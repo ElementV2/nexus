@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { spawn, type ChildProcess } from "child_process";
-import { join } from "path";
 import { existsSync } from "fs";
 import { getPreferences } from "@/lib/db/preferences";
 
@@ -9,6 +8,9 @@ export const dynamic = "force-dynamic";
 import ffmpegStaticImport from "ffmpeg-static";
 
 // Resolve the bundled ffmpeg-static binary, fall back to PATH.
+// Avoid path operations rooted at `process.cwd()` — Turbopack's file
+// tracer flags them as "dynamic path could be anything" and traces the
+// whole project into this route's bundle.
 function getFfmpegPath(): string {
   const ext = process.platform === "win32" ? ".exe" : "";
   const raw =
@@ -25,8 +27,8 @@ function getFfmpegPath(): string {
     if (existsSync(fixed)) return fixed;
     if (existsSync(raw)) return raw;
   }
-  const beside = join(process.cwd(), `ffmpeg${ext}`);
-  if (existsSync(beside)) return beside;
+  // Last-ditch: let `spawn()` resolve via PATH. Fails with ENOENT → 502
+  // if FFmpeg isn't installed system-wide, which the handler reports.
   return `ffmpeg${ext}`;
 }
 
