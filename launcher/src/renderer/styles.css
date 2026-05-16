@@ -11,6 +11,15 @@
   padding: 0;
 }
 
+/* `[hidden]` is set by JS to toggle the update banner. The UA stylesheet
+   maps it to `display: none`, but rules like `.row { display: flex }`
+   have the same specificity and win the cascade because they're declared
+   later, so the banner stayed visible even when JS hid it. Force `hidden`
+   to actually hide, regardless of any class-based display rule. */
+[hidden] {
+  display: none !important;
+}
+
 :root {
   /* surfaces */
   --bg:        #0d1310;
