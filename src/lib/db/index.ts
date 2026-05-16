@@ -1,26 +1,22 @@
 import { mkdirSync, existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
-import { homedir, platform } from "node:os";
 import { join } from "node:path";
 
 /**
- * Resolve the directory where the JSON data store lives. Matches the
- * launcher convention so both code paths share the same files when
- * Next.js is hosted inside the Electron launcher.
+ * Storage root for the JSON data files.
+ *
+ * The launcher process owns the platform-specific path logic (see
+ * `launcher/src/server-manager.ts`) and passes the resolved directory
+ * through the `NEXUS_DATA_DIR` env var when it spawns the Next.js
+ * server. Standalone `npm run dev` (no launcher) leaves the env var
+ * unset and the fallback `./.nexus-data` is used — that directory is
+ * gitignored and stays out of `%APPDATA%` so dev state never pollutes
+ * the installed launcher's data.
+ *
+ * Keeping `homedir()` / platform detection out of this module is what
+ * lets Turbopack's static analyzer trace the route bundles without
+ * pulling in the whole project as a "could be anywhere" precaution.
  */
-function getDataDir(): string {
-  if (process.env.NEXUS_DATA_DIR) return process.env.NEXUS_DATA_DIR;
-  if (platform() === "win32") {
-    const appData = process.env.APPDATA || join(homedir(), "AppData", "Roaming");
-    return join(appData, "Nexus");
-  }
-  if (platform() === "darwin") {
-    return join(homedir(), "Library", "Application Support", "Nexus");
-  }
-  const xdg = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-  return join(xdg, "nexus");
-}
-
-export const DATA_DIR = getDataDir();
+export const DATA_DIR = process.env.NEXUS_DATA_DIR || ".nexus-data";
 
 function ensureDir() {
   if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });

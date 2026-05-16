@@ -1,38 +1,24 @@
 import { NextResponse } from "next/server";
 import { spawn, type ChildProcess } from "child_process";
-import { existsSync } from "fs";
+import ffmpegStaticImport from "ffmpeg-static";
 import { getPreferences } from "@/lib/db/preferences";
 
 export const dynamic = "force-dynamic";
 
-import ffmpegStaticImport from "ffmpeg-static";
-
-// Resolve the bundled ffmpeg-static binary, fall back to PATH.
-// Avoid path operations rooted at `process.cwd()` — Turbopack's file
-// tracer flags them as "dynamic path could be anything" and traces the
-// whole project into this route's bundle.
-function getFfmpegPath(): string {
-  const ext = process.platform === "win32" ? ".exe" : "";
-  const raw =
-    typeof ffmpegStaticImport === "string"
-      ? ffmpegStaticImport
-      : (ffmpegStaticImport as unknown as { default?: string })?.default;
-  if (raw) {
-    // Inside an Electron asar bundle, ffmpeg-static returns a path that
-    // can't be executed directly — rewrite to the asar.unpacked twin.
-    const fixed = raw.replace(
-      /([\\/])app\.asar([\\/])/,
-      "$1app.asar.unpacked$2"
-    );
-    if (existsSync(fixed)) return fixed;
-    if (existsSync(raw)) return raw;
-  }
-  // Last-ditch: let `spawn()` resolve via PATH. Fails with ENOENT → 502
-  // if FFmpeg isn't installed system-wide, which the handler reports.
-  return `ffmpeg${ext}`;
-}
-
-const FFMPEG_BIN = getFfmpegPath();
+/**
+ * FFmpeg binary path. The `ffmpeg-static` package exports the absolute
+ * path of its bundled binary as the default export — we trust that
+ * value and let NFT trace the .exe normally (since it's a static import
+ * resolution, not a dynamic filesystem probe).
+ *
+ * Fallback to bare `"ffmpeg"` so the route still works in setups where
+ * ffmpeg-static isn't installed (e.g. some lightweight dev sandboxes).
+ */
+const FFMPEG_BIN =
+  (typeof ffmpegStaticImport === "string"
+    ? ffmpegStaticImport
+    : (ffmpegStaticImport as unknown as { default?: string })?.default) ||
+  "ffmpeg";
 
 // ---------------------------------------------------------------------------
 // Singleton FFmpeg process – shared across all concurrent HTTP readers.
