@@ -1,0 +1,530 @@
+/* ──────────────────────────────────────────────────────────────
+ *  Component classes — Tactical Refined.
+ *  Two layers live here:
+ *    1. Legacy `.sw-*` primitives, kept so existing component code
+ *       keeps rendering (just reskinned for the dark sage palette).
+ *    2. New canonical utilities (`.btn`, `.tile`, `.badge`,
+ *       `.slider`, `.label`, `.panel`) for new code, per spec.
+ * ────────────────────────────────────────────────────────────── */
+
+/* ══════════════════════════════════════════════════════════════
+ *  1.  LEGACY PRIMITIVES — reskinned, same API
+ * ══════════════════════════════════════════════════════════════ */
+
+.sw-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--row-h);
+  border: 1px solid var(--line);
+  padding: 7px 12px;
+  margin-right: -1px;
+  margin-bottom: -1px;
+  background: var(--card);
+  color: var(--mid);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  transition: background 0.08s ease, color 0.08s ease, border-color 0.08s ease;
+  cursor: pointer;
+  user-select: none;
+}
+.sw-cell:hover:not(:disabled):not([data-active="true"]) {
+  background: var(--card-hi);
+  color: var(--ink);
+  border-color: var(--line-hi);
+  position: relative;
+  z-index: 1;
+}
+.sw-cell:disabled {
+  /* Lifted from 0.42 → 0.55 so disabled labels stay above the WCAG
+     AA-Large 3:1 contrast floor against --card. Below ~0.45 the text
+     becomes hard to read for low-vision users. */
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Active cells lift above the negative-margin overlap so their
+   signal-coloured border is never eaten by an adjacent cell's neutral
+   border. Without this, the cell painted later in DOM order wins at the
+   shared 1 px column and the active border appears clipped on one side
+   (most visible on standalone "Muted" rows above a bus grid, and on a
+   single active cell in a 5-button transport bar). */
+.sw-cell[data-active="true"] {
+  position: relative;
+  z-index: 2;
+}
+
+/* Active states — tinted background + signal-colour border + signal-colour
+   text (per Tactical Refined spec section 3.1). Replaces the older
+   solid-filled inversion. */
+.sw-cell[data-active="true"][data-role="default"] {
+  background: var(--card-hi);
+  color: var(--ink);
+  border-color: var(--line-hi);
+}
+.sw-cell[data-active="true"][data-role="red"] {
+  background: var(--pgm-tint);
+  color: var(--pgm);
+  border-color: var(--pgm);
+}
+.sw-cell[data-active="true"][data-role="green"] {
+  background: var(--pvw-tint);
+  color: var(--pvw);
+  border-color: var(--pvw);
+}
+.sw-cell[data-active="true"][data-role="amber"] {
+  background: var(--amber-tint);
+  color: var(--amber);
+  border-color: var(--amber);
+}
+.sw-cell[data-active="true"][data-role="blue"] {
+  background: var(--cyan-tint);
+  color: var(--cyan);
+  border-color: var(--cyan);
+}
+.sw-cell[data-active="true"][data-role="purple"] {
+  background: var(--purple-tint);
+  color: var(--purple);
+  border-color: var(--purple);
+}
+
+/* Compact variant for dense grids */
+.sw-cell--sm {
+  min-height: 28px;
+  padding: 6px 10px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+}
+
+.sw-input {
+  border: 1px solid var(--line);
+  padding: 7px 10px;
+  min-height: var(--row-h);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  background: var(--card);
+  transition: border-color 0.08s ease;
+  width: 100%;
+}
+.sw-input:focus {
+  border-color: var(--amber);
+  outline: none;
+}
+.sw-input::placeholder { color: var(--sub); }
+
+.sw-select {
+  border: 1px solid var(--line);
+  padding: 7px 32px 7px 10px;
+  min-height: var(--row-h);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--card);
+  width: 100%;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--mid) 50%),
+    linear-gradient(135deg, var(--mid) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 9px) 50%;
+  background-size: 6px 6px;
+  background-repeat: no-repeat;
+}
+.sw-select:focus {
+  border-color: var(--amber);
+  outline: none;
+}
+
+.sw-field-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.sw-color-swatch {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid var(--line-hi);
+  cursor: pointer;
+  background: transparent;
+  flex-shrink: 0;
+}
+.sw-color-swatch::-webkit-color-swatch-wrapper { padding: 0; }
+.sw-color-swatch::-webkit-color-swatch { border: 0; }
+
+.sw-mono-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--card);
+}
+
+.sw-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  padding: 5px 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--mid);
+}
+.sw-status-pill[data-role="red"]    { border-color: var(--pgm);    color: var(--pgm); }
+.sw-status-pill[data-role="green"]  { border-color: var(--pvw);    color: var(--pvw); }
+.sw-status-pill[data-role="amber"]  { border-color: var(--amber);  color: var(--amber); }
+.sw-status-pill[data-role="blue"]   { border-color: var(--cyan);   color: var(--cyan); }
+.sw-status-pill[data-role="purple"] { border-color: var(--purple); color: var(--purple); }
+.sw-status-pill[data-role="muted"]  { border-color: var(--line);   color: var(--muted); }
+.sw-status-pill[data-variant="solid"][data-role="red"]    { background: var(--pgm);    color: var(--bg); }
+.sw-status-pill[data-variant="solid"][data-role="green"]  { background: var(--pvw);    color: var(--bg); }
+.sw-status-pill[data-variant="solid"][data-role="amber"]  { background: var(--amber);  color: var(--bg); }
+.sw-status-pill[data-variant="solid"][data-role="blue"]   { background: var(--cyan);   color: var(--bg); }
+.sw-status-pill[data-variant="solid"][data-role="purple"] { background: var(--purple); color: var(--bg); }
+
+.sw-section {
+  border-bottom: 1px solid var(--line);
+  padding: 16px 20px;
+}
+.sw-section--nopad { padding: 0; }
+.sw-section--noborder { border-bottom: 0; }
+
+.sw-hairline-row {
+  border-bottom: 1px solid var(--line);
+  border-left: 3px solid transparent;
+  padding: 16px 22px;
+}
+.sw-hairline-row[data-state="pgm"] {
+  background: var(--pgm-tint);
+  border-left-color: var(--pgm);
+}
+.sw-hairline-row[data-state="pvw"] {
+  border-left-color: var(--pvw);
+}
+
+.sw-rule-bottom { border-bottom: 1px solid var(--line-hi); }
+.sw-rule-right  { border-right:  1px solid var(--line-hi); }
+
+.sw-hairline-bottom { border-bottom: 1px solid var(--line); }
+.sw-hairline-top    { border-top:    1px solid var(--line); }
+
+
+/* ══════════════════════════════════════════════════════════════
+ *  2.  NEW UTILITIES — Tactical Refined spec
+ *      Use these for all new components. Section numbers below
+ *      mirror the migration spec.
+ * ══════════════════════════════════════════════════════════════ */
+
+/* ── 2.5 — Section labels ──────────────────────────────────── */
+.label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+}
+
+/* ── 3.5 — Panels ──────────────────────────────────────────── */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+.panel--inset { background: var(--panel-2); }
+.divider      { border-bottom: 1px solid var(--line); }
+
+.section { margin-top: 18px; }
+.section > .label { display: block; margin-bottom: 9px; }
+
+/* ── 3.1 — Buttons (new pattern: tinted active) ────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  padding: 7px 12px;
+  min-height: var(--row-h);
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 0.08s ease, border-color 0.08s ease, color 0.08s ease;
+  user-select: none;
+}
+.btn:hover:not(:disabled) { background: var(--card-hi); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.btn--lg { min-height: var(--row-h-lg); padding: 10px 14px; font-size: 12px; }
+
+/* Generic active = amber */
+.btn[aria-pressed="true"],
+.btn.is-active {
+  background: var(--amber-tint);
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+/* Per-signal variants */
+.btn--pgm.is-active,
+.btn--pgm[aria-pressed="true"] {
+  background: var(--pgm-tint);
+  border-color: var(--pgm);
+  color: var(--pgm);
+}
+.btn--pvw.is-active,
+.btn--pvw[aria-pressed="true"] {
+  background: var(--pvw-tint);
+  border-color: var(--pvw);
+  color: var(--pvw);
+}
+.btn--mix.is-active,
+.btn--mix[aria-pressed="true"] {
+  background: var(--cyan-tint);
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+.btn--ovl.is-active,
+.btn--ovl[aria-pressed="true"] {
+  background: var(--amber-tint);
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+/* ── 3.8 — Button bars (collés, no gap, shared borders) ──── */
+.btn-bar {
+  display: inline-flex;
+}
+.btn-bar > .btn {
+  border-right-width: 1px;
+  border-left-width: 0;
+  border-color: var(--line);
+}
+.btn-bar > .btn:first-child { border-left-width: 1px; }
+/* Active item: 2px left bar in the signal color */
+.btn-bar > .btn.is-active,
+.btn-bar > .btn[aria-pressed="true"] {
+  position: relative;
+}
+.btn-bar > .btn.is-active::before,
+.btn-bar > .btn[aria-pressed="true"]::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: currentColor;
+}
+
+/* ── 3.2 — Badges ──────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  padding: 2px 5px;
+  text-transform: uppercase;
+  border: 0;
+  color: var(--ink);
+  background: var(--card);
+}
+.badge--pgm   { background: var(--pgm);    color: #fff; }
+.badge--pvw   { background: rgba(13, 19, 15, 0.85); color: var(--pvw); }
+.badge--amber { background: var(--amber);  color: var(--bg); }
+.badge--cyan  { background: var(--cyan);   color: var(--bg); }
+.badge--ghost { background: transparent;   color: var(--muted); border: 1px solid var(--line); }
+
+/* ── 3.3 — Tiles (Live grid) ───────────────────────────────── */
+.tile {
+  background: var(--card);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 7px 9px 10px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.08s ease, border-color 0.08s ease;
+}
+.tile:hover { background: var(--card-hi); }
+
+.tile__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.tile__type {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1.4px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.tile__number {
+  font-family: var(--font-mono);
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -1.5px;
+  line-height: 0.9;
+  margin-top: auto;
+  color: var(--ink);
+}
+.tile__name {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+/* States */
+.tile--pgm {
+  background-color: var(--pgm-tint);
+  border-color: var(--pgm);
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 6px,
+    rgba(217, 68, 89, 0.13) 6px 7px
+  );
+}
+.tile--pgm .tile__type { color: var(--pgm); }
+
+.tile--pvw {
+  background-color: var(--pvw);
+  border-color: var(--pvw);
+  color: #0d130f;
+}
+.tile--pvw .tile__type   { color: rgba(13, 19, 15, 0.7); }
+.tile--pvw .tile__number,
+.tile--pvw .tile__name   { color: #0d130f; }
+
+/* Keep the signal colour on hover — the hover cue is a brighter
+   border + a faint inset overlay, never a background swap.
+   These rules sit AFTER `.tile:hover` so they win the cascade
+   for equal-specificity hover styling. */
+.tile--pgm:hover {
+  background-color: var(--pgm-tint);
+  border-color: var(--pgm-deep);
+}
+.tile--pvw:hover {
+  background-color: var(--pvw);
+  border-color: var(--pvw-deep);
+}
+.tile--pgm:hover::after,
+.tile--pvw:hover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.04);
+  pointer-events: none;
+}
+
+/* Selection — 2 px amber ring drawn AS AN OUTLINE inset by -2 px so
+   it sits exactly at the tile edge, INSIDE the box, painted on top
+   of whatever border/hover effect the tile carries (PGM red, PVW
+   green, default line). Outline doesn't participate in box-model
+   math so the content area stays the SAME size whether the tile is
+   selected or not — no text reflow on click. */
+.tile--selected {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+}
+
+.tile--offline { opacity: 0.42; }
+
+.tile__eye {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.08s ease, border-color 0.08s ease;
+}
+.tile__eye:hover { color: var(--ink); border-color: var(--line-hi); }
+/* Stay readable on coloured tiles */
+.tile--pgm .tile__eye {
+  color: var(--pgm);
+  border-color: var(--pgm);
+}
+.tile--pvw .tile__eye {
+  color: rgba(13, 19, 15, 0.7);
+  border-color: rgba(13, 19, 15, 0.5);
+}
+.tile--pvw .tile__eye:hover { color: #0d130f; border-color: #0d130f; }
+
+/* ── 3.4 — Sliders (audio gain) ────────────────────────────── */
+.slider {
+  position: relative;
+  height: 6px;
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+.slider__fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: linear-gradient(
+    90deg,
+    var(--pvw) 0%,
+    var(--pvw) 65%,
+    var(--amber) 90%,
+    var(--pgm) 100%
+  );
+  opacity: 0.65;
+}
+.slider__handle {
+  position: absolute;
+  top: -3px; bottom: -3px;
+  width: 3px;
+  background: var(--ink);
+  cursor: ew-resize;
+}
+
+/* ── Ableton "queued" cue — mirrors Ableton's blinking-play
+   on clips waiting for the next launch-quantize boundary. */
+@keyframes ableton-pending-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.25; }
+}
+.ableton-pending-blink {
+  animation: ableton-pending-blink 0.6s ease-in-out infinite;
+}

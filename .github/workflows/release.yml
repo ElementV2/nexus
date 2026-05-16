@@ -1,0 +1,86 @@
+name: Release
+
+# Auto-builds the Windows installer and publishes a GitHub release
+# whenever the version in launcher/package.json is bumped past the
+# latest existing tag. Every push to master runs the workflow; if the
+# tag for the current version already exists, the build is skipped.
+#
+# To cut a release: bump `version` in launcher/package.json, commit,
+# push. The workflow does the rest.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need full tag history so the existence check below is accurate.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            launcher/package-lock.json
+
+      - name: Read launcher version
+        id: version
+        shell: bash
+        run: |
+          v=$(node -p "require('./launcher/package.json').version")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          echo "Launcher version: $v"
+
+      - name: Check if tag already exists
+        id: tag-check
+        shell: bash
+        run: |
+          if git rev-parse "refs/tags/${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag ${{ steps.version.outputs.tag }} already exists — skipping build."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Tag ${{ steps.version.outputs.tag }} is new — building."
+          fi
+
+      - name: Install root deps
+        if: steps.tag-check.outputs.exists == 'false'
+        run: npm ci
+
+      - name: Install launcher deps
+        if: steps.tag-check.outputs.exists == 'false'
+        working-directory: launcher
+        run: npm ci
+
+      - name: Build installer
+        if: steps.tag-check.outputs.exists == 'false'
+        working-directory: launcher
+        # `package:win` runs `next build` (standalone) → compiles the
+        # launcher TS → invokes electron-builder. Output ends up in
+        # `launcher/dist/Nexus-Setup-<version>.exe`.
+        run: npm run package:win
+        env:
+          # Avoid electron-builder trying to publish itself; the release
+          # step below handles that explicitly.
+          GH_TOKEN: ''
+
+      - name: Create release
+        if: steps.tag-check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: launcher/dist/Nexus-Setup-*.exe

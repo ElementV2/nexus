@@ -1,0 +1,114 @@
+@import "tailwindcss";
+@import "../styles/tokens.css";
+@import "../styles/reset.css";
+@import "../styles/components.css";
+
+/* ──────────────────────────────────────────────────────────────
+ *  Expose tokens to Tailwind utilities. Both the new canonical
+ *  names and the legacy --sw-* aliases are wired so utility
+ *  classes like `bg-bg`, `text-ink`, `border-line` AND the
+ *  existing `bg-sw-bg`, `text-sw-text` keep working.
+ * ────────────────────────────────────────────────────────────── */
+@theme inline {
+  /* New canonical surface/line/text tokens */
+  --color-bg:       var(--bg);
+  --color-panel:    var(--panel);
+  --color-panel-2:  var(--panel-2);
+  --color-card:     var(--card);
+  --color-card-hi:  var(--card-hi);
+  --color-line:     var(--line);
+  --color-line-hi:  var(--line-hi);
+  --color-ink:      var(--ink);
+  --color-mid:      var(--mid);
+  --color-muted:    var(--muted);
+  --color-sub:      var(--sub);
+
+  /* Signal colors */
+  --color-pgm:        var(--pgm);
+  --color-pgm-deep:   var(--pgm-deep);
+  --color-pgm-tint:   var(--pgm-tint);
+  --color-pvw:        var(--pvw);
+  --color-pvw-deep:   var(--pvw-deep);
+  --color-pvw-tint:   var(--pvw-tint);
+  --color-amber:      var(--amber);
+  --color-amber-tint: var(--amber-tint);
+  --color-cyan:       var(--cyan);
+  --color-cyan-tint:  var(--cyan-tint);
+  --color-purple:     var(--purple);
+
+  /* Legacy --sw-* color tokens (still exposed for un-migrated screens) */
+  --color-sw-bg:         var(--sw-bg);
+  --color-sw-panel:      var(--sw-panel);
+  --color-sw-panel-alt:  var(--sw-panel-alt);
+  --color-sw-line:       var(--sw-line);
+  --color-sw-line-2:     var(--sw-line-2);
+  --color-sw-text:       var(--sw-text);
+  --color-sw-text-dim:   var(--sw-text-dim);
+  --color-sw-muted:      var(--sw-muted);
+  --color-sw-sub:        var(--sw-sub);
+  --color-sw-red:        var(--sw-red);
+  --color-sw-red-deep:   var(--sw-red-deep);
+  --color-sw-green:      var(--sw-green);
+  --color-sw-amber:      var(--sw-amber);
+  --color-sw-blue:       var(--sw-blue);
+  --color-sw-purple:     var(--sw-purple);
+
+  --font-sans:           var(--font-sans);
+  --font-mono:           var(--font-mono);
+}
+
+/* ── Base ───────────────────────────────────────────────────── */
+html, body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+html {
+  touch-action: pan-y;
+  overflow: hidden;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+body {
+  overflow: hidden;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+@supports (-webkit-touch-callout: none) {
+  html, body {
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Drag selection guard */
+html.is-dragging,
+html.is-dragging * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  cursor: grabbing !important;
+}
+
+/* Color wheel cursor — outline-only circle.
+   Reset zeroes border-radius globally, so we override it here.
+   Same exception applies to user avatars (the only round element). */
+.wheel-cursor,
+.avatar-round {
+  border-radius: 9999px !important;
+}
+.wheel-cursor { transition: transform 0.12s ease; }
+.wheel-cursor:hover,
+.wheel-cursor.dragging {
+  transform: scale(1.1);
+}

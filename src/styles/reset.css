@@ -1,0 +1,110 @@
+/* ──────────────────────────────────────────────────────────────
+ *  Tactical Refined reset — forcing function.
+ *  Kills border-radius and box-shadow GLOBALLY. Establishes a
+ *  default border style ("solid") and zero width so any explicit
+ *  `border-[1px]` / `border-l-[3px]` etc. actually renders without
+ *  the component file having to spell out border-style: solid.
+ * ────────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  /* Tailwind v4 no longer sets a global border-style → without this,
+     arbitrary border widths render at style=none, i.e. invisible. */
+  border-style: solid;
+  border-width: 0;
+  border-color: var(--line);
+  /* Broadcast control surface — text selection is disabled by default
+     (operators don't drag-select labels in a live mixer). Inputs,
+     textareas and contenteditable surfaces re-enable it below. */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+input,
+textarea,
+[contenteditable="true"],
+[contenteditable=""] {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
+}
+
+/* Buttons stripped to a blank slate — design system adds typography back. */
+button {
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+/* Suppress focus rings only for non-keyboard activations (mouse
+   clicks). Keyboard-driven focus keeps a visible 2px amber outline
+   that lives inside the element's box (negative offset) so the
+   surrounding grid alignment is unchanged. */
+button:focus { outline: none; }
+button:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+}
+
+/* Same affordance on interactive primitives that aren't <button>
+   (sidebar nav links, tactical tiles in Live, web-asset layer rows,
+   etc.). The selectors stay tight so cosmetic divs don't pick this
+   up by accident. */
+a:focus-visible,
+[role="button"]:focus-visible,
+[tabindex="0"]:focus-visible,
+.tile:focus-visible,
+.sw-cell:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+}
+
+/* Inputs lose all native chrome (we restyle in primitives) */
+input,
+textarea,
+select {
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+}
+input::placeholder,
+textarea::placeholder { color: var(--sub); }
+
+/* Number input arrows out — they don't fit the system */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] { -moz-appearance: textfield; }
+
+/* Links inherit the surrounding type and color. */
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Selection — amber, the user-focus accent */
+::selection {
+  background: var(--amber);
+  color: var(--bg);
+}
+
+/* Hairline scrollbar tuned to the dark sage palette */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-hi); }
+::-webkit-scrollbar-thumb:hover { background: var(--mid); }

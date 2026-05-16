@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+    <title>Nexus</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- ── MAIN VIEW ─────────────────────────────────── -->
+    <div class="view is-active" data-view="main">
+
+      <!-- Drag strip — replaces the OS title bar (hidden by Electron).
+           The Windows caption buttons (min/max/close) overlay the
+           right side of this strip via `titleBarOverlay` so they stay
+           native while matching the dark palette. -->
+      <header class="titlebar"></header>
+
+      <!-- 01 / Status (hero) -->
+      <section class="hero">
+        <div class="numeral" id="numeral">9088</div>
+        <div class="eyebrow eyebrow--accent">01 / Status</div>
+        <h1 class="display" id="display">Running.</h1>
+        <p class="subline">
+          Local web server reachable at <span class="mono" id="subPort">:9088</span><span id="subEnd">.</span>
+        </p>
+      </section>
+
+      <!-- 02 — Interface  |  03 — Port -->
+      <section class="grid-2">
+        <div class="cell">
+          <div class="eyebrow">02 — Interface</div>
+          <div class="cell-value" id="ifaceValue" data-action="iface">Ethernet 4</div>
+          <div class="cell-sub mono" id="ifaceIp">192.168.56.1</div>
+          <div class="dropdown" id="ifaceDropdown" hidden></div>
+        </div>
+        <div class="cell">
+          <div class="eyebrow">03 — Port</div>
+          <div class="cell-value mono" id="portValue" data-action="port">9088</div>
+          <button class="action-link" id="portChange">Change <span class="arrow">→</span></button>
+        </div>
+      </section>
+
+      <!-- 04 — Logs -->
+      <button class="row row--clickable" data-go="logs">
+        <div>
+          <div class="eyebrow">04 — Logs</div>
+          <div class="row-title">Server activity</div>
+        </div>
+        <span class="arrow arrow--big">→</span>
+      </button>
+
+      <!-- 05 — Update available (hidden until the updater finds a
+           newer release on GitHub) -->
+      <button class="row row--clickable row--update" id="updateRow" hidden>
+        <div>
+          <div class="eyebrow eyebrow--accent">05 — Update</div>
+          <div class="row-title" id="updateTitle">Update available</div>
+          <div class="row-sub" id="updateSub"></div>
+        </div>
+        <span class="arrow arrow--big">↓</span>
+      </button>
+
+      <!-- Spacer -->
+      <div class="spacer"></div>
+
+      <!-- Action stack -->
+      <button class="cta" id="openGui">
+        <span class="cta-label" id="ctaLabel">LAUNCH GUI</span>
+        <span class="arrow cta-arrow">↗</span>
+      </button>
+
+      <div class="secondary-actions">
+        <button class="ghost" id="hideBtn">Hide</button>
+        <button class="ghost ghost--muted" id="quitBtn">Quit</button>
+      </div>
+    </div>
+
+    <!-- ── LOGS VIEW ─────────────────────────────────── -->
+    <div class="view" data-view="logs">
+      <header class="titlebar"></header>
+      <header class="topbar">
+        <button class="topbar-link" data-go="main">← Back</button>
+        <div class="topbar-title">Logs</div>
+        <button class="topbar-link topbar-link--right" id="clearLogs">Clear ✎</button>
+      </header>
+      <div class="logs-body" id="logsBody"></div>
+    </div>
+
+    <!-- ── QUIT CONFIRM ──────────────────────────────── -->
+    <div class="modal-overlay" id="quitConfirm">
+      <div class="modal">
+        <div class="modal-content">
+          <div class="eyebrow eyebrow--accent">Confirm</div>
+          <h2 class="modal-title">Stop server and quit?</h2>
+          <p class="modal-body">The local web server will become unreachable from the LAN.</p>
+        </div>
+        <div class="modal-actions">
+          <button class="modal-btn modal-btn--ghost" id="quitCancel">Cancel</button>
+          <button class="modal-btn modal-btn--danger" id="quitConfirmBtn">Quit ✕</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

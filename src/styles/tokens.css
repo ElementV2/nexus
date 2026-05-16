@@ -1,0 +1,113 @@
+/* ──────────────────────────────────────────────────────────────
+ *  Nexus — "Tactical Refined" design tokens
+ *  Dark sage-olive console palette. Pro broadcast aesthetic
+ *  (DaVinci Resolve / Logic Pro territory — sober, monochrome,
+ *  signal colors reserved for state).
+ *
+ *  Canonical tokens are the unprefixed names (--bg, --ink, --pgm).
+ *  Legacy --sw-* tokens are kept as ALIASES so existing component
+ *  code keeps rendering until it is migrated to the new names.
+ * ────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Surfaces (darkest → lightest) ───────────────────────────── */
+  --bg:        #0d1310;   /* global page background */
+  --panel:     #141a15;   /* sidebar, top bar, inspector */
+  --panel-2:   #181f19;   /* raised zone inside a panel */
+  --card:      #1c241d;   /* tiles, inputs, idle buttons */
+  --card-hi:   #222a23;   /* hover */
+
+  /* ── Lines ──────────────────────────────────────────────────── */
+  --line:      #2c352d;   /* default borders, dividers */
+  --line-hi:   #3a4439;   /* emphasised borders */
+
+  /* ── Text ───────────────────────────────────────────────────── */
+  --ink:       #dde2d6;   /* primary text */
+  --mid:       #9aa498;   /* secondary text */
+  /* --muted is used on labels/meta-text widely — bumped from #6c7569
+     (~3.3:1 on --bg, AA-fail) to #8b948a (~4.7:1, passes WCAG AA for
+     normal text). */
+  --muted:     #8b948a;
+  /* --sub is reserved for non-text dividers / disabled marks only.
+     Bumped from #4d564b (1.5:1) to #6c7569 (~3.3:1) — still below
+     AA for body text, by design: code is expected to use --muted for
+     anything readable and --sub for decorative elements that don't
+     carry semantic content. */
+  --sub:       #6c7569;
+
+  /* ── Signal colors (use sparingly — one color = one state) ──── */
+  --pgm:        #d94459;
+  --pgm-deep:   #a92e3f;
+  --pgm-tint:   #3b1f24;
+
+  --pvw:        #4eb771;
+  --pvw-deep:   #2c8a4d;
+  --pvw-tint:   #1f2e24;
+
+  --amber:      #d4a13b;
+  --amber-tint: #2e2517;
+
+  --cyan:       #5ba5cf;
+  --cyan-tint:  #1d2a32;
+
+  /* Channel B / AB identity (replay groups) — desaturated to fit dark sage */
+  --purple:      #8b6dcf;
+  --purple-tint: #221b34;
+
+  /* ── Typography ─────────────────────────────────────────────── */
+  --font-sans: 'Geist', 'Inter', 'Helvetica Neue', -apple-system,
+               BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, 'SF Mono',
+               Consolas, Menlo, monospace;
+
+  /* ── Spacing (4-step scale) ─────────────────────────────────── */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+
+  /* ── Density ────────────────────────────────────────────────── */
+  --row-h:    32px;   /* standard buttons / inputs */
+  --row-h-lg: 40px;   /* large tap-mode buttons */
+  --radius:   0;      /* NO rounded corners except avatars */
+
+  /* ── Layout (kept from previous system for existing screens) ── */
+  --sidebar-w:  60px;
+  --topbar-h:   72px;
+
+  /* ──────────────────────────────────────────────────────────────
+   *  Legacy --sw-* aliases. These map the old Swiss-mode token
+   *  names onto the new dark palette so existing component files
+   *  keep rendering without edits. Migrate page-by-page to the
+   *  canonical names above when convenient.
+   * ────────────────────────────────────────────────────────────── */
+  --sw-bg:        var(--bg);
+  --sw-panel:     var(--panel);
+  --sw-panel-alt: var(--panel-2);
+  --sw-line:      var(--line);
+  --sw-line-2:    var(--line-hi);
+  --sw-text:      var(--ink);
+  --sw-text-dim:  var(--mid);
+  --sw-muted:     var(--muted);
+  --sw-sub:       var(--sub);
+
+  --sw-red:       var(--pgm);
+  --sw-red-deep:  var(--pgm-tint);
+  --sw-green:     var(--pvw);
+  --sw-amber:     var(--amber);
+  --sw-blue:      var(--cyan);
+  --sw-purple:    var(--purple);
+
+  --sw-font-sans: var(--font-sans);
+  --sw-font-mono: var(--font-mono);
+
+  /* Legacy spacing/layout aliases */
+  --sw-pad-outer:  var(--s-6);
+  --sw-pad-tight:  18px;
+  --sw-rhythm:     var(--s-4);
+  --sw-sidebar-w:  var(--sidebar-w);
+  --sw-topbar-h:   var(--topbar-h);
+}

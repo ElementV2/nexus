@@ -1,0 +1,523 @@
+/* ──────────────────────────────────────────────────────────────
+ *  Nexus launcher — Tactical Refined (dark sage).
+ *  Mirrors the web app's token system so the desktop shell and
+ *  the in-browser GUI share one visual language.
+ *  Source palette: ../../../src/styles/tokens.css
+ * ────────────────────────────────────────────────────────────── */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  /* surfaces */
+  --bg:        #0d1310;
+  --panel:     #141a15;
+  --panel-2:   #181f19;
+  --card:      #1c241d;
+  --card-hi:   #222a23;
+  /* lines */
+  --line:      #2c352d;
+  --line-hi:   #3a4439;
+  /* text */
+  --ink:       #dde2d6;
+  --mid:       #9aa498;
+  --muted:     #8b948a;
+  --sub:       #6c7569;
+  /* signal */
+  --pgm:        #d94459;
+  --pgm-tint:   #3b1f24;
+  --pvw:        #4eb771;
+  --pvw-tint:   #1f2e24;
+  --amber:      #d4a13b;
+  --amber-tint: #2e2517;
+
+  --pad-x: 20px;
+
+  --font-sans: "Geist", "Inter", "Helvetica Neue", -apple-system,
+               BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, "SF Mono",
+               Consolas, Menlo, monospace;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+  overflow: hidden;
+  font-feature-settings: "ss01", "cv11";
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+}
+
+/* ── View routing ────────────────────────────────────── */
+.view {
+  display: none;
+  flex-direction: column;
+  height: 100vh;
+}
+.view.is-active { display: flex; }
+
+/* ── Drag strip (replaces OS title bar) ─────────────── */
+/* Match the Electron `titleBarOverlay.height` exactly so the native
+   Windows caption buttons sit flush over this strip. Anything taller
+   leaves a dead band; anything shorter clips the buttons.
+   No border-bottom — the strip blends into the hero (same bg) so the
+   caption buttons appear to float over a single continuous panel
+   instead of sitting on a separate banner. */
+.titlebar {
+  height: 32px;
+  background: var(--panel-2);
+  flex-shrink: 0;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+/* Logs view: the titlebar leads into the topbar instead of the hero —
+   keep the bg matching the topbar so the seam disappears there too. */
+.view[data-view="logs"] .titlebar {
+  background: var(--panel);
+}
+
+/* ── Hero block ─────────────────────────────────────── */
+.hero {
+  position: relative;
+  padding: 26px var(--pad-x) 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.numeral {
+  position: absolute;
+  top: -34px;
+  right: -10px;
+  font-family: var(--font-mono);
+  font-size: 200px;
+  font-weight: 700;
+  letter-spacing: -0.06em;
+  line-height: 0.9;
+  color: var(--ink);
+  opacity: 0.04;
+  pointer-events: none;
+  user-select: none;
+}
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+.eyebrow--accent { color: var(--amber); }
+
+.display {
+  font-size: 38px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--ink);
+  margin-bottom: 12px;
+}
+.subline {
+  font-size: 12px;
+  color: var(--mid);
+  max-width: 320px;
+  line-height: 1.5;
+}
+.subline .mono {
+  color: var(--ink);
+  font-weight: 600;
+  margin: 0 1px;
+}
+
+/* state-driven hero color cues */
+body.is-stopped  .display { color: var(--muted); }
+body.is-starting .display { color: var(--amber); }
+body.is-error    .display { color: var(--pgm); }
+
+/* ── 2-column config grid ───────────────────────────── */
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  background: var(--panel);
+}
+.cell {
+  position: relative;
+  padding: 16px var(--pad-x) 16px;
+  border-right: 1px solid var(--line);
+  min-height: 92px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+}
+.cell:last-child { border-right: 0; }
+.cell .eyebrow { margin-bottom: 10px; }
+.cell-value {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.cell-value.mono {
+  font-size: 24px;
+  letter-spacing: -0.01em;
+}
+.cell-sub {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+[data-action] {
+  cursor: pointer;
+  transition: color 0.08s ease;
+}
+[data-action]:hover { color: var(--amber); }
+
+.action-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-family: var(--font-mono);
+  color: var(--amber);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: opacity 0.08s ease;
+}
+.action-link:hover { opacity: 0.7; }
+.arrow { font-weight: 400; }
+
+/* Inline edit input replaces the value */
+.cell-input {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--amber);
+  padding: 0 0 2px;
+  margin-bottom: 8px;
+  width: 100%;
+  outline: none;
+  font-feature-settings: "tnum";
+  caret-color: var(--amber);
+}
+
+/* Interface dropdown */
+.dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: -1px;
+  background: var(--card);
+  border: 1px solid var(--line-hi);
+  border-top: 0;
+  z-index: 10;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.dropdown-item {
+  display: block;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 10px var(--pad-x);
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+  transition: background 0.08s ease;
+}
+.dropdown-item:last-child { border-bottom: 0; }
+.dropdown-item:hover { background: var(--card-hi); }
+.dropdown-item .mono {
+  font-size: 10px;
+  color: var(--muted);
+  margin-left: 6px;
+}
+.dropdown-item.is-selected {
+  color: var(--amber);
+  background: var(--amber-tint);
+}
+
+/* ── Logs row ───────────────────────────────────────── */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px var(--pad-x);
+  background: var(--panel);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  width: 100%;
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  flex-shrink: 0;
+}
+.row--clickable { cursor: pointer; transition: background 0.08s ease; }
+.row--clickable:hover { background: var(--card-hi); }
+.row .eyebrow { margin-bottom: 4px; }
+.row-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.row-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.arrow--big {
+  font-size: 16px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+/* Update-available row — same shell as `.row`, accent-tinted to draw
+   the eye without screaming. Hover bumps the tint, mirroring the
+   other clickable rows. */
+.row--update {
+  background: var(--amber-tint);
+  border-bottom-color: var(--amber);
+}
+.row--update:hover { background: var(--amber-tint); filter: brightness(1.15); }
+.row--update .arrow--big { color: var(--amber); }
+.row--update .row-title { color: var(--amber); font-weight: 600; }
+
+/* ── Spacer ─────────────────────────────────────────── */
+.spacer {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── CTA + secondary actions ────────────────────────── */
+.cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 52px;
+  padding: 0 var(--pad-x);
+  background: var(--amber);
+  color: var(--bg);
+  border: 0;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.08s ease;
+  flex-shrink: 0;
+}
+.cta:hover { background: #e1b04a; }
+.cta:disabled {
+  background: var(--card);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.cta-arrow { font-size: 16px; }
+
+/* Stopped → green Start, since amber is reserved for the Live state */
+body.is-stopped .cta { background: var(--pvw); }
+body.is-stopped .cta:hover { background: #5ec381; }
+/* Error → red Retry */
+body.is-error .cta { background: var(--pgm); color: #fff; }
+body.is-error .cta:hover { background: #df5a6c; }
+
+.secondary-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--panel);
+  flex-shrink: 0;
+}
+.ghost {
+  height: 40px;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--mid);
+  cursor: pointer;
+  transition: background 0.08s ease, color 0.08s ease;
+}
+.ghost:last-child { border-right: 0; }
+.ghost:hover {
+  background: var(--card-hi);
+  color: var(--ink);
+}
+.ghost--muted { color: var(--muted); }
+.ghost--muted:hover { color: var(--pgm); }
+
+/* ── Logs view ──────────────────────────────────────── */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px var(--pad-x);
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.topbar-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.topbar-link {
+  background: none;
+  border: 0;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mid);
+  cursor: pointer;
+  padding: 4px 0;
+  transition: color 0.08s ease;
+}
+.topbar-link:hover { color: var(--amber); }
+.topbar-link--right { color: var(--muted); }
+.topbar-link--right:hover { color: var(--pgm); }
+
+.logs-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px var(--pad-x);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.55;
+  user-select: text;
+  color: var(--ink);
+  background: var(--bg);
+}
+.logs-body::-webkit-scrollbar { width: 6px; }
+.logs-body::-webkit-scrollbar-thumb {
+  background: var(--line-hi);
+}
+.log-line {
+  display: flex;
+  gap: 12px;
+  padding: 1px 0;
+  word-break: break-word;
+}
+.log-ts {
+  color: var(--sub);
+  flex-shrink: 0;
+}
+.log-msg.info { color: var(--ink); }
+.log-msg.warn { color: var(--amber); }
+.log-msg.err  { color: var(--pgm); }
+
+/* ── Quit confirm modal ─────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal-overlay.is-open { display: flex; }
+
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--line-hi);
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+}
+.modal-content {
+  padding: 20px 22px 18px;
+}
+.modal-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin: 8px 0 10px;
+  color: var(--ink);
+}
+.modal-body {
+  font-size: 12px;
+  color: var(--mid);
+  line-height: 1.5;
+}
+.modal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--line);
+}
+.modal-btn {
+  height: 44px;
+  background: none;
+  border: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.08s ease, color 0.08s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--ink);
+}
+.modal-btn--ghost {
+  color: var(--mid);
+  border-right: 1px solid var(--line);
+}
+.modal-btn--ghost:hover {
+  background: var(--card-hi);
+  color: var(--ink);
+}
+.modal-btn--danger {
+  background: var(--pgm-tint);
+  color: var(--pgm);
+}
+.modal-btn--danger:hover { background: var(--pgm); color: #fff; }

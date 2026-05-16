@@ -1,0 +1,300 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { cn } from "@/lib/utils";
+import { useVmixStore } from "@/stores/vmix-store";
+import {
+  Monitor,
+  Volume2,
+  Clapperboard,
+  ListMusic,
+  Type,
+  Palette,
+  Layers,
+  Wifi,
+  Tv,
+  Activity,
+  Menu,
+  X,
+  Music2,
+} from "lucide-react";
+
+type Icon = typeof Monitor;
+interface NavItem {
+  href: string;
+  label: string;
+  icon: Icon;
+}
+
+const NAV: NavItem[] = [
+  { href: "/dashboard",   label: "Home",    icon: Activity },
+  { href: "/live",        label: "Live",    icon: Monitor },
+  { href: "/audio",       label: "Audio",   icon: Volume2 },
+  { href: "/replay",      label: "Replay",  icon: Clapperboard },
+  { href: "/playlist",    label: "Playlist", icon: ListMusic },
+  { href: "/titles",      label: "Titles",  icon: Type },
+  { href: "/colorimetry", label: "Color",   icon: Palette },
+  { href: "/ableton",     label: "Ableton", icon: Music2 },
+  { href: "/web-assets",  label: "Assets",  icon: Layers },
+  { href: "/network",     label: "Network", icon: Wifi },
+];
+
+interface SidebarProps {
+  onToggleStream?: () => void;
+  streamOpen?: boolean;
+}
+
+/* ── Brand block — square amber logo "vM" + LOCAL caption ────── */
+function Brand() {
+  return (
+    <div
+      className="flex flex-col items-center justify-center gap-1 px-2 py-3"
+      style={{
+        minHeight: 60,
+        borderBottom: "1px solid var(--line)",
+      }}
+    >
+      <div
+        className="flex items-center justify-center"
+        style={{
+          width: 30,
+          height: 30,
+          background: "var(--amber)",
+          color: "var(--bg)",
+        }}
+      >
+        <span
+          className="font-mono font-bold"
+          style={{ fontSize: 13, letterSpacing: "-0.02em" }}
+        >
+          vM
+        </span>
+      </div>
+      <span
+        className="font-mono font-semibold uppercase"
+        style={{ fontSize: 8, letterSpacing: "0.18em", color: "var(--muted)" }}
+      >
+        Local
+      </span>
+    </div>
+  );
+}
+
+function NavTile({
+  item,
+  active,
+  onClick,
+}: {
+  item: NavItem;
+  active: boolean;
+  onClick?: () => void;
+}) {
+  const Icon = item.icon;
+  return (
+    <Link
+      href={item.href}
+      onClick={onClick}
+      className="relative flex flex-col items-center justify-center gap-1.5 transition-colors"
+      style={{
+        minHeight: 64,
+        background: active ? "var(--panel-2)" : "transparent",
+        color: active ? "var(--ink)" : "var(--mid)",
+        borderBottom: "1px solid var(--line)",
+        transitionDuration: "80ms",
+      }}
+    >
+      {active && (
+        <span
+          aria-hidden
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 2,
+            background: "var(--pvw)",
+          }}
+        />
+      )}
+      <Icon
+        size={16}
+        strokeWidth={1.5}
+        color={active ? "var(--pvw)" : "currentColor"}
+      />
+      <span
+        className="font-mono uppercase"
+        style={{
+          fontSize: 8,
+          letterSpacing: "0.18em",
+          fontWeight: 600,
+        }}
+      >
+        {item.label}
+      </span>
+    </Link>
+  );
+}
+
+export function Sidebar({ onToggleStream, streamOpen }: SidebarProps) {
+  const pathname = usePathname();
+  const connected = useVmixStore((s) => s.connected);
+
+  return (
+    <nav
+      className="flex h-full flex-col shrink-0"
+      style={{
+        width: 60,
+        background: "var(--panel)",
+        borderRight: "1px solid var(--line)",
+      }}
+    >
+      <Brand />
+
+      <div className="flex-1 overflow-y-auto">
+        {NAV.map((item) => {
+          const isActive =
+            item.href === "/dashboard"
+              ? pathname === "/dashboard"
+              : pathname.startsWith(item.href);
+          return <NavTile key={item.href} item={item} active={isActive} />;
+        })}
+
+        {onToggleStream && (
+          <button
+            onClick={onToggleStream}
+            className="relative flex flex-col items-center justify-center gap-1.5 w-full transition-colors"
+            style={{
+              minHeight: 64,
+              background: streamOpen ? "var(--panel-2)" : "transparent",
+              color: streamOpen ? "var(--ink)" : "var(--mid)",
+              borderBottom: "1px solid var(--line)",
+              transitionDuration: "80ms",
+            }}
+          >
+            {streamOpen && (
+              <span
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: 2,
+                  background: "var(--pvw)",
+                }}
+              />
+            )}
+            <Tv
+              size={16}
+              strokeWidth={1.5}
+              color={streamOpen ? "var(--pvw)" : "currentColor"}
+            />
+            <span
+              className="font-mono uppercase"
+              style={{ fontSize: 8, letterSpacing: "0.18em", fontWeight: 600 }}
+            >
+              Stream
+            </span>
+          </button>
+        )}
+      </div>
+
+      {/* Footer: avatar (the only round element of the app) */}
+      <div
+        className="flex items-center justify-center px-2 py-3"
+        style={{
+          minHeight: 50,
+          borderTop: "1px solid var(--line)",
+        }}
+      >
+        <div
+          className="avatar-round flex items-center justify-center"
+          style={{
+            width: 30,
+            height: 30,
+            background: "var(--card)",
+            border: "1px solid var(--line-hi)",
+            color: connected ? "var(--pvw)" : "var(--muted)",
+          }}
+          title={connected ? "Connected" : "Offline"}
+          role="status"
+          aria-live="polite"
+          aria-label={connected ? "vMix connected" : "vMix offline"}
+        >
+          <span
+            className="font-mono font-bold"
+            style={{ fontSize: 11, letterSpacing: "-0.02em" }}
+            aria-hidden
+          >
+            N
+          </span>
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+/* ── Mobile sidebar overlay ────────────────────────────────────────── */
+
+export function MobileSidebar({
+  open,
+  onClose,
+  onToggleStream,
+  streamOpen,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onToggleStream?: () => void;
+  streamOpen?: boolean;
+}) {
+  return (
+    <>
+      <div
+        className={cn(
+          "fixed inset-0 z-40 bg-black/40 transition-opacity duration-200",
+          open ? "opacity-100" : "opacity-0 pointer-events-none"
+        )}
+        onClick={onClose}
+      />
+      <div
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 transition-transform duration-200",
+          open ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        <Sidebar
+          onToggleStream={
+            onToggleStream
+              ? () => {
+                  onToggleStream();
+                  onClose();
+                }
+              : undefined
+          }
+          streamOpen={streamOpen}
+        />
+      </div>
+    </>
+  );
+}
+
+/* ── Burger button for mobile header ─────────────────────────────── */
+
+export function BurgerButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center justify-center h-9 w-9 md:hidden"
+      style={{
+        border: "1px solid var(--line-hi)",
+        background: "var(--card)",
+        color: "var(--mid)",
+      }}
+    >
+      <Menu size={16} />
+    </button>
+  );
+}
+
+export { X as CloseIcon };
