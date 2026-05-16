@@ -15,6 +15,8 @@ interface InterfaceOption {
 }
 
 const api = {
+  getVersion: (): Promise<string> =>
+    ipcRenderer.invoke("launcher:get-version"),
   getStatus: (): Promise<ServerStatus> =>
     ipcRenderer.invoke("launcher:get-status"),
   getLogs: (): Promise<ServerLog[]> =>

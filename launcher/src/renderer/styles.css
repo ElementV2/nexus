@@ -395,6 +395,30 @@ body.is-error .cta:hover { background: #df5a6c; }
 .ghost--muted { color: var(--muted); }
 .ghost--muted:hover { color: var(--pgm); }
 
+/* ── Meta strip (app name + version, always visible) ── */
+.meta-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px var(--pad-x);
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.meta-strip-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.meta-strip-version {
+  font-size: 11px;
+  color: var(--ink);
+  font-feature-settings: "tnum";
+}
+
 /* ── Logs view ──────────────────────────────────────── */
 .topbar {
   display: flex;

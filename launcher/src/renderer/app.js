@@ -34,6 +34,8 @@ const els = {
   updateRow: $("updateRow"),
   updateTitle: $("updateTitle"),
   updateSub: $("updateSub"),
+  // meta footer
+  versionLabel: $("versionLabel"),
   // quit modal
   quitConfirm: $("quitConfirm"),
   quitCancel: $("quitCancel"),
@@ -299,6 +301,8 @@ window.launcher.onUpdateInfo((info) => renderUpdate(info));
 
 /* ── Hydrate ───────────────────────────────────────── */
 (async () => {
+  const version = await window.launcher.getVersion();
+  els.versionLabel.textContent = `v${version}`;
   const s = await window.launcher.getStatus();
   if (s) renderStatus(s);
   const logs = await window.launcher.getLogs();

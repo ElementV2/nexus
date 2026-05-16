@@ -74,6 +74,14 @@
         <button class="ghost" id="hideBtn">Hide</button>
         <button class="ghost ghost--muted" id="quitBtn">Quit</button>
       </div>
+
+      <!-- Persistent footer strip with app name + current version. Stays
+           visible at all times so the operator can confirm which build
+           is running, independent of whether an update is available. -->
+      <div class="meta-strip">
+        <span class="meta-strip-label">Nexus</span>
+        <span class="meta-strip-version mono" id="versionLabel">—</span>
+      </div>
     </div>
 
     <!-- ── LOGS VIEW ─────────────────────────────────── -->

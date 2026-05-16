@@ -201,6 +201,7 @@ function listInterfaces(): { label: string; ip: string }[] {
 }
 
 function wireIpc(srv: ServerManager) {
+  ipcMain.handle("launcher:get-version", () => app.getVersion());
   ipcMain.handle("launcher:get-status", () => srv.getStatus());
   ipcMain.handle("launcher:get-logs", () => srv.getLogs());
   ipcMain.handle("launcher:get-settings", () => loadSettings());
