@@ -1,8 +1,13 @@
 {
   "name": "nexus-launcher",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Local launcher that runs the Nexus Next.js server on the LAN.",
+  "author": "ElementV2 <death0factory@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ElementV2/nexus.git"
+  },
   "main": "build/main.js",
   "scripts": {
     "compile": "tsc && node ./scripts/copy-renderer.mjs",
