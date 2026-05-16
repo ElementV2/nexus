@@ -230,8 +230,12 @@ function wireIpc(srv: ServerManager) {
     const urls = srv.getStatus().lanUrls;
     if (urls.length > 0) shell.openExternal(urls[0]);
   });
-  ipcMain.on("launcher:open-external", (_e, url: string) => {
-    shell.openExternal(url);
+  ipcMain.on("launcher:open-external", async (_e, url: string) => {
+    try {
+      await shell.openExternal(url);
+    } catch (err) {
+      console.error("[launcher] shell.openExternal failed:", url, err);
+    }
   });
   ipcMain.on("launcher:hide", () => mainWindow?.hide());
   ipcMain.on("launcher:quit", () => {

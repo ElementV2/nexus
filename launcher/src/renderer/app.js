@@ -280,12 +280,16 @@ function renderUpdate(info) {
 }
 
 els.updateRow.addEventListener("click", () => {
-  if (!updateInfo) return;
-  // Prefer the direct installer link when present so the user lands on
-  // the .exe download; fall back to the release page (with notes) if
-  // the asset isn't named the way we expect.
-  const url = updateInfo.installerUrl || updateInfo.releaseUrl;
-  if (url) window.launcher.openExternal(url);
+  // Prefer the direct installer link, then the release page from the
+  // updater payload, then a hardcoded `/releases/latest` so the click
+  // ALWAYS opens something useful — even if the GitHub API returned a
+  // release without assets (race between release creation and asset
+  // upload) or the updater hasn't fired yet.
+  const url =
+    (updateInfo && (updateInfo.installerUrl || updateInfo.releaseUrl)) ||
+    "https://github.com/ElementV2/nexus/releases/latest";
+  console.log("[launcher] update click →", url, updateInfo);
+  window.launcher.openExternal(url);
 });
 
 /* ── Backend events ────────────────────────────────── */
