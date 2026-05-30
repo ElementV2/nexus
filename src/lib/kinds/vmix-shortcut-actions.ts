@@ -180,14 +180,15 @@ function defaultFamily(f: NonNullable<VmixShortcut["family"]>[number]): string |
 }
 
 // ── Colours ────────────────────────────────────────────────────────────
-// The hand-tuned semantic colours from the (now-removed) curated tiles,
-// keyed by the vMix Function they fire. A generated preset whose default
-// Function matches picks it up; everything else falls back to a per-category
-// accent so no tile is colourless.
+// Base tile colours, keyed by the vMix Function. IMPORTANT: a base colour
+// is NEVER red or green — those are reserved for LIVE FEEDBACK (red = on
+// program, green = on preview). A red/green base would hide the feedback
+// change (e.g. a green "preview" tile wouldn't visibly turn green when its
+// input is staged). Tally-style buttons therefore sit on a neutral base so
+// the feedback pops. Everything else falls back to a per-category accent.
 type Color = { bgcolor?: string; fgcolor?: string };
 
-const RED: Color = { bgcolor: "#ff3b30", fgcolor: "#ffffff" }; // PGM / cut
-const GREEN: Color = { bgcolor: "#34c759", fgcolor: "#000000" }; // preview
+const NEUTRAL: Color = { bgcolor: "#2c2c2e", fgcolor: "#dddddd" }; // tally buttons
 const ORANGE: Color = { bgcolor: "#ff9500", fgcolor: "#000000" }; // fade / merge
 const BLUE: Color = { bgcolor: "#5ac8fa", fgcolor: "#000000" }; // motion wipes
 const INDIGO: Color = { bgcolor: "#5856d6", fgcolor: "#ffffff" }; // alpha / slot
@@ -195,8 +196,11 @@ const PURPLE: Color = { bgcolor: "#af52de", fgcolor: "#ffffff" }; // stinger
 const BLACK: Color = { bgcolor: "#000000", fgcolor: "#ffffff" }; // FTB
 
 const CURATED_COLOR_BY_FN: Record<string, Color> = {
-  Cut: RED,
-  PreviewInput: GREEN,
+  // Tally buttons → neutral base (red/green is the live feedback).
+  Cut: NEUTRAL,
+  CutDirect: NEUTRAL,
+  PreviewInput: NEUTRAL,
+  QuickPlay: NEUTRAL,
   Fade: ORANGE,
   Merge: ORANGE,
   Wipe: BLUE,
@@ -217,12 +221,12 @@ const CURATED_COLOR_BY_FN: Record<string, Color> = {
   Transition3: INDIGO,
   Transition4: INDIGO,
   FadeToBlack: BLACK,
-  CutDirect: RED,
 };
 
+// Per-category accents — none are red or green (reserved for feedback).
 const CATEGORY_COLOR: Record<VmixCategory, Color> = {
   General: { bgcolor: "#48484a", fgcolor: "#ffffff" },
-  Audio: { bgcolor: "#30c7a0", fgcolor: "#000000" },
+  Audio: { bgcolor: "#2997ff", fgcolor: "#ffffff" },
   Transition: { bgcolor: "#ff9500", fgcolor: "#000000" },
   Output: { bgcolor: "#5ac8fa", fgcolor: "#000000" },
   Title: { bgcolor: "#af52de", fgcolor: "#ffffff" },
@@ -230,7 +234,7 @@ const CATEGORY_COLOR: Record<VmixCategory, Color> = {
   Overlay: { bgcolor: "#5856d6", fgcolor: "#ffffff" },
   PlayList: { bgcolor: "#ff9f0a", fgcolor: "#000000" },
   Scripting: { bgcolor: "#8e8e93", fgcolor: "#ffffff" },
-  Replay: { bgcolor: "#ff375f", fgcolor: "#ffffff" },
+  Replay: { bgcolor: "#c75ae0", fgcolor: "#ffffff" },
   NDI: { bgcolor: "#bf5af2", fgcolor: "#ffffff" },
   PTZ: { bgcolor: "#64d2ff", fgcolor: "#000000" },
   Preset: { bgcolor: "#636366", fgcolor: "#ffffff" },

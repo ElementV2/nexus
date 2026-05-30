@@ -49,11 +49,17 @@ describe("vMix shortcut generation — coverage", () => {
     }
   });
 
-  it("carries curated colours onto the matching generated tiles", () => {
+  it("colours tiles but NEVER red/green at rest (those are live-feedback only)", () => {
     const byPid = new Map(vmixShortcutPresets.map((p) => [p.id, p]));
-    expect(byPid.get("sc-cut")?.bgcolor).toBe("#ff3b30"); // red (PGM/cut)
-    expect(byPid.get("sc-previewinput")?.bgcolor).toBe("#34c759"); // green (PVW)
+    // Tally buttons sit on a neutral base so the red/green feedback shows.
+    expect(byPid.get("sc-cut")?.bgcolor).toBe("#2c2c2e");
+    expect(byPid.get("sc-previewinput")?.bgcolor).toBe("#2c2c2e");
     expect(byPid.get("sc-fade")?.bgcolor).toBe("#ff9500"); // orange (fade)
+    // No generated tile may use the reserved feedback colours as its base.
+    for (const p of vmixShortcutPresets) {
+      expect(p.bgcolor, p.id).not.toBe("#ff3b30"); // feedback red
+      expect(p.bgcolor, p.id).not.toBe("#34c759"); // feedback green
+    }
   });
 });
 
