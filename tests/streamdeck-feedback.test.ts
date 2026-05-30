@@ -57,24 +57,36 @@ describe("vMix tally feedback — PROGRAM wins over PREVIEW (live priority)", ()
   });
 });
 
-describe("vMix overlay-live feedback", () => {
-  it("green when this overlay channel is showing this input", () => {
+describe("vMix overlay tally feedback (red live / green preview)", () => {
+  it("RED when this overlay channel is live showing this input", () => {
     expect(
       fb(vmixKey("sc-overlayinput", { ch: 2, input: "7" }), { overlay_2: 7 })
         ?.bgcolor
+    ).toBe(RED);
+  });
+
+  it("GREEN when the button's input is staged on preview", () => {
+    expect(
+      fb(vmixKey("sc-overlayinput", { ch: 2, input: "7" }), {
+        overlay_2: 4,
+        tally_preview: 7,
+      })?.bgcolor
     ).toBe(GREEN);
   });
 
-  it("null when the overlay shows a DIFFERENT input", () => {
+  it("null when the overlay is off and the input isn't on preview", () => {
     expect(
-      fb(vmixKey("sc-overlayinput", { ch: 2, input: "7" }), { overlay_2: 4 })
+      fb(vmixKey("sc-overlayinput", { ch: 2, input: "7" }), {
+        overlay_2: 4,
+        tally_preview: 1,
+      })
     ).toBeNull();
   });
 
-  it("off/out buttons (no input) light up whenever the channel is up", () => {
+  it("off/out buttons (no input) go RED whenever the channel is up", () => {
     expect(
       fb(vmixKey("sc-overlayinputoff", { ch: 3 }), { overlay_3: 9 })?.bgcolor
-    ).toBe(GREEN);
+    ).toBe(RED);
     expect(
       fb(vmixKey("sc-overlayinputoff", { ch: 3 }), { overlay_3: 0 })
     ).toBeNull();

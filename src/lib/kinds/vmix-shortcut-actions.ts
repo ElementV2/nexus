@@ -98,7 +98,9 @@ function paramOption(p: VmixParamId, description: string): ActionOption {
         max: 8,
       };
     case "mix":
-      return { id: "mix", type: "number", label: "Mix #", default: 1, min: 1, max: 4 };
+      // vMix's Mix param is 0-indexed: 0 = the main/PGM mix (Mix 1 in the
+      // UI), 1 = Mix 2, 2 = Mix 3, 3 = Mix 4. Default to the main mix.
+      return { id: "mix", type: "number", label: "Mix (0 = PGM)", default: 0, min: 0, max: 3 };
     case "selectedIndex":
       return {
         id: "selectedIndex",

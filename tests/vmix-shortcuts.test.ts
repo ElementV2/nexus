@@ -88,6 +88,11 @@ describe("family placeholders become one parameterized action", () => {
     expect(cmd("sc-overlayinput", {}).Function).toBe("OverlayInput1");
   });
 
+  it("defaults Mix to 0 (vMix's main/PGM mix), not 1", () => {
+    const mixOpt = byId.get("sc-cut")?.options?.find((o) => o.id === "mix");
+    expect(mixOpt).toMatchObject({ default: 0, min: 0 });
+  });
+
   it("maps the documented params to vMix query keys; omits empties", () => {
     expect(cmd("sc-audio", { input: "3" })).toEqual({
       Function: "Audio",

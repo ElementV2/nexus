@@ -158,17 +158,20 @@ function vmixFeedback(
     return null;
   }
 
-  // Overlay live — green when this overlay channel is currently showing the
-  // button's Input. Off/Out/Zoom buttons carry no Input → light up whenever
-  // the channel is up at all (so you can see there's something to clear).
+  // Overlay tally — RED when this overlay channel is LIVE showing the
+  // button's Input, GREEN when that Input is staged on PREVIEW (ready to
+  // overlay), like the main bus tally. Off/Out/Zoom buttons carry no Input
+  // → red whenever the channel is up (there's something to clear).
   if (action.startsWith("sc-overlayinput")) {
     const ch = num(opts.ch);
     if (ch === undefined) return null;
     const onInput = num(vars[`overlay_${ch}`]); // input # on channel, 0 = empty
     if (inputOpt !== undefined) {
-      return onInput && onInput === inputOpt ? GREEN : null;
+      if (onInput && onInput === inputOpt) return RED;
+      if (num(vars.tally_preview) === inputOpt) return GREEN;
+      return null;
     }
-    return onInput ? GREEN : null;
+    return onInput ? RED : null;
   }
 
   // Audio bus on/off — green when the bus is ON, dim when muted.
