@@ -35,6 +35,9 @@ const eslintConfig = defineConfig([
     "nexus-cross/build/**",
     "nexus-cross/dist/**",
     "**/dist/**",
+    // CommonJS dev/build scripts (e.g. the vMix shortcut generator) use
+    // require() by design — not app code, not worth flat-config gymnastics.
+    "**/*.cjs",
   ]),
 ]);
 

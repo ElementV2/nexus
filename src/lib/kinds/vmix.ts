@@ -20,8 +20,10 @@ import type {
   KindEvent,
   VariableDefinition,
 } from "@/lib/core/types";
-import { vmixActions } from "./vmix-actions";
-import { vmixPresets } from "./vmix-presets";
+import {
+  vmixShortcutActions,
+  vmixShortcutPresets,
+} from "./vmix-shortcut-actions";
 
 /**
  * vMix kind — fully per-instance.
@@ -150,6 +152,7 @@ class VmixAdapter implements BrokerImpl {
       "Value",
       "Mix",
       "Duration",
+      "Channel",
       "SelectedIndex",
       "SelectedName",
     ]) {
@@ -241,15 +244,10 @@ class VmixAdapter implements BrokerImpl {
   }
 }
 
-// ─────────────────────────── Actions catalog ──────────────────────────
-
-// The full action catalog now lives in `./vmix-actions.ts` — moved out
-// to keep this file readable as the kind grew past ~80 entries. The
-// exported `vmixActions` covers every command in `src/lib/vmix/commands.ts`
-// (transitions, audio per-input + buses + master, colorimetry, transport,
-// list items, outputs, stream/record, timers, titles, video-call, replay).
-
-// Inline catalog removed — full content moved to `./vmix-actions.ts`.
+// Actions + presets are generated from the vMix Shortcut reference in
+// `./vmix-shortcut-actions.ts` (see its header). The legacy operator pages
+// (live/audio/replay/…) build their own commands via `src/lib/vmix/
+// commands.ts`; this kind only contributes the surface catalog.
 
 // ─────────────────────────── Variables ────────────────────────────────
 
@@ -261,8 +259,6 @@ const vmixVariables: VariableDefinition[] = [
   { id: "recording", label: "Recording on/off", hint: "boolean" },
   { id: "fade_to_black", label: "Fade to black on/off", hint: "boolean" },
 ];
-
-// Inline presets removed — full content lives in ./vmix-presets.ts.
 
 // ─────────────────────────── Kind definition ──────────────────────────
 
@@ -286,9 +282,13 @@ const vmixKind: DeviceKind = {
     { href: "/titles", label: "Titles", icon: Type },
     { href: "/colorimetry", label: "Color", icon: Palette },
   ],
-  actions: vmixActions,
+  // Actions + presets are the single generated vMix catalog — every
+  // documented Function (families condensed to one parameterized entry),
+  // plus the named transitions the reference omits. Curated colours are
+  // carried onto the matching tiles inside the generator.
+  actions: vmixShortcutActions,
   variables: vmixVariables,
-  presets: vmixPresets,
+  presets: vmixShortcutPresets,
   make({ config }): BrokerImpl {
     const parsed = parseVmixConfig(config);
     if (!parsed.ok) {

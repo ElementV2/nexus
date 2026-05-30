@@ -30,6 +30,20 @@ shared release tag.
   kind exists**. You can delete every connection and end up with none;
   the Deck page always stays so you can prepare shortcuts in advance.
 
+### vMix — full shortcut coverage
+- The preset browser now lists **every vMix Function**, generated from the
+  scraped reference (`src/lib/vmix/shortcuts.ts`) plus the named
+  transitions the reference omits (Cut, Fade, Wipe, Slide, Fly, Zoom,
+  Merge, …). The old hand-curated tiles were **removed** to avoid
+  duplicates — their hand-tuned colours were carried onto the matching
+  generated tiles (every tile is coloured; PGM/cut red, preview green,
+  fade orange, …).
+- Numbered/lettered **families are condensed into one parameterized
+  preset** instead of dozens of near-duplicates: e.g. `OverlayInput{ch}`
+  is a single tile with an *Overlay #* picker + Input, `SetBus{bus}Volume`
+  a single tile with a *Bus* dropdown. The dispatcher now also forwards
+  the `Channel` param.
+
 ### Stream Deck editor
 - **Per-action connection targeting** — a single key can drive several
   actions across different devices/instances (e.g. vMix #1 cut + OBS

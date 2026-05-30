@@ -1,9 +1,10 @@
-// ─────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────
 // vMix Shortcut Function Reference — SOURCE OF TRUTH
 //
-// Auto-generated from the official reference, scraped in full:
-//   https://www.vmix.com/help28/ShortcutFunctionReference.html
-//   Scraped 2026-05-30 · 714 documented functions · 100% coverage.
+// Originally scraped in full from the official reference (vMix help28,
+// ShortcutFunctionReference · 713 documented functions). This file is now
+// the committed, hand-maintained source of truth — edit it directly when
+// vMix ships new functions.
 //
 // Numbered / lettered families are condensed into a single templated
 // entry: the variable part of the Function name becomes a {placeholder}
@@ -12,9 +13,10 @@
 // `params` lists, in vMix's documented order, the query args the call
 // reads besides the family placeholders.
 //
-// Do not hand-edit — regenerate via .tmp_gen_shortcuts.cjs against a
-// fresh scrape when vMix ships a new version.
-// ─────────────────────────────────────────────────────────────────────
+// NOTE: the reference omits the NAMED transitions (Cut, Fade, Wipe, …);
+// those are added in src/lib/kinds/vmix-shortcut-actions.ts, which turns
+// each entry here into one action + one preset.
+// ──────────────────────────────────────────────────────────────────────
 
 export type VmixParamId =
   | "input"
@@ -60,7 +62,7 @@ export interface VmixShortcut {
 
 export const VMIX_SHORTCUTS: VmixShortcut[] = [
 
-  // ══════════════════════════ General ══════════════════════════
+  // ══════════════════════ General ══════════════════════
   { fn: "ActivatorRefresh", category: "General", description: "Refresh all activator device lights and controls", params: [] },
   { fn: "CallManagerShowHide", category: "General", description: "", params: [] },
   { fn: "KeyPress", category: "General", description: "Value = Key", params: ["value"] },
@@ -68,7 +70,7 @@ export const VMIX_SHORTCUTS: VmixShortcut[] = [
   { fn: "SetDynamicValue{n}", category: "General", description: "Set Dynamic Value to use when specifying Dynamic1 as a shortcut value. Value = Value", params: ["value"], family: [{ id: "n", kind: "int", min: 1, max: 4, label: "Slot #" }] },
   { fn: "Undo", category: "General", description: "Undo closing Input.", params: [] },
 
-  // ══════════════════════════ Audio ══════════════════════════
+  // ══════════════════════ Audio ══════════════════════
   { fn: "Audio", category: "Audio", description: "Toggle Audio Mute On/Off", params: ["input"] },
   { fn: "AudioAuto", category: "Audio", description: "", params: ["input"] },
   { fn: "AudioAutoOff", category: "Audio", description: "", params: ["input"] },
@@ -141,7 +143,7 @@ export const VMIX_SHORTCUTS: VmixShortcut[] = [
   { fn: "SoloPFLOff", category: "Audio", description: "Turn off PFL mode for Solo", params: ["input"] },
   { fn: "SoloPFLOn", category: "Audio", description: "Turn on PFL mode for Solo", params: ["input"] },
 
-  // ══════════════════════════ Transition ══════════════════════════
+  // ══════════════════════ Transition ══════════════════════
   { fn: "CutDirect", category: "Transition", description: "Cuts the input directly to Output without changing Preview", params: ["input"] },
   { fn: "FadeToBlack", category: "Transition", description: "Toggle FTB On/Off", params: [] },
   { fn: "QuickPlay", category: "Transition", description: "", params: ["input"] },
@@ -152,7 +154,7 @@ export const VMIX_SHORTCUTS: VmixShortcut[] = [
   { fn: "Stinger{slot}", category: "Transition", description: "", params: ["input", "mix"], family: [{ id: "slot", kind: "int", min: 1, max: 4, label: "Stinger #" }] },
   { fn: "Transition{slot}", category: "Transition", description: "Clicks one of the four Transition buttons in the main vMix window.", params: [], family: [{ id: "slot", kind: "int", min: 1, max: 4, label: "Button #" }] },
 
-  // ══════════════════════════ Output ══════════════════════════
+  // ══════════════════════ Output ══════════════════════
   { fn: "Fullscreen", category: "Output", description: "Toggles Fullscreen On or Off", params: [] },
   { fn: "FullscreenOff", category: "Output", description: "", params: [] },
   { fn: "FullscreenOn", category: "Output", description: "", params: [] },
@@ -185,7 +187,7 @@ export const VMIX_SHORTCUTS: VmixShortcut[] = [
   { fn: "StreamingSetUsername", category: "Output", description: "Set Username on Custom RTMP Stream. Optional stream number starting from 0 at start followed by comma, e.g 0,username Value = Stream", params: ["value"] },
   { fn: "WriteDurationToRecordingLog", category: "Output", description: "Write current recording duration to log file with optional tag text Value. Value = Tag Text", params: ["value"] },
 
-  // ══════════════════════════ Title ══════════════════════════
+  // ══════════════════════ Title ══════════════════════
   { fn: "AdjustCountdown", category: "Title", description: "Seconds to add or subtract from current Countdown time Value = Seconds", params: ["value", "input"] },
   { fn: "ChangeCountdown", category: "Title", description: "Change countdown time according to Value as hh:mm:ss (00:00:00) Value = Time 00:00:00", params: ["value", "input"] },
   { fn: "NextTitlePreset", category: "Title", description: "", params: ["input"] },
@@ -211,7 +213,7 @@ export const VMIX_SHORTCUTS: VmixShortcut[] = [
   { fn: "SuspendCountdown", category: "Title", description: "Pause Countdown Only", params: ["input"] },
   { fn: "TitleBeginAnimation", category: "Title", description: "Value = Animation", params: ["value", "input"] },
 
-  // ══════════════════════════ Input ══════════════════════════
+  // ══════════════════════ Input ══════════════════════
   { fn: "ActiveInput", category: "Input", description: "Send to Output the selected Input", params: ["input", "mix"] },
   { fn: "AddInput", category: "Input", description: "Create a new Input based on information provided in Value. Video|c:\\path\\to\\video.avi Image|c:\\path\\to\\image.jpg Photos|c:\\path\\to\\folder Title|c:\\path\\to\\title.gtzip VideoList|c:\\path\\to\\playlist.m3u Colour|HTMLColor AudioFile|c:\\path\\to\\audio.wav Flash|c:\\path\\to\\flash.swf PowerPoint|c:\\path\\to\\powerpoint.pptx Value = Type|Filename", params: ["value"] },
   { fn: "AutoPauseOff", category: "Input", description: "", params: ["input"] },
@@ -356,7 +358,7 @@ export const VMIX_SHORTCUTS: VmixShortcut[] = [
   { fn: "ZoomSelectParticipantByName", category: "Input", description: "Value = Name", params: ["value", "input"] },
   { fn: "ZoomUnMuteSelf", category: "Input", description: "", params: ["input"] },
 
-  // ══════════════════════════ Overlay ══════════════════════════
+  // ══════════════════════ Overlay ══════════════════════
   { fn: "MoveMultiViewOverlay", category: "Overlay", description: "Move Overlay in Input MultiView according to Value parameter. Example: 1,2 moves Overlay1 to Overlay2 Value = FromIndex,ToIndex", params: ["value", "input"] },
   { fn: "MultiViewOverlay", category: "Overlay", description: "Toggle On/Off MultiView Overlay For Input At Index (starting from 1) Value = Index", params: ["value", "input"] },
   { fn: "MultiViewOverlayOff", category: "Overlay", description: "Turn Off MultiView Overlay For Input At Index (starting from 1) Value = Index", params: ["value", "input"] },
@@ -371,21 +373,21 @@ export const VMIX_SHORTCUTS: VmixShortcut[] = [
   { fn: "PreviewOverlayInput{ch}", category: "Overlay", description: "Preview Overlay1 using the selected Input", params: ["input"], family: [{ id: "ch", kind: "int", min: 1, max: 4, label: "Overlay #" }] },
   { fn: "SetMultiViewOverlay", category: "Overlay", description: "Change Layer in Input MultiView according to Value parameter. Example: 1,2 changes Layer 1 to Input2 Value = Index,Input", params: ["value", "input"] },
 
-  // ══════════════════════════ PlayList ══════════════════════════
+  // ══════════════════════ PlayList ══════════════════════
   { fn: "NextPlayListEntry", category: "PlayList", description: "Move to Next Item in a running PlayList", params: [] },
   { fn: "PreviousPlayListEntry", category: "PlayList", description: "Move to Previous Item in a running PlayList", params: [] },
   { fn: "SelectPlayList", category: "PlayList", description: "Open PlayList with Name matching Value Value = PlayList", params: ["value"] },
   { fn: "StartPlayList", category: "PlayList", description: "", params: [] },
   { fn: "StopPlayList", category: "PlayList", description: "", params: [] },
 
-  // ══════════════════════════ Scripting ══════════════════════════
+  // ══════════════════════ Scripting ══════════════════════
   { fn: "ScriptStart", category: "Scripting", description: "Value = Script Name", params: ["value"] },
   { fn: "ScriptStartDynamic", category: "Scripting", description: "Start a dynamic script using code specified as the Value. Value = Code", params: ["value"] },
   { fn: "ScriptStop", category: "Scripting", description: "Value = Script Name", params: ["value"] },
   { fn: "ScriptStopAll", category: "Scripting", description: "", params: [] },
   { fn: "ScriptStopDynamic", category: "Scripting", description: "", params: [] },
 
-  // ══════════════════════════ Replay ══════════════════════════
+  // ══════════════════════ Replay ══════════════════════
   { fn: "Replay{chn}Camera{cam}", category: "Replay", description: "", params: [], family: [{ id: "chn", kind: "enum", values: ["A", "B"], label: "Channel" }, { id: "cam", kind: "int", min: 1, max: 8, label: "Camera #" }] },
   { fn: "ReplayCamera{cam}", category: "Replay", description: "", params: [], family: [{ id: "cam", kind: "int", min: 1, max: 8, label: "Camera #" }] },
   { fn: "ReplayChangeDirection", category: "Replay", description: "", params: ["channel"] },
@@ -484,14 +486,14 @@ export const VMIX_SHORTCUTS: VmixShortcut[] = [
   { fn: "ReplayUpdateSelectedSpeedDefault", category: "Replay", description: "Update Selected Event to use Default Speed.", params: ["channel"] },
   { fn: "ReplayUpdateSelectedSpeedFromValue", category: "Replay", description: "See SetRateSlowMotion Value = Speed 0-1", params: ["value", "channel"] },
 
-  // ══════════════════════════ NDI ══════════════════════════
+  // ══════════════════════ NDI ══════════════════════
   { fn: "NDICommand", category: "NDI", description: "Send specified command to NDI source Value = Command", params: ["value", "input"] },
   { fn: "NDISelectSourceByIndex", category: "NDI", description: "Value = Index 0-100", params: ["value", "input"] },
   { fn: "NDISelectSourceByName", category: "NDI", description: "Value = Name", params: ["value", "input"] },
   { fn: "NDIStartRecording", category: "NDI", description: "", params: ["input"] },
   { fn: "NDIStopRecording", category: "NDI", description: "", params: ["input"] },
 
-  // ══════════════════════════ PTZ ══════════════════════════
+  // ══════════════════════ PTZ ══════════════════════
   { fn: "PTZCreateVirtualInput", category: "PTZ", description: "Creates a PTZ Virtual Input with the current Position", params: ["input"] },
   { fn: "PTZFocusAuto", category: "PTZ", description: "", params: ["input"] },
   { fn: "PTZFocusFar", category: "PTZ", description: "Value = Speed 0-1", params: ["value", "input"] },
@@ -515,12 +517,12 @@ export const VMIX_SHORTCUTS: VmixShortcut[] = [
   { fn: "PTZZoomOut", category: "PTZ", description: "Value = Speed 0-1", params: ["value", "input"] },
   { fn: "PTZZoomStop", category: "PTZ", description: "", params: ["input"] },
 
-  // ══════════════════════════ Preset ══════════════════════════
+  // ══════════════════════ Preset ══════════════════════
   { fn: "LastPreset", category: "Preset", description: "Load the last preset.", params: [] },
   { fn: "OpenPreset", category: "Preset", description: "Load preset from the specified Filename. Value = Filename", params: ["value"] },
   { fn: "SavePreset", category: "Preset", description: "Save preset to the specified Filename. Value = Filename", params: ["value"] },
 
-  // ══════════════════════════ DataSources ══════════════════════════
+  // ══════════════════════ DataSources ══════════════════════
   { fn: "DataSourceAutoNextOff", category: "DataSources", description: "Name of the Data Source, Table Name (optional) eg 'Excel/CSV,Sheet1' Value = Name,Table", params: ["value"] },
   { fn: "DataSourceAutoNextOn", category: "DataSources", description: "Name of the Data Source, Table Name (optional) eg 'Excel/CSV,Sheet1' Value = Name,Table", params: ["value"] },
   { fn: "DataSourceAutoNextOnOff", category: "DataSources", description: "Name of the Data Source, Table Name (optional) eg 'Excel/CSV,Sheet1' Value = Name,Table", params: ["value"] },
@@ -531,7 +533,7 @@ export const VMIX_SHORTCUTS: VmixShortcut[] = [
   { fn: "DataSourcePreviousRow", category: "DataSources", description: "Name of the Data Source and Table Name (optional) eg 'Excel/CSV,Sheet1' Value = Name,Table", params: ["value"] },
   { fn: "DataSourceSelectRow", category: "DataSources", description: "Name of the Data Source, Table Name (optional) and Row Index starting from 0 eg 'Excel/CSV,Sheet1,5' Value = Name,Table,Index", params: ["value"] },
 
-  // ══════════════════════════ Browser ══════════════════════════
+  // ══════════════════════ Browser ══════════════════════
   { fn: "BrowserBack", category: "Browser", description: "", params: ["input"] },
   { fn: "BrowserForward", category: "Browser", description: "", params: ["input"] },
   { fn: "BrowserKeyboardDisabled", category: "Browser", description: "", params: ["input"] },
