@@ -65,9 +65,13 @@ export function PagesRail({
       <div style={{ flex: 1, overflow: "auto" }}>
         {layouts.map((l) => {
           const isSel = l.id === selectedId;
-          const paired = l.deviceSerial
-            ? hw?.devices.find((d) => d.serialNumber === l.deviceSerial)
-            : null;
+          // A page can be paired to several decks; count how many of them
+          // are currently connected.
+          const pairedTotal = l.deviceSerials.length;
+          const pairedOnline = l.deviceSerials.filter((s) =>
+            hw?.devices.some((d) => d.serialNumber === s)
+          ).length;
+          const anyOnline = pairedOnline > 0;
           const count = Object.keys(l.bindings).length;
           return (
             <div
@@ -84,30 +88,41 @@ export function PagesRail({
                   : "2px solid transparent",
               }}
             >
-              {/* Pairing dot */}
+              {/* Pairing dot: filled when at least one paired deck is
+                  online, outlined when paired-but-offline, empty when
+                  unpaired. */}
               <span
                 title={
-                  l.deviceSerial
-                    ? paired
-                      ? `Paired · ${l.deviceSerial}`
-                      : `Paired serial offline · ${l.deviceSerial}`
-                    : "Not paired"
+                  pairedTotal === 0
+                    ? "Not paired"
+                    : `Paired · ${pairedTotal} deck${pairedTotal > 1 ? "s" : ""} (${pairedOnline} online)\n${l.deviceSerials.join(", ")}`
                 }
                 style={{
                   width: 7,
                   height: 7,
                   borderRadius: 4,
                   flexShrink: 0,
-                  background: l.deviceSerial
-                    ? paired
-                      ? "var(--pvw)"
-                      : "transparent"
-                    : "transparent",
+                  background:
+                    pairedTotal > 0 && anyOnline ? "var(--pvw)" : "transparent",
                   border: `1px solid ${
-                    l.deviceSerial ? "var(--pvw)" : "var(--line-hi)"
+                    pairedTotal > 0 ? "var(--pvw)" : "var(--line-hi)"
                   }`,
                 }}
               />
+              {pairedTotal > 1 && (
+                <span
+                  title={`Paired to ${pairedTotal} decks`}
+                  className="font-mono"
+                  style={{
+                    fontSize: 9,
+                    color: "var(--pvw)",
+                    flexShrink: 0,
+                    letterSpacing: "0.04em",
+                  }}
+                >
+                  ×{pairedTotal}
+                </span>
+              )}
               <div style={{ flex: 1, minWidth: 0 }}>
                 {editingId === l.id ? (
                   <input

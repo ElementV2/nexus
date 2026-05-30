@@ -91,7 +91,7 @@ export function remapLayout(
   return {
     ...layout,
     id: newId,
-    deviceSerial: undefined,
+    deviceSerials: [],
     bindings,
   };
 }

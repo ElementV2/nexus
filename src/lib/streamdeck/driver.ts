@@ -181,6 +181,7 @@ class DriverImpl {
   private deviceInfo = new Map<string, StreamDeckDeviceInfo>();
   private listeners = new Set<DriverListener>();
   private hotplugBound = false;
+  private detachHotplug: (() => void) | null = null;
 
   /**
    * Per-key render coalescing. When multiple render requests land
@@ -226,6 +227,7 @@ class DriverImpl {
    *  does a full HID enumeration (`listStreamDecks()`), which briefly
    *  blocks the event loop. Invalidated on hotplug + satellite change. */
   private devicesCache: { ts: number; list: DeviceSummary[] } | null = null;
+  private devicesChangedTimer: ReturnType<typeof setTimeout> | null = null;
 
   subscribe(cb: DriverListener): () => void {
     this.listeners.add(cb);
@@ -355,12 +357,28 @@ class DriverImpl {
     for (const [k] of this.deviceInfo) {
       if (!seen.has(k)) this.deviceInfo.delete(k);
     }
+    // Close handles for decks that are no longer enumerated (unplugged).
+    // Without this a re-plug on the same USB path would reuse the DEAD
+    // cached handle (open() returns it as-is), so renders silently no-op
+    // — exactly the "deck shows in Load to deck but won't load after a
+    // replug" symptom. Closing here means the next open() builds fresh.
+    for (const [path] of this.openHandles) {
+      if (!seen.has(path)) void this.close(path);
+    }
 
     // Merge in satellite-owned devices. Their `path` is a synthetic
     // marker the rest of the pipeline routes through the satellite
     // registry instead of HID. The UI treats local and remote
     // identically — same serial-based pairing, same renders.
+    // Skip any serial that's ALSO present locally: a deck physically
+    // plugged into this PC must be driven over local HID, not a stale
+    // satellite that still advertises it (which would render into the
+    // void). Local wins.
+    const localSerials = new Set(
+      out.map((o) => o.serialNumber).filter((s): s is string => !!s)
+    );
     satelliteRegistry.forEachDevice((satelliteId, d, satelliteLabel) => {
+      if (localSerials.has(d.serial)) return;
       out.push({
         path: `satellite:${d.serial}`,
         serialNumber: d.serial,
@@ -395,8 +413,15 @@ class DriverImpl {
     };
     // usb v2 exposes the hotplug EventEmitter under `usb.usb`, not
     // the top-level export. Top-level has Device/findByIds/etc.
-    mods.usb.usb.on("attach", onUsbChange);
-    mods.usb.usb.on("detach", onUsbChange);
+    const usb = mods.usb.usb;
+    usb.on("attach", onUsbChange);
+    usb.on("detach", onUsbChange);
+    // Remember how to detach so dispose() (HMR / teardown) doesn't leave
+    // listeners accumulating on the module-level usb emitter.
+    this.detachHotplug = () => {
+      usb.off("attach", onUsbChange);
+      usb.off("detach", onUsbChange);
+    };
   }
 
   async open(devicePath: string): Promise<StreamDeck | null> {
@@ -465,6 +490,11 @@ class DriverImpl {
   }
 
   async close(devicePath: string): Promise<void> {
+    // Drop the per-key face cache for this device: a closed deck that's
+    // re-plugged comes back BLANK, so the next render of an unchanged face
+    // must actually re-draw instead of being skipped by change-detection
+    // (the "deck stays dark after a re-plug" class of bug).
+    this.invalidateFaceCache(devicePath);
     const handle = this.openHandles.get(devicePath);
     if (!handle) return;
     try {
@@ -578,7 +608,10 @@ class DriverImpl {
         await deck.clearKey(keyIndex);
         this.lastFace.set(ck, sig);
       } catch {
-        /* ignore — leave cache unset so the next attempt retries */
+        // Write failed → the handle is likely dead (cable glitch, deck
+        // dropped without a clean USB detach). Evict it so the next render
+        // opens a fresh handle instead of silently writing into the void.
+        void this.close(devicePath);
       }
       return;
     }
@@ -595,6 +628,10 @@ class DriverImpl {
         keyIndex,
         reason: err instanceof Error ? err.message : String(err),
       });
+      // Dead handle → evict so the next render rebuilds it (otherwise every
+      // subsequent write to this deck keeps failing against the stale handle
+      // until the next listDevices enumeration notices it's gone).
+      void this.close(devicePath);
     }
   }
 
@@ -665,8 +702,16 @@ class DriverImpl {
    * cache so that refetch is fresh.
    */
   notifyDevicesChanged(): void {
+    // Drop the list cache immediately (cheap), but debounce the SSE
+    // "devices-changed" broadcast: a satellite reconnect storm fires one
+    // announce per flap, and each emit makes every open editor refetch
+    // /devices → a fresh HID enumeration. Coalesce into one trailing emit.
     this.devicesCache = null;
-    this.emit({ type: "devices-changed" });
+    if (this.devicesChangedTimer) return;
+    this.devicesChangedTimer = setTimeout(() => {
+      this.devicesChangedTimer = null;
+      this.emit({ type: "devices-changed" });
+    }, 150);
   }
 
   async pushLayout(
@@ -709,6 +754,9 @@ class DriverImpl {
   }
 
   dispose(): void {
+    this.detachHotplug?.();
+    this.detachHotplug = null;
+    this.hotplugBound = false;
     this.satelliteUnsub?.();
     this.satelliteUnsub = null;
     for (const { timer } of this.pendingRenders.values()) {
@@ -726,6 +774,8 @@ class DriverImpl {
     this.openHandles.clear();
     this.listeners.clear();
     this.lastFace.clear();
+    if (this.devicesChangedTimer) clearTimeout(this.devicesChangedTimer);
+    this.devicesChangedTimer = null;
     this.devicesCache = null;
   }
 }

@@ -66,7 +66,7 @@ export function compareSemver(a: string | null, b: string): number {
   return 0;
 }
 
-/** Find the installer asset whose name matches `pattern`. */
+/** Download URL of the installer asset whose name matches `pattern`. */
 export function pickInstaller(
   assets: ReleaseAsset[] | undefined,
   pattern: RegExp
@@ -76,8 +76,27 @@ export function pickInstaller(
 }
 
 /**
+ * Version parsed from the matching installer asset's filename (capture
+ * group 1 of `pattern`, e.g. `Nexus-Cross-Setup-0.1.8.exe` → `0.1.8`).
+ * This — NOT the shared release tag — is THIS app's version, so the
+ * launcher and satellite version independently: a main-app-only release
+ * never flags the satellite as out of date.
+ */
+export function pickInstallerVersion(
+  assets: ReleaseAsset[] | undefined,
+  pattern: RegExp
+): string | null {
+  for (const a of assets || []) {
+    const m = pattern.exec(a.name);
+    if (m) return m[1] ?? null;
+  }
+  return null;
+}
+
+/**
  * Turn a GitHub release payload into an UpdateInfo. `now` is injected so
- * tests stay deterministic.
+ * tests stay deterministic. `assetPattern` MUST capture the version in
+ * group 1 so each app compares against its own installer, not the tag.
  */
 export function buildUpdateInfo(
   raw: ReleasePayload,
@@ -85,13 +104,21 @@ export function buildUpdateInfo(
   assetPattern: RegExp,
   now: number
 ): UpdateInfo {
-  const latestVersion = tagToVersion(raw.tag_name);
+  const installerUrl = pickInstaller(raw.assets, assetPattern);
+  // Prefer the version embedded in our own asset's filename; fall back to
+  // the release tag only for display when no matching asset is present.
+  const latestVersion =
+    pickInstallerVersion(raw.assets, assetPattern) ?? tagToVersion(raw.tag_name);
   return {
-    available: compareSemver(latestVersion, currentVersion) > 0,
+    // Only "available" when our installer is present AND newer than the
+    // running build. No matching asset (a release that predates this
+    // app) → never light the banner with a dead download button.
+    available:
+      installerUrl !== null && compareSemver(latestVersion, currentVersion) > 0,
     currentVersion,
     latestVersion,
     releaseUrl: raw.html_url || null,
-    installerUrl: pickInstaller(raw.assets, assetPattern),
+    installerUrl,
     publishedAt: raw.published_at || null,
     checkedAt: now,
   };

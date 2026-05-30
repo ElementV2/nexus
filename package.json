@@ -8,7 +8,7 @@
     "dev:launcher": "cd launcher && npm run dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint --max-warnings 0",
     "test": "vitest run",
     "test:watch": "vitest",
     "version:check": "node ./scripts/sync-versions.mjs --check",

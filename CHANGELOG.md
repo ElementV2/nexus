@@ -7,9 +7,14 @@ installers per release, both attached to the matching GitHub release:
 - **Nexus-Cross-Setup-&lt;version&gt;.exe** — the Stream Deck satellite
   ("Nexus Cross"), run on another LAN machine that has a deck plugged in.
 
-Versioning is shared: the `version` in `launcher/package.json` drives the
-release tag; `package.json` (web app) and `nexus-cross/package.json` are
-kept in lockstep.
+Versioning: the web app (`package.json`) and the launcher
+(`launcher/package.json`) ship in the same installer and share one
+**main-app** version, which drives the release tag. **`nexus-cross` is
+versioned independently** — bump it only when the satellite changes, so a
+main-app-only release doesn't make Cross users re-download. Each in-app
+updater compares against the version embedded in its own installer asset
+name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
+shared release tag.
 
 ## 0.1.8
 
@@ -40,6 +45,17 @@ kept in lockstep.
   to a local one (including actions that ran on a kind's default).
 - **Load to deck** modal: pick a physical deck + a page, pair and push in
   one step.
+- **Undo / redo** in the editor — `Ctrl/Cmd+Z` undoes, `Ctrl/Cmd+Y`
+  (or `Ctrl/Cmd+Shift+Z`) redoes. History is per-page and coalesces a
+  burst of rapid edits into one step.
+- **Clearing a key is now the Delete key** (select a key, press Delete),
+  not right-click — a stray right-click no longer wipes a shortcut. The
+  inspector's Clear button still clears too.
+- **One page → many decks.** A layout can now be loaded onto several
+  decks at once, local or across satellites (e.g. the same page on 15
+  satellite decks). Each deck still shows exactly one page; loading a page
+  onto a deck moves that deck off whatever page it showed before. The
+  pages rail shows a `×N` badge and an online count.
 
 ### Nexus Cross (Stream Deck satellite) — new
 - Run a Stream Deck on a different machine than the one hosting Nexus.
@@ -69,13 +85,60 @@ kept in lockstep.
   `version:check` keep the three `package.json` *and* their
   `package-lock.json` versions aligned (a recurring `npm ci` foot-gun
   at release time).
-- **Updater dedup** — shared, unit-tested release-parsing core between
-  the launcher and satellite.
+- **Updater dedup** — a unit-tested release-parsing core kept byte-identical
+  between the launcher and satellite (each Electron app is a standalone TS
+  project, so the file is duplicated-but-identical rather than imported).
 - **Large-page decomposition** — the OBS and Stream Deck pages were
   split into focused colocated components (behaviour unchanged).
 - Satellite HID failures are now logged; the launcher validates the
   configured port before restarting the server; the satellite respects
   an explicit `:443`/`:80` proxy port instead of forcing `:9088`.
+
+### Fixes
+- **Tally feedback: PROGRAM now wins over PREVIEW.** An input that's live
+  (on PGM) stays red on a preview button even when it's also queued on
+  PVW — live is the priority signal. Applies to vMix cut/preview and OBS
+  program/preview-scene buttons.
+- **Removed the redundant white feedback badge** (the small square in a
+  key's top-right). It only ever duplicated the background-colour tally;
+  meaningful coloured badges (studio mode, etc.) stay.
+- **Stream Deck: a deck re-plugged after being unplugged (or moved to a
+  satellite and back) renders again.** The driver now closes the HID
+  handle when a deck disappears, so re-plugging on the same USB port
+  opens a fresh handle instead of reusing a dead one (renders had
+  silently no-op'd). `listDevices` also de-dupes by serial, preferring a
+  locally-plugged deck over a stale satellite still advertising it.
+- **Stream Deck: loading a page onto a deck now unpairs the previous
+  page from that device.** Two pages could both claim one deck's serial,
+  so the deck showed the new page's keys but fired the OLD page's
+  shortcuts. A serial now maps to exactly one page.
+- **Independent satellite versioning** — the updater reads each app's
+  version from its own installer asset name, so a main-app release no
+  longer shows a phantom "update available" on Nexus Cross (and the
+  Download button only appears when a matching installer actually
+  exists).
+- **Nexus Cross settings**: separate IP and Port fields (no more typing
+  `http://…`); the "Label" field is now "Name (on network)".
+
+### Performance &amp; stability (broadcast hardening)
+- **Stream Deck store is cached** (mtime-gated) — the feedback coordinator
+  no longer does a synchronous disk read + JSON parse on every variable
+  tick, freeing the event loop on the tally hot path.
+- **OBS socket identity guard** — editing an OBS connection's host/port no
+  longer lets the old socket's late `close` orphan the new one (which made
+  commands silently fail and spawned a phantom reconnect).
+- **Dead satellites are reaped** — a satellite that drops off the LAN is
+  now removed after ~3 missed heartbeats instead of lingering forever and
+  buffering renders nobody drains.
+- **OBS thumbnails share one rate-capped scheduler** — a big scene grid no
+  longer fires 15–30 screenshot requests/sec at OBS's encoder; requests
+  are sequential, round-robin, and capped.
+- **SSE reconnects use jittered backoff** and the variables stream now
+  tears down on a hidden tab — no more lockstep reconnect storm after a
+  server blip. Satellite SSE has bounded backpressure.
+- **HID hardening** — a dead deck handle is evicted on write failure and
+  the face cache is dropped on close, so a re-plugged deck redraws; USB
+  hotplug listeners are removed on teardown.
 
 ## 0.1.7
 - Launcher: separate path resolution from the route handlers (cleaner

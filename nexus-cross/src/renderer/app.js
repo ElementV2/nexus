@@ -7,7 +7,8 @@ const api = window.cross;
 
 const $ = (id) => document.getElementById(id);
 const stateEl = $("state");
-const serverEl = $("server");
+const ipEl = $("ip");
+const portEl = $("port");
 const labelEl = $("label");
 const saveEl = $("save");
 const hintEl = $("hint");
@@ -18,6 +19,25 @@ const updateTextEl = $("update-text");
 const updateBtnEl = $("update-btn");
 
 let updateUrl = null;
+
+// The settings store a full base URL (http://host:port); the UI shows a
+// bare IP + port so the operator never deals with the scheme.
+function splitServer(url) {
+  if (!url) return { ip: "", port: "" };
+  try {
+    const u = new URL(url);
+    return { ip: u.hostname, port: u.port || "" };
+  } catch {
+    return { ip: url, port: "" };
+  }
+}
+
+function composeServer(ip, port) {
+  const host = (ip || "").trim();
+  const p = (port || "").trim();
+  if (!host) return "";
+  return p ? `${host}:${p}` : host;
+}
 
 function renderState(status) {
   if (!status || !status.running) {
@@ -77,7 +97,9 @@ function render(status) {
 async function init() {
   versionEl.textContent = "v" + (await api.getVersion());
   const settings = await api.getSettings();
-  serverEl.value = settings.serverUrl || "";
+  const { ip, port } = splitServer(settings.serverUrl || "");
+  ipEl.value = ip;
+  portEl.value = port;
   labelEl.value = settings.label || "";
   render(await api.getStatus());
 
@@ -98,20 +120,24 @@ function showUpdate(info) {
 saveEl.addEventListener("click", async () => {
   hintEl.textContent = "Connecting…";
   const saved = await api.setSettings({
-    serverUrl: serverEl.value,
+    serverUrl: composeServer(ipEl.value, portEl.value),
     label: labelEl.value,
   });
-  // Show the normalised URL (scheme + :9088 added) so it's clear the
-  // bare IP was expanded to a reachable address.
+  // Reflect the normalised result (default :9088 added when no port was
+  // given) back into the bare IP + port fields.
   if (saved && typeof saved.serverUrl === "string") {
-    serverEl.value = saved.serverUrl;
+    const { ip, port } = splitServer(saved.serverUrl);
+    ipEl.value = ip;
+    portEl.value = port;
   }
   hintEl.textContent = "Saved.";
 });
 
-serverEl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") saveEl.click();
-});
+for (const el of [ipEl, portEl, labelEl]) {
+  el.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") saveEl.click();
+  });
+}
 
 updateBtnEl.addEventListener("click", () => {
   if (updateUrl) api.openExternal(updateUrl);

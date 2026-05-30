@@ -86,6 +86,7 @@ export class HidManager {
   private keyListener: ((e: KeyEvent) => void) | null = null;
   private deviceChangeListener: (() => void) | null = null;
   private rescanTimer: NodeJS.Timeout | null = null;
+  private detachHotplug: (() => void) | null = null;
   // Decks that enumeration found but we couldn't open — almost always
   // because another process on this machine already owns them (the main
   // Nexus app, or Elgato's software). Surfaced in the status so the UI
@@ -323,9 +324,23 @@ export class HidManager {
     };
     usb.on("attach", schedule);
     usb.on("detach", schedule);
+    // The agent creates a fresh HidManager on every settings change
+    // (server-URL edit) — without detaching, each old manager's hotplug
+    // listeners stay registered on the module-level usb emitter and pile
+    // up, firing N duplicate rescans per plug. Remember how to remove them.
+    this.detachHotplug = () => {
+      usb.off("attach", schedule);
+      usb.off("detach", schedule);
+    };
   }
 
   async dispose(): Promise<void> {
+    this.detachHotplug?.();
+    this.detachHotplug = null;
+    if (this.rescanTimer) {
+      clearTimeout(this.rescanTimer);
+      this.rescanTimer = null;
+    }
     for (const open of this.decks.values()) {
       for (const t of open.pending.values()) clearTimeout(t);
       try {

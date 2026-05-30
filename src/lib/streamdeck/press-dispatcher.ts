@@ -33,8 +33,9 @@ class PressDispatcherImpl {
       // here it runs at most once per press regardless of how many
       // SSE consumers are connected.
       const store = getStreamdeckStore();
-      const layout = store.layouts.find(
-        (l) => l.deviceSerial === event.serialNumber
+      const serial = event.serialNumber;
+      const layout = store.layouts.find((l) =>
+        l.deviceSerials.includes(serial)
       );
       const binding = layout?.bindings[event.keyIndex];
       if (!binding) return;

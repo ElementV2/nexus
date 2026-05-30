@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useSSE } from "./use-sse";
 
 /**
  * Subscribe to the server-side variable bus via SSE. Returns a
@@ -28,54 +29,41 @@ interface VariableEntry {
 export function useVariables(): VariablesByConnection {
   const [vars, setVars] = useState<VariablesByConnection>({});
 
-  useEffect(() => {
-    let es: EventSource | null = null;
-    let retry: ReturnType<typeof setTimeout> | null = null;
-
-    const open = () => {
-      es = new EventSource("/api/variables/events");
-      es.onmessage = (e) => {
-        let msg: { type?: string; entries?: VariableEntry[] } & VariableEntry;
-        try {
-          msg = JSON.parse(e.data);
-        } catch {
-          return;
+  // Route through the shared useSSE scaffolding so this stream gets the
+  // same visibility-teardown + jitter/backoff reconnect as every other SSE
+  // consumer — it used to hand-roll its own EventSource with a fixed
+  // 1500 ms retry and no tab-hidden teardown, the one stream that stayed
+  // open on a hidden tab and reconnected in lockstep after a server blip.
+  const onMessage = useCallback((e: MessageEvent) => {
+    let msg: { type?: string; entries?: VariableEntry[] } & VariableEntry;
+    try {
+      msg = JSON.parse(e.data);
+    } catch {
+      return;
+    }
+    if (msg.type === "__hydrate" && Array.isArray(msg.entries)) {
+      const entries = msg.entries;
+      setVars(() => {
+        const next: VariablesByConnection = {};
+        for (const entry of entries) {
+          if (!next[entry.connectionId]) next[entry.connectionId] = {};
+          next[entry.connectionId][entry.varId] = entry.value;
         }
-        if (msg.type === "__hydrate" && Array.isArray(msg.entries)) {
-          // Full snapshot — rebuild the lookup in one go.
-          setVars(() => {
-            const next: VariablesByConnection = {};
-            for (const entry of msg.entries!) {
-              if (!next[entry.connectionId]) next[entry.connectionId] = {};
-              next[entry.connectionId][entry.varId] = entry.value;
-            }
-            return next;
-          });
-          return;
-        }
-        if (msg.type === "change" && msg.connectionId && msg.varId) {
-          setVars((cur) => ({
-            ...cur,
-            [msg.connectionId]: {
-              ...(cur[msg.connectionId] ?? {}),
-              [msg.varId]: msg.value,
-            },
-          }));
-        }
-      };
-      es.onerror = () => {
-        if (es?.readyState === EventSource.CLOSED) {
-          retry = setTimeout(open, 1500);
-        }
-      };
-    };
-
-    open();
-    return () => {
-      if (retry) clearTimeout(retry);
-      es?.close();
-    };
+        return next;
+      });
+      return;
+    }
+    if (msg.type === "change" && msg.connectionId && msg.varId) {
+      setVars((cur) => ({
+        ...cur,
+        [msg.connectionId]: {
+          ...(cur[msg.connectionId] ?? {}),
+          [msg.varId]: msg.value,
+        },
+      }));
+    }
   }, []);
 
+  useSSE("/api/variables/events", onMessage);
   return vars;
 }

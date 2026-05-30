@@ -1,7 +1,6 @@
 "use client";
 
 import { memo } from "react";
-import { Trash2 } from "lucide-react";
 import type { DeckBinding } from "@/lib/db/streamdeck";
 import type { FeedbackOverride } from "@/lib/streamdeck/feedback";
 import type { FireState } from "./types";
@@ -18,7 +17,6 @@ interface DeckKeyProps {
   onDragOver: (i: number, e: React.DragEvent) => void;
   onDragLeave: (i: number) => void;
   onDrop: (i: number, e: React.DragEvent) => void;
-  onClear: (i: number) => void;
   onSelect: (i: number) => void;
 }
 
@@ -75,7 +73,6 @@ export const DeckKey = memo(function DeckKey({
   onDragOver,
   onDragLeave,
   onDrop,
-  onClear,
   onSelect,
 }: DeckKeyProps) {
   const isFiring = fire.kind === "running" && fire.keyIndex === index;
@@ -130,13 +127,13 @@ export const DeckKey = memo(function DeckKey({
       onDragLeave={() => onDragLeave(index)}
       onDrop={(e) => onDrop(index, e)}
       onClick={() => onSelect(index)}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        if (binding) onClear(index);
-      }}
+      // Suppress the native context menu, but DON'T clear on right-click —
+      // clearing is the Delete key (or the inspector's Clear button) so a
+      // stray right-click never wipes a shortcut.
+      onContextMenu={(e) => e.preventDefault()}
       title={
         binding
-          ? `${binding.preset.kind}:${binding.preset.id}\nClick: select for editing\nDrag: move / swap\nRight click: clear`
+          ? `${binding.preset.kind}:${binding.preset.id}\nClick: select for editing\nDrag: move / swap\nDelete: clear`
           : `Key ${index} — drop a preset here, click to select`
       }
       className="relative flex flex-col items-center justify-center text-center overflow-hidden"
@@ -221,34 +218,6 @@ export const DeckKey = memo(function DeckKey({
         >
           {hovered ? "drop" : String(index + 1).padStart(2, "0")}
         </span>
-      )}
-      {binding && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onClear(index);
-          }}
-          title="Clear key"
-          style={{
-            position: "absolute",
-            top: 2,
-            right: 2,
-            width: 14,
-            height: 14,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "rgba(0,0,0,0.4)",
-            color: "rgba(255,255,255,0.7)",
-            border: 0,
-            cursor: "pointer",
-            opacity: 0,
-            transition: "opacity 120ms",
-          }}
-          className="hover:!opacity-100"
-        >
-          <Trash2 size={9} />
-        </button>
       )}
     </div>
   );

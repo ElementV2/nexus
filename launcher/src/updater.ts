@@ -8,8 +8,9 @@ export type { UpdateInfo } from "./update-core";
 // only this constant needs to change.
 const REPO = "ElementV2/nexus";
 const API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
-// The launcher watches for the main app installer asset.
-const ASSET_RE = /^Nexus-Setup-.+\.exe$/i;
+// The launcher watches for the main app installer asset. Capture group 1
+// = the main app's version: `Nexus-Setup-0.1.8.exe` → `0.1.8`.
+const ASSET_RE = /^Nexus-Setup-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\.exe$/i;
 const USER_AGENT = "Nexus-Launcher";
 
 // Re-check every 6 hours after the initial check. Long enough to avoid

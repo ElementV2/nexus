@@ -1,12 +1,15 @@
 # Nexus
 
-> Browser-based, LAN-first remote controller for [vMix](https://www.vmix.com/).
+> Browser-based, LAN-first control surface for live production —
+> [vMix](https://www.vmix.com/), OBS, Ableton Live, Behringer X32,
+> grandMA2/3, and Stream Decks, from one operator UI.
 
 Nexus is a Next.js + Electron application that exposes a full operator
-UI for vMix on any device on the local network. Run the launcher on
-the same PC as vMix, open the printed LAN URL on a phone, tablet, or
-second machine, and you have a clean touch-friendly control surface
-for live production — no extra hardware required.
+UI for your production devices on any machine on the local network. Run
+the launcher on a PC, open the printed LAN URL on a phone, tablet, or
+second machine, and you have a clean touch-friendly control surface for
+live production — plus a Stream Deck layout editor that drives local or
+remote (satellite) decks. No extra hardware required.
 
 The launcher itself is a small Electron window that boots a local web
 server. The web app is the actual UI; the launcher just gives you the
@@ -17,9 +20,15 @@ LAN URL, a port picker, and a logs viewer.
 ## Highlights
 
 - **Multi-page operator UI** — Live (PGM/PVW routing + transition
-  picker), Replay (transport + channels + events + marks), Audio,
-  Playlist, Titles, Web Assets, Colorimetry, Network, Ableton, Timers,
-  Live preview, Dashboard.
+  picker), OBS (scenes/audio/media/filters), Stream Deck editor, Replay
+  (transport + channels + events + marks), Audio, Playlist, Titles, Web
+  Assets, Colorimetry, Network, Ableton, Timers, Live preview, Dashboard.
+- **Multi-device, multi-instance** — several vMix / OBS / Ableton / X32 /
+  grandMA connections at once, each on its own broker, with a default
+  per kind.
+- **Stream Deck surfaces** — a drag-and-drop layout editor; one page can
+  drive many decks, local or on remote machines via the nexus-cross
+  satellite; live tally/feedback on the keys.
 - **LAN-first** — bind the server to a specific interface or all
   interfaces; share the URL with co-operators on the same network.
 - **Touch-friendly** — designed for tablets sitting on FOH consoles;
@@ -167,70 +176,93 @@ banner links straight to the new `.exe` for a manual upgrade
 
 ```
 .
-├── src/                     # Next.js web app
+├── src/                     # Next.js web app + LAN server
 │   ├── app/
 │   │   ├── (app)/           # Operator pages
-│   │   │   ├── live/        # PGM / PVW routing + transition picker
-│   │   │   ├── replay/      # Replay transport, channels, events, marks
-│   │   │   ├── audio/       # Bus matrix, master strip, meters
-│   │   │   ├── playlist/    # Output buttons + transitions
-│   │   │   ├── titles/      # Title input editor
-│   │   │   ├── web-assets/  # In-browser title editor (text / images)
-│   │   │   ├── colorimetry/ # Per-input color correction
-│   │   │   ├── network/     # vMix + Ableton connection panels
-│   │   │   ├── ableton/     # Clip launcher + transport (OSC)
-│   │   │   ├── timers/      # Countdown / countup timers on overlays
-│   │   │   ├── live-preview/# Compact MPEG-TS viewer
-│   │   │   ├── dashboard/   # Multi-pane overview
-│   │   │   └── debug-xml/   # Raw vMix XML inspector
-│   │   ├── api/             # Next.js route handlers (vMix proxy, etc.)
+│   │   │   ├── live/        # PGM / PVW routing + transition picker (vMix)
+│   │   │   ├── obs/          # OBS scenes, audio, media, filters, stats
+│   │   │   ├── streamdeck/   # Stream Deck layout editor (drag presets → keys)
+│   │   │   ├── replay/       # Replay transport, channels, events, marks
+│   │   │   ├── audio/        # Bus matrix, master strip, meters
+│   │   │   ├── playlist/     # List / output buttons + transitions
+│   │   │   ├── titles/       # Title input editor
+│   │   │   ├── web-assets/   # In-browser title editor (text / images)
+│   │   │   ├── colorimetry/  # Per-input color correction
+│   │   │   ├── network/      # Connections panel + LAN device scanner
+│   │   │   ├── ableton/      # Clip launcher + transport (OSC)
+│   │   │   ├── timers/       # Countdown / countup timers on overlays
+│   │   │   ├── live-preview/ # Compact MPEG-TS viewer
+│   │   │   ├── dashboard/    # Multi-pane overview
+│   │   │   └── debug-xml/    # Raw vMix XML inspector
+│   │   ├── api/             # Route handlers:
+│   │   │                    #   connections/:id (command + SSE events),
+│   │   │                    #   streamdeck (devices, push, satellite, events),
+│   │   │                    #   actions, bindings, presets, variables,
+│   │   │                    #   overlays, web-assets, network, stream
 │   │   └── layout.tsx
 │   ├── components/          # Reusable UI (sw = Swiss design system)
-│   ├── stores/              # Zustand stores (vmix, ableton, …)
-│   ├── hooks/               # use-vmix-command, useOptimisticValue, …
+│   ├── stores/              # Zustand stores (vmix, obs, ableton, overlay…)
+│   ├── hooks/               # use-connections, use-variables, use-sse, …
 │   ├── lib/
-│   │   ├── vmix/            # Command builders + XML parser
-│   │   ├── ableton/         # OSC broker + API
-│   │   └── db/              # JSON data store (preferences, overlays)
+│   │   ├── core/            # Device-kind registry, per-instance broker
+│   │   │                    #   adapter, connection manager, variable bus
+│   │   ├── kinds/           # One file per device kind (vmix, obs, ableton,
+│   │   │                    #   x32, grandma2/3) — registered into core
+│   │   ├── vmix/ obs/ ableton/ x32/ grandma3/ osc/  # per-kind brokers
+│   │   ├── streamdeck/      # HID driver, feedback coordinator, press
+│   │   │                    #   dispatcher, satellite registry
+│   │   └── db/              # JSON data store (preferences, layouts, overlays)
 │   └── styles/              # Tokens + components.css
 │
-├── launcher/                # Electron desktop wrapper
-│   ├── src/
-│   │   ├── main.ts          # Window, tray, IPC, lifecycle
-│   │   ├── preload.ts       # Bridges IPC to the renderer
-│   │   ├── server-manager.ts# Spawns the Next.js standalone / dev server
-│   │   ├── prefs.ts         # Shared launcher.json + preferences.json
-│   │   ├── updater.ts       # GitHub releases polling + version compare
-│   │   └── renderer/        # Swiss-style status window
-│   ├── scripts/             # Build glue (install binary, copy renderer)
-│   └── resources/icon.ico
-│
-├── public/downloads/        # Where the built installer is copied
-├── .github/workflows/       # CI: release.yml
+├── launcher/                # Electron desktop wrapper — main app installer
+│   └── src/                 # main.ts, preload.ts, server-manager.ts,
+│                            #   update-core.ts, updater.ts, renderer/
+├── nexus-cross/             # Electron Stream Deck satellite — 2nd installer
+│   └── src/                 # agent.ts, hid.ts, key-image.ts,
+│                            #   server-client.ts, update-core.ts, renderer/
+├── tests/                   # Vitest (OSC codec, URL + version helpers, …)
+├── scripts/                 # sync-versions.mjs, copy-renderer.mjs (shared)
+├── public/downloads/        # Where the built installers are copied
+├── .github/workflows/       # CI: checks.yml (gate) · ci.yml (PR) · release.yml
 └── README.md
 ```
 
-### Data flow (web ↔ vMix)
+### Architecture: device kinds + per-instance brokers
 
-1. The web app polls vMix's HTTP API (`http://<host>:8088/api`) every
-   ~150 ms (configurable on the Network page).
-2. XML response is parsed in `src/lib/vmix/` into a normalized store
-   shape (Zustand).
+Every device type (vMix, OBS, Ableton, X32, grandMA2/3) is a **kind
+plugin**: `src/lib/kinds/<kind>.ts` implements the `DeviceKind` contract
+(config validation, actions, variables, broker factory) and registers
+itself into `src/lib/core`. Each saved **connection** gets its own
+**broker instance** (one transport — HTTP poll / WebSocket / UDP socket —
+per connection), so several vMix machines or OBS instances run side by
+side. Brokers publish state onto a shared **variable bus**; the UI and the
+Stream Deck feedback layer both read from it.
+
+### Data flow (UI ↔ a device)
+
+1. A broker maintains the live link to its device — vMix HTTP polling
+   (~150 ms, configurable), an OBS WebSocket, or an Ableton/X32/grandMA
+   UDP socket — and normalizes state into a Zustand store + the variable
+   bus.
+2. The browser streams that state over **Server-Sent Events** from
+   `/api/connections/:id/events` (one EventSource per stream, shared
+   across consumers, paused on a hidden tab).
 3. UI subscribes via narrow selectors — pages re-render only when the
    slice they care about changes.
-4. User actions call `useVmixCommand()` which builds the command URL
-   (`/api?Function=…&Input=…`) and fires HTTP GET via a Next.js
-   route handler proxy (so the browser doesn't need direct network
-   access to vMix).
+4. Actions `POST /api/connections/:id/command`; the server routes to the
+   matching broker, which builds the device command (vMix URL, OBS
+   request, OSC message) — the browser never talks to devices directly.
 
-### Data flow (Ableton bridge)
+### Data flow (Stream Deck)
 
-1. AbletonOSC listens on UDP `11000` and sends back on `11001`.
-2. The Next.js server holds a single OSC broker
-   (`src/lib/ableton/osc-broker.ts`) that owns one socket pair
-   regardless of how many browser tabs are open.
-3. Browser tabs stream Ableton state via Server-Sent Events from the
-   broker; commands go HTTP POST → broker → OSC out.
+1. Layouts persist in `streamdeck.json`; each can be paired to several
+   physical decks (`deviceSerials`), local or via a nexus-cross satellite.
+2. A single server-side **feedback coordinator** watches the variable bus
+   and re-renders changed keys (per-key debounce + change-detection); a
+   single **press dispatcher** turns one physical press into one preset
+   run regardless of how many browsers are open.
+3. Remote decks bridge through a **satellite**: it announces its decks,
+   receives slim render payloads over SSE, and forwards presses back.
 
 ### State persistence
 

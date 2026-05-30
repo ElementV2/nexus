@@ -19,6 +19,12 @@
 
 import { hmrSingleton } from "@/lib/utils/hmr-singleton";
 
+// A connected satellite is touch()ed by its 25 s SSE keepalive, so reaping
+// after ~3 missed heartbeats cleanly distinguishes "gone" from "idle".
+const HEARTBEAT_MS = 25_000;
+const STALE_MS = HEARTBEAT_MS * 3;
+const SWEEP_MS = 30_000;
+
 /**
  * Slim render payload sent to a satellite. The satellite only needs
  * the visual fields to compose the key image — NOT the full binding
@@ -110,6 +116,27 @@ class SatelliteRegistryImpl {
       type: "down" | "up";
     }) => void
   >();
+  private sweepTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor() {
+    // Reap satellites that have gone silent (laptop closed, agent killed,
+    // LAN drop). Without this they linger forever: their decks keep being
+    // advertised by the driver's listDevices() and the coordinator keeps
+    // buffering renders into a writer nobody drains, while serialOwner +
+    // the satellites map grow across a long broadcast. The driver's 1 s
+    // device-list TTL naturally drops a reaped satellite's decks.
+    this.sweepTimer = setInterval(() => this.sweepStale(), SWEEP_MS);
+    this.sweepTimer.unref?.();
+  }
+
+  private sweepStale(): void {
+    const now = Date.now();
+    const dead: string[] = [];
+    for (const [id, entry] of this.satellites) {
+      if (now - entry.lastSeenTs > STALE_MS) dead.push(id);
+    }
+    for (const id of dead) this.remove(id);
+  }
 
   /**
    * Called by the announce route. (Re-)registers a satellite with
@@ -331,6 +358,8 @@ class SatelliteRegistryImpl {
   }
 
   dispose(): void {
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
+    this.sweepTimer = null;
     this.satellites.clear();
     this.serialOwner.clear();
     this.pressListeners.clear();

@@ -72,19 +72,25 @@ on first subscriber. See an existing kind (e.g. `x32.ts`) as a template.
 
 ## Versioning & releasing
 
-The version is shared across all three packages; `launcher/package.json`
-is the source of truth (it drives the release tag).
+The web app (root) and the launcher ship in one installer and share a
+**main-app** version (`launcher/package.json` is the source of truth and
+drives the release tag). **`nexus-cross` is versioned independently** —
+bump it only when the satellite actually changes, so a main-app-only
+release doesn't make Cross users re-download.
 
-1. Bump the version and propagate it everywhere (package.json **and**
-   lockfiles):
+1. Bump the main app (root + launcher, package.json **and** lockfiles):
    ```bash
-   npm run version:sync 0.2.0      # or edit launcher/package.json, then `npm run version:sync`
+   npm run version:sync 0.2.0      # sets root + launcher to 0.2.0
    ```
+   To bump the satellite instead, edit `nexus-cross/package.json` then run
+   `npm run version:sync` (no arg) to align its lockfile.
 2. Update `CHANGELOG.md`.
 3. Commit and push to `master`.
 
 `release.yml` then runs the quality gate, builds both installers on a
-Windows runner, and publishes a GitHub release tagged `v<version>` with
-both `.exe` files attached — but only if the tag doesn't already exist.
-Each app's in-app updater watches that release for its own installer
-asset.
+Windows runner, and publishes a GitHub release tagged `v<main-version>`
+with both `.exe` files attached — but only if the tag doesn't already
+exist. Each in-app updater compares against the version in its OWN
+installer asset name (`Nexus-Setup-X.Y.Z.exe` /
+`Nexus-Cross-Setup-X.Y.Z.exe`), so the satellite never shows a phantom
+update when only the main app changed.

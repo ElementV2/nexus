@@ -32,46 +32,59 @@ export async function GET(req: NextRequest) {
   let detach: (() => void) | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
 
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      const safeEnqueue = (chunk: string): boolean => {
-        try {
-          controller.enqueue(encoder.encode(chunk));
-          return true;
-        } catch {
-          cleanup();
-          return false;
-        }
-      };
-      const cleanup = () => {
-        if (heartbeat) {
-          clearInterval(heartbeat);
-          heartbeat = null;
-        }
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      start(controller) {
+        const cleanup = () => {
+          if (heartbeat) {
+            clearInterval(heartbeat);
+            heartbeat = null;
+          }
+          detach?.();
+          detach = null;
+        };
+        const safeEnqueue = (chunk: string): boolean => {
+          try {
+            // Backpressure guard: with the 64-frame high-water mark below,
+            // desiredSize only drops to ≤0 when a satellite's socket is
+            // genuinely stuck (congested LAN) and ~64 frames are already
+            // queued. Drop further frames instead of growing server memory
+            // unboundedly — render frames self-heal on the next coordinator
+            // walk, keepalives are disposable. A healthy-but-not-instant
+            // socket keeps headroom and never trips this.
+            if (controller.desiredSize !== null && controller.desiredSize <= 0) {
+              return false;
+            }
+            controller.enqueue(encoder.encode(chunk));
+            return true;
+          } catch {
+            cleanup();
+            return false;
+          }
+        };
+
+        safeEnqueue(": connected\n\n");
+
+        // Attach the writer — the registry flushes any buffered
+        // messages immediately and follows up with a `hello`.
+        detach = satelliteRegistry.attachWriter(id, (msg) => {
+          safeEnqueue(`data: ${JSON.stringify(msg)}\n\n`);
+        });
+
+        heartbeat = setInterval(() => {
+          satelliteRegistry.touch(id);
+          safeEnqueue(": ping\n\n");
+        }, 25_000);
+      },
+      cancel() {
+        if (heartbeat) clearInterval(heartbeat);
+        heartbeat = null;
         detach?.();
         detach = null;
-      };
-
-      safeEnqueue(": connected\n\n");
-
-      // Attach the writer — the registry flushes any buffered
-      // messages immediately and follows up with a `hello`.
-      detach = satelliteRegistry.attachWriter(id, (msg) => {
-        safeEnqueue(`data: ${JSON.stringify(msg)}\n\n`);
-      });
-
-      heartbeat = setInterval(() => {
-        satelliteRegistry.touch(id);
-        safeEnqueue(": ping\n\n");
-      }, 25_000);
+      },
     },
-    cancel() {
-      if (heartbeat) clearInterval(heartbeat);
-      heartbeat = null;
-      detach?.();
-      detach = null;
-    },
-  });
+    new CountQueuingStrategy({ highWaterMark: 64 })
+  );
 
   return new Response(stream, {
     headers: {

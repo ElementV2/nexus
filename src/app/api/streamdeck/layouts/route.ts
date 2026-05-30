@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   DECK_GEOMETRIES,
   getStreamdeckStore,
+  normalizeLayout,
   removeLayout,
   upsertLayout,
   type DeckLayout,
@@ -43,19 +44,19 @@ export async function PUT(req: NextRequest) {
       { status: 400 }
     );
   }
-  const cleaned: DeckLayout = {
+  // normalizeLayout coerces pairing into `deviceSerials: string[]` and
+  // migrates a legacy single `deviceSerial` from older clients.
+  const cleaned = normalizeLayout({
     id: l.id,
     model: l.model,
     label: typeof l.label === "string" && l.label.trim() ? l.label : l.id,
-    deviceSerial:
-      typeof l.deviceSerial === "string" && l.deviceSerial.trim()
-        ? l.deviceSerial
-        : undefined,
+    deviceSerials: Array.isArray(l.deviceSerials) ? l.deviceSerials : [],
+    deviceSerial: (l as { deviceSerial?: string }).deviceSerial,
     bindings:
       l.bindings && typeof l.bindings === "object"
         ? (l.bindings as DeckLayout["bindings"])
         : {},
-  };
+  } as DeckLayout);
   const next = upsertLayout(cleaned);
   return NextResponse.json({ ok: true, store: next });
 }

@@ -533,7 +533,48 @@ function ListItemCardImpl({ input }: ListItemCardProps) {
   );
 }
 
-export const ListItemCard = memo(ListItemCardImpl);
+/**
+ * The vMix poll rebuilds `inputs` every ~150 ms, handing each card a fresh
+ * `input` object reference, so the default memo would re-render every card
+ * every tick. Compare the fields the card actually renders instead — note
+ * this INCLUDES the live ones (`meterF1/2`, `position`): when they change
+ * we DO re-render (the VU + progress must stay live), but an idle list
+ * input whose data is byte-identical this tick skips the re-render.
+ */
+function listInputEqual(
+  a: ListItemCardProps,
+  b: ListItemCardProps
+): boolean {
+  const x = a.input;
+  const y = b.input;
+  if (
+    x.number !== y.number ||
+    x.title !== y.title ||
+    x.state !== y.state ||
+    x.type !== y.type ||
+    x.duration !== y.duration ||
+    x.position !== y.position ||
+    x.selectedIndex !== y.selectedIndex ||
+    x.muted !== y.muted ||
+    x.hasAudio !== y.hasAudio ||
+    x.audioBusses !== y.audioBusses ||
+    x.meterF1 !== y.meterF1 ||
+    x.meterF2 !== y.meterF2
+  ) {
+    return false;
+  }
+  const xi = x.items ?? [];
+  const yi = y.items ?? [];
+  if (xi.length !== yi.length) return false;
+  for (let i = 0; i < xi.length; i++) {
+    if (xi[i].source !== yi[i].source || xi[i].selected !== yi[i].selected) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export const ListItemCard = memo(ListItemCardImpl, listInputEqual);
 
 function ListNavButton({
   children,

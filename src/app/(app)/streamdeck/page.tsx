@@ -44,6 +44,76 @@ export default function StreamdeckPage() {
   draftRef.current = draft;
   const [dirty, setDirty] = useState(false);
   const [fire, setFire] = useState<FireState>({ kind: "idle" });
+
+  // ── Undo / redo history (Ctrl+Z / Ctrl+Y) ────────────────────────────
+  // Snapshots of the edited page. `past` holds states BEFORE each edit
+  // burst, `future` holds undone states for redo. A "burst" coalesces a
+  // run of rapid edits (e.g. typing in the inspector) into ONE undo step:
+  // only the first edit of a burst pushes a snapshot; the burst ends when
+  // the debounced save lands. History is per-page — reset on page switch.
+  const past = useRef<DeckLayout[]>([]);
+  const future = useRef<DeckLayout[]>([]);
+  const editBurstActive = useRef(false);
+
+  const snapshotLayout = (l: DeckLayout): DeckLayout => structuredClone(l);
+
+  // Call at the START of every user edit, before mutating the draft.
+  const beginEdit = useCallback(() => {
+    const cur = draftRef.current;
+    if (!cur || editBurstActive.current) return;
+    past.current.push(snapshotLayout(cur));
+    if (past.current.length > 100) past.current.shift();
+    future.current = [];
+    editBurstActive.current = true;
+  }, []);
+
+  const resetHistory = useCallback(() => {
+    past.current = [];
+    future.current = [];
+    editBurstActive.current = false;
+  }, []);
+
+  // Apply a historical snapshot as the new draft, persist it, and
+  // re-render the whole page to every paired deck (pushLayout renders
+  // every key index, clearing ones whose binding was undone).
+  const applyHistory = useCallback((layout: DeckLayout) => {
+    setDraft(layout);
+    setData((cur) =>
+      cur
+        ? {
+            ...cur,
+            layouts: cur.layouts.map((l) => (l.id === layout.id ? layout : l)),
+          }
+        : cur
+    );
+    setDirty(true);
+    editBurstActive.current = false;
+    if (layout.deviceSerials.length > 0) {
+      void fetch("/api/streamdeck/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ layoutId: layout.id }),
+      }).catch(() => {});
+    }
+  }, []);
+
+  const undo = useCallback(() => {
+    const cur = draftRef.current;
+    if (!cur) return;
+    const prev = past.current.pop();
+    if (!prev) return;
+    future.current.push(snapshotLayout(cur));
+    applyHistory(prev);
+  }, [applyHistory]);
+
+  const redo = useCallback(() => {
+    const cur = draftRef.current;
+    if (!cur) return;
+    const next = future.current.pop();
+    if (!next) return;
+    past.current.push(snapshotLayout(cur));
+    applyHistory(next);
+  }, [applyHistory]);
   const [hoverKey, setHoverKey] = useState<number | null>(null);
   // Editor selection — single-click on a bound key selects it and
   // pops the right sidebar to its inspector tab. Hardware press
@@ -55,9 +125,9 @@ export default function StreamdeckPage() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Hardware state — driver status + detected devices.
-  // Note: there's no longer an "active device" picker — pairing
-  // lives on the layout itself (`draft.deviceSerial`), so the device
-  // a render targets is implicit from the layout being edited.
+  // Note: there's no longer an "active device" picker — pairing lives on
+  // the layout itself (`draft.deviceSerials`), which can list several
+  // decks, so a render targets every paired deck of the edited layout.
   const [hw, setHw] = useState<DevicesResponse | null>(null);
 
   // Live variables from the bus + the connections registry so the
@@ -153,11 +223,13 @@ export default function StreamdeckPage() {
     if (l) {
       setDraft(l);
       setDirty(false);
+      // Undo history is per-page — start fresh on a real page switch.
+      resetHistory();
       // Drop the selection on layout switch — the selected key index
       // doesn't carry meaning across layouts.
       setSelectedKey(null);
     }
-  }, [selectedId, data]);
+  }, [selectedId, data, resetHistory]);
 
   // When a key is selected, auto-switch the sidebar to the inspector
   // tab so the editor jumps into context. Deselecting doesn't force
@@ -214,7 +286,7 @@ export default function StreamdeckPage() {
   // the immediate push and the 400 ms debounced save.
   const flushPendingPushes = useCallback(() => {
     const draft = draftRef.current;
-    if (!draft || !draft.deviceSerial) {
+    if (!draft || draft.deviceSerials.length === 0) {
       pendingKeys.current.clear();
       return;
     }
@@ -253,10 +325,14 @@ export default function StreamdeckPage() {
   const setPairedDevice = useCallback(
     async (serial: string | null) => {
       if (!draft) return;
-      const next: DeckLayout = {
-        ...draft,
-        deviceSerial: serial ?? undefined,
-      };
+      // Add the serial to this layout's deck set (a layout can drive
+      // several decks). `null` clears all pairings.
+      const deviceSerials = serial
+        ? draft.deviceSerials.includes(serial)
+          ? draft.deviceSerials
+          : [...draft.deviceSerials, serial]
+        : [];
+      const next: DeckLayout = { ...draft, deviceSerials };
       setDraft(next);
       try {
         const res = await fetch("/api/streamdeck/layouts", {
@@ -295,15 +371,16 @@ export default function StreamdeckPage() {
   // elsewhere — we don't want to steal a device.
   useEffect(() => {
     if (!hw || !draft || !data) return;
-    if (draft.deviceSerial) return;
+    if (draft.deviceSerials.length > 0) return;
     if (hw.devices.length !== 1) return;
     const onlyDev = hw.devices[0];
-    if (!onlyDev.serialNumber) return;
-    const claimed = data.layouts.some(
-      (l) => l.deviceSerial === onlyDev.serialNumber
+    const onlySerial = onlyDev.serialNumber;
+    if (!onlySerial) return;
+    const claimed = data.layouts.some((l) =>
+      l.deviceSerials.includes(onlySerial)
     );
     if (claimed) return;
-    void setPairedDevice(onlyDev.serialNumber);
+    void setPairedDevice(onlySerial);
   }, [hw, draft, data, setPairedDevice]);
 
   // Visible save status for the toolbar chip and for the
@@ -346,6 +423,8 @@ export default function StreamdeckPage() {
             cur ? { ...cur, layouts: json.store.layouts } : cur
           );
           setDirty(false);
+          // Burst committed → the next edit starts a new undo step.
+          editBurstActive.current = false;
           saveAttempt.current = 0;
         } else {
           saveAttempt.current += 1;
@@ -448,6 +527,7 @@ export default function StreamdeckPage() {
             delete nextBindings[sourceIndex];
             nextBindings[targetIndex] = sourceBinding;
           }
+          beginEdit();
           setDraft({ ...draft, bindings: nextBindings });
           setDirty(true);
           // Pass the FRESH binding for each side of the move/swap.
@@ -486,6 +566,7 @@ export default function StreamdeckPage() {
             // Empty key → fresh binding from the dropped preset.
             next = { preset } as DeckBinding;
           }
+          beginEdit();
           setDraft({
             ...draft,
             bindings: {
@@ -500,7 +581,7 @@ export default function StreamdeckPage() {
         /* malformed payload — silently ignore */
       }
     },
-    [queueKeyPush]
+    [queueKeyPush, beginEdit]
   );
 
   const handleClear = useCallback(
@@ -508,14 +589,16 @@ export default function StreamdeckPage() {
       const draft = draftRef.current;
       if (!draft) return;
       const next = { ...draft.bindings };
+      if (!(keyIndex in next)) return; // nothing to clear → no history step
       delete next[keyIndex];
+      beginEdit();
       setDraft({ ...draft, bindings: next });
       setDirty(true);
       queueKeyPush(keyIndex, null);
       // Drop the selection if it pointed to the cleared key.
       setSelectedKey((cur) => (cur === keyIndex ? null : cur));
     },
-    [queueKeyPush]
+    [queueKeyPush, beginEdit]
   );
 
   // Inspector callback: replace a binding's preset payload after the
@@ -526,6 +609,7 @@ export default function StreamdeckPage() {
     (keyIndex: number, nextBinding: DeckBinding) => {
       const draft = draftRef.current;
       if (!draft) return;
+      beginEdit();
       setDraft({
         ...draft,
         bindings: { ...draft.bindings, [keyIndex]: nextBinding },
@@ -533,7 +617,7 @@ export default function StreamdeckPage() {
       setDirty(true);
       queueKeyPush(keyIndex, nextBinding);
     },
-    [queueKeyPush]
+    [queueKeyPush, beginEdit]
   );
 
   // ── Copy / paste a key binding (duplicate shortcuts) ──
@@ -570,14 +654,42 @@ export default function StreamdeckPage() {
   }, []);
   const onKeySelect = useCallback((i: number) => setSelectedKey(i), []);
 
-  // Ctrl/Cmd+C / +V on the selected key — skipped while typing in a
-  // field so it never hijacks normal text copy/paste in the inspector.
+  // Editor keyboard shortcuts — all skipped while typing in a field so
+  // they never hijack normal text editing in the inspector.
+  //   • Ctrl/Cmd + Z          → undo      (Ctrl/Cmd + Shift + Z → redo)
+  //   • Ctrl/Cmd + Y          → redo
+  //   • Delete / Backspace    → clear the selected key (NOT right-click)
+  //   • Ctrl/Cmd + C / V      → copy / paste the selected key
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (selectedKey === null) return;
-      if (!(e.ctrlKey || e.metaKey)) return;
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      // Undo / redo work regardless of whether a key is selected.
+      if (e.ctrlKey || e.metaKey) {
+        const key = e.key.toLowerCase();
+        if (key === "z" && !e.shiftKey) {
+          e.preventDefault();
+          undo();
+          return;
+        }
+        if (key === "y" || (key === "z" && e.shiftKey)) {
+          e.preventDefault();
+          redo();
+          return;
+        }
+      }
+      if (selectedKey === null) return;
+      if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey
+      ) {
+        e.preventDefault();
+        handleClear(selectedKey);
+        return;
+      }
+      if (!(e.ctrlKey || e.metaKey)) return;
       const k = e.key.toLowerCase();
       if (k === "c") {
         copyKey(selectedKey);
@@ -587,7 +699,7 @@ export default function StreamdeckPage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedKey, copyKey, pasteKey]);
+  }, [selectedKey, copyKey, pasteKey, handleClear, undo, redo]);
 
   const handleFire = useCallback(
     async (keyIndex: number, binding: DeckBinding) => {
@@ -645,6 +757,7 @@ export default function StreamdeckPage() {
       id,
       model: "xl",
       label: `Layout ${data.layouts.length + 1}`,
+      deviceSerials: [],
       bindings: {},
     };
     setData({ ...data, layouts: [...data.layouts, fresh] });
@@ -747,7 +860,7 @@ export default function StreamdeckPage() {
       const file: DeckExportFile = {
         type: "nexus-deck",
         version: 1,
-        layouts: layouts.map((l) => ({ ...l, deviceSerial: undefined })),
+        layouts: layouts.map((l) => ({ ...l, deviceSerials: [] })),
         connections: collectConnRefs(layouts, connections),
       };
       const blob = new Blob([JSON.stringify(file, null, 2)], {
@@ -894,6 +1007,7 @@ export default function StreamdeckPage() {
         onExportAll={() => exportToFile("all")}
         onPickImportFile={(f) => void onPickImportFile(f)}
         onLabelChange={(label) => {
+          beginEdit();
           setDraft({ ...draft, label });
           setDirty(true);
         }}
@@ -976,7 +1090,6 @@ export default function StreamdeckPage() {
                       onDragOver={onKeyDragOver}
                       onDragLeave={onKeyDragLeave}
                       onDrop={handleDrop}
-                      onClear={handleClear}
                       onSelect={onKeySelect}
                     />
                   );
@@ -993,9 +1106,11 @@ export default function StreamdeckPage() {
               <Eyebrow tone="muted">Tips</Eyebrow>
               <span>Drag tiles from the right panel onto any key.</span>
               <span style={{ marginLeft: 8 }}>•</span>
-              <span>Click a bound key to fire it.</span>
+              <span>Click a key to edit it; use Test in the inspector to fire it.</span>
               <span>•</span>
-              <span>Right-click to clear.</span>
+              <span>Select a key and press Delete to clear it.</span>
+              <span>•</span>
+              <span>Ctrl+Z / Ctrl+Y to undo / redo.</span>
             </div>
           </div>
         </div>
@@ -1110,27 +1225,31 @@ export default function StreamdeckPage() {
           selectedId={selectedId}
           onClose={() => setLoadModalOpen(false)}
           onLoad={async (layoutId, serial) => {
-            // Pair the chosen page to the device, then push it.
+            // ADD the deck to the page's set — one page can drive several
+            // decks (incl. across satellites). The server unpairs the
+            // serial from any other page (one deck shows one page).
             const target = data.layouts.find((l) => l.id === layoutId);
             if (!target) return;
-            // Auto-detect the model from the deck we're loading onto
-            // (no manual model picker). Map the
-            // device's reported model id onto a known geometry; fall
-            // back to the page's existing model if it's unknown.
+            const firstPairing = target.deviceSerials.length === 0;
+            // Only the FIRST deck sets the page's geometry; later decks
+            // just join (mixing models under one layout isn't supported).
             const dev = hw?.devices.find((d) => d.serialNumber === serial);
             const detectedModel =
-              dev && data.geometries[dev.model]
+              firstPairing && dev && data.geometries[dev.model]
                 ? (dev.model as DeckModel)
                 : target.model;
+            const deviceSerials = target.deviceSerials.includes(serial)
+              ? target.deviceSerials
+              : [...target.deviceSerials, serial];
             const paired = {
               ...target,
-              deviceSerial: serial,
+              deviceSerials,
               model: detectedModel,
             };
             await persistLayout(paired);
             if (selectedId === layoutId) {
               setDraft((d) =>
-                d ? { ...d, deviceSerial: serial, model: detectedModel } : d
+                d ? { ...d, deviceSerials, model: detectedModel } : d
               );
             }
             await fetch("/api/streamdeck/push", {

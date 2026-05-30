@@ -33,6 +33,7 @@ export function useSSE(
     let es: EventSource | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let hideTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
 
     const close = () => {
       if (retry) {
@@ -55,15 +56,24 @@ export function useSSE(
       if (es) return;
 
       es = new EventSource(url);
+      es.onopen = () => {
+        attempt = 0; // healthy again → reset backoff
+      };
       es.onmessage = onMessage;
       es.onerror = () => {
         // The browser usually recovers on its own; if it doesn't, we
-        // close and retry after a short backoff.
+        // close and retry with capped exponential backoff + jitter. The
+        // jitter is what matters at broadcast scale: without it, every
+        // open tab + the variables stream reconnect in lockstep waves
+        // after a server blip and hammer the just-restarted server.
         if (es?.readyState === EventSource.CLOSED) {
+          if (retry) clearTimeout(retry);
+          const delay = Math.min(15_000, 1_000 * 2 ** attempt) + Math.random() * 1_000;
+          attempt++;
           retry = setTimeout(() => {
             retry = null;
             open();
-          }, 1500);
+          }, delay);
         }
       };
     };

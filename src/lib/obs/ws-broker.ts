@@ -302,11 +302,19 @@ export class ObsBroker {
         // respond in `onMessage` after parsing it.
       });
 
+      // Guard both handlers by socket identity: when updateConfig() (or the
+      // onIdentified failure path) closes this socket and immediately opens a
+      // new one, this socket's deferred `close`/`message` events still fire a
+      // tick later. Without this check the stale close would null out
+      // `this.ws` — orphaning the NEW healthy socket (commands then reject)
+      // and firing a phantom reconnect, briefly running two live sockets.
       ws.addEventListener("message", (evt: MessageEvent) => {
+        if (this.ws !== ws) return;
         this.onMessage(evt.data);
       });
 
       ws.addEventListener("close", (evt: CloseEvent) => {
+        if (this.ws !== ws) return;
         this.onClose(evt.code, evt.reason);
       });
 

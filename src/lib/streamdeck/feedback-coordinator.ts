@@ -29,6 +29,10 @@ class CoordinatorImpl {
    *  tick batch into one walk. Without this, a vMix poll that
    *  publishes 5 variables fires 5 walks back-to-back. */
   private recomputeQueued = false;
+  /** Trailing-debounce for refresh() so a satellite reconnect storm
+   *  (each announce calls refresh) coalesces into ONE recompute instead
+   *  of N back-to-back HID re-enumerations. */
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   start(): void {
     if (this.booted) return;
@@ -65,34 +69,40 @@ class CoordinatorImpl {
     const defaults = getPreferences().defaultConnections ?? {};
 
     for (const layout of layouts) {
-      if (!layout.deviceSerial) continue;
-      const device = devices.find(
-        (d) => d.serialNumber === layout.deviceSerial
-      );
-      if (!device) continue;
+      if (layout.deviceSerials.length === 0) continue;
+      // A layout can drive several decks (local + satellites) — render its
+      // bindings to every connected one.
+      const paths = layout.deviceSerials
+        .map((serial) => devices.find((d) => d.serialNumber === serial)?.path)
+        .filter((p): p is string => !!p);
+      if (paths.length === 0) continue;
       for (const [keyStr, binding] of Object.entries(layout.bindings)) {
         const keyIndex = Number(keyStr);
         if (!Number.isFinite(keyIndex)) continue;
         const override = evaluateFeedback(binding, vars, kinds, defaults);
-        streamdeckDriver.renderKey(
-          device.path,
-          keyIndex,
-          binding,
-          override ?? undefined
-        );
+        for (const path of paths) {
+          streamdeckDriver.renderKey(path, keyIndex, binding, override ?? undefined);
+        }
       }
     }
   }
 
-  /** Force a recompute across the board — useful after a layout
-   *  change or fresh device connect. */
-  async refresh(): Promise<void> {
-    await this.recompute();
+  /** Force a recompute across the board — useful after a layout change
+   *  or fresh device connect. Trailing-debounced (150 ms) so a burst of
+   *  satellite (re)announces collapses into one walk. */
+  refresh(): void {
+    if (this.refreshTimer) return;
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      void this.recompute();
+    }, 150);
   }
 
   dispose(): void {
     this.unsubVariables?.();
     this.unsubVariables = null;
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = null;
     this.booted = false;
   }
 }

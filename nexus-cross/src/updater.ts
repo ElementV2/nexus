@@ -8,7 +8,9 @@ export type { UpdateInfo } from "./update-core";
 // satellite watches for its own `Nexus-Cross-Setup-*.exe` asset.
 const REPO = "ElementV2/nexus";
 const API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
-const ASSET_RE = /^Nexus-Cross-Setup-.+\.exe$/i;
+// Capture group 1 = the satellite's own version (independent of the
+// shared release tag): `Nexus-Cross-Setup-0.1.8.exe` → `0.1.8`.
+const ASSET_RE = /^Nexus-Cross-Setup-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\.exe$/i;
 const USER_AGENT = "Nexus-Cross";
 
 const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000;

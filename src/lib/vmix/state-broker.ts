@@ -64,7 +64,10 @@ export class VmixStateBroker {
   private startPolling() {
     if (!this.stopped) return;
     this.stopped = false;
-    setTimeout(() => this.tick(), STARTUP_DELAY_MS);
+    // Track the startup timer in pollHandle so a stop() during the startup
+    // window cancels it — otherwise a quick start→stop→start could leave an
+    // orphaned timer firing a second, parallel tick() chain.
+    this.pollHandle = setTimeout(() => this.tick(), STARTUP_DELAY_MS);
   }
 
   private stopPolling() {

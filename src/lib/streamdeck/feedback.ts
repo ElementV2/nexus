@@ -106,36 +106,25 @@ function vmixFeedback(
   // Cut / Preview tally — fire-red when this input is currently PGM,
   // green when it's on PVW. Lets the operator use a "Cut to input"
   // button as a live tally indicator at the same time.
+  // PROGRAM always wins over PREVIEW: an input that's live (on PGM) stays
+  // red even when it's also queued on PVW — live is the priority signal
+  // the operator must never miss. So `tally_active` is checked first on
+  // BOTH the cut/pgm and the preview buttons.
   if (action === "cut" || action === "pgm") {
     if (inputOpt !== undefined && num(vars.tally_active) === inputOpt) {
-      return {
-        bgcolor: "#ff3b30",
-        fgcolor: "#ffffff",
-        badge: { color: "#ffffff" },
-      };
+      return { bgcolor: "#ff3b30", fgcolor: "#ffffff" };
     }
     if (inputOpt !== undefined && num(vars.tally_preview) === inputOpt) {
-      return {
-        bgcolor: "#34c759",
-        fgcolor: "#000000",
-        badge: { color: "#ffffff" },
-      };
+      return { bgcolor: "#34c759", fgcolor: "#000000" };
     }
     return null;
   }
   if (action === "preview-input" || action === "prv") {
-    if (inputOpt !== undefined && num(vars.tally_preview) === inputOpt) {
-      return {
-        bgcolor: "#34c759",
-        fgcolor: "#000000",
-        badge: { color: "#ffffff" },
-      };
-    }
     if (inputOpt !== undefined && num(vars.tally_active) === inputOpt) {
-      return {
-        bgcolor: "#ff3b30",
-        fgcolor: "#ffffff",
-      };
+      return { bgcolor: "#ff3b30", fgcolor: "#ffffff" };
+    }
+    if (inputOpt !== undefined && num(vars.tally_preview) === inputOpt) {
+      return { bgcolor: "#34c759", fgcolor: "#000000" };
     }
     return null;
   }
@@ -151,7 +140,6 @@ function vmixFeedback(
         bgcolor: "#ff3b30",
         fgcolor: "#ffffff",
         text: "● LIVE",
-        badge: { color: "#ffffff" },
       };
     }
     return null;
@@ -168,7 +156,6 @@ function vmixFeedback(
         bgcolor: "#8e44ad",
         fgcolor: "#ffffff",
         text: "● REC",
-        badge: { color: "#ffffff" },
       };
     }
     return null;
@@ -214,21 +201,18 @@ function obsFeedback(
 
   if (action === "set-program-scene") {
     if (sceneName && vars.current_program_scene === sceneName) {
-      return {
-        bgcolor: "#ff3b30",
-        fgcolor: "#ffffff",
-        badge: { color: "#ffffff" },
-      };
+      return { bgcolor: "#ff3b30", fgcolor: "#ffffff" };
     }
     return null;
   }
   if (action === "set-preview-scene") {
+    // Live priority: a scene that's on PROGRAM stays red even on a
+    // preview button (program wins over preview).
+    if (sceneName && vars.current_program_scene === sceneName) {
+      return { bgcolor: "#ff3b30", fgcolor: "#ffffff" };
+    }
     if (sceneName && vars.current_preview_scene === sceneName) {
-      return {
-        bgcolor: "#34c759",
-        fgcolor: "#000000",
-        badge: { color: "#ffffff" },
-      };
+      return { bgcolor: "#34c759", fgcolor: "#000000" };
     }
     return null;
   }
@@ -242,7 +226,6 @@ function obsFeedback(
         bgcolor: "#ff3b30",
         fgcolor: "#ffffff",
         text: "● LIVE",
-        badge: { color: "#ffffff" },
       };
     }
     return null;

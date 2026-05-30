@@ -130,6 +130,28 @@ header {
   font-weight: 600;
 }
 
+/* IP + port on one line: IP takes the room, port stays narrow. */
+.row {
+  display: flex;
+  gap: 8px;
+}
+.row-ip {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.row-port {
+  width: 88px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.row input {
+  width: 100%;
+}
+
 input {
   background: var(--panel-2);
   border: 1px solid var(--line-hi);

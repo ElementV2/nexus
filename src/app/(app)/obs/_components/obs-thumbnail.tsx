@@ -4,13 +4,98 @@ import { useEffect, useState } from "react";
 import { useConnections } from "@/hooks/use-connections";
 import { useConnectionId } from "@/hooks/use-connection-command";
 
-/* ── Live screenshot tile ────────────────────────────────────── */
+/* ── Live screenshot tiles, on a SHARED rate-capped scheduler ────────── */
 
 /**
- * Polls the OBS broker via the generic connection command at ~1 Hz
- * to keep a live thumbnail visible. Pauses when the tab is hidden so
- * we don't burn OBS's CPU when the operator isn't looking.
+ * A scene grid can mount 15–30 thumbnails. If each polled OBS on its own
+ * 1 Hz timer they'd fire 15–30 `GetSourceScreenshot` requests per second
+ * — hammering OBS's encoder thread exactly when broadcast CPU headroom
+ * matters most. Instead every tile registers with ONE module-level
+ * scheduler that issues requests sequentially, round-robin, with a fixed
+ * gap between them: total OBS load is capped regardless of grid size,
+ * and tiles share the rate fairly. Paused while the tab is hidden.
  */
+
+interface Tile {
+  sourceName: string;
+  width: number;
+  height: number;
+  obsId: string;
+  update: (src: string | null, failed: boolean) => void;
+}
+
+// One request every MIN_GAP_MS at most (≈4 req/s), AND sequential (we await
+// each before scheduling the next), so OBS never sees concurrent captures.
+const MIN_GAP_MS = 250;
+const HIDDEN_GAP_MS = 1500;
+
+const tiles = new Set<Tile>();
+let loopArmed = false;
+let cursor = 0;
+
+function scheduleLoop(delay: number): void {
+  loopArmed = true;
+  setTimeout(runOnce, delay);
+}
+
+async function runOnce(): Promise<void> {
+  if (tiles.size === 0) {
+    loopArmed = false;
+    return;
+  }
+  if (typeof document !== "undefined" && document.hidden) {
+    scheduleLoop(HIDDEN_GAP_MS);
+    return;
+  }
+  // Round-robin: pick the next tile in a stable order.
+  const arr = Array.from(tiles);
+  const tile = arr[cursor % arr.length];
+  cursor = (cursor + 1) % Math.max(1, arr.length);
+
+  try {
+    const res = await fetch(
+      `/api/connections/${encodeURIComponent(tile.obsId)}/command`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          action: "get-source-screenshot",
+          sourceName: tile.sourceName,
+          imageWidth: tile.width,
+          imageHeight: tile.height,
+        }),
+      }
+    );
+    if (tiles.has(tile)) {
+      if (res.ok) {
+        const json = (await res.json()) as
+          | { ok: true; data: string }
+          | { ok: false; error: string };
+        if (json.ok && typeof json.data === "string") {
+          tile.update(json.data, false);
+        } else {
+          tile.update(null, true);
+        }
+      } else {
+        tile.update(null, true);
+      }
+    }
+  } catch {
+    if (tiles.has(tile)) tile.update(null, true);
+  }
+
+  scheduleLoop(MIN_GAP_MS);
+}
+
+function registerTile(tile: Tile): () => void {
+  tiles.add(tile);
+  if (!loopArmed) scheduleLoop(0);
+  return () => {
+    tiles.delete(tile);
+  };
+}
+
 export function ObsThumbnail({
   sourceName,
   width,
@@ -31,57 +116,18 @@ export function ObsThumbnail({
 
   useEffect(() => {
     if (!obsId) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const tick = async () => {
-      if (cancelled) return;
-      if (typeof document !== "undefined" && document.hidden) {
-        timer = setTimeout(tick, 1500);
-        return;
-      }
-      try {
-        const res = await fetch(
-          `/api/connections/${encodeURIComponent(obsId)}/command`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            cache: "no-store",
-            body: JSON.stringify({
-              action: "get-source-screenshot",
-              sourceName,
-              imageWidth: width,
-              imageHeight: height,
-            }),
-          }
-        );
-        if (!cancelled) {
-          if (res.ok) {
-            const json = (await res.json()) as
-              | { ok: true; data: string }
-              | { ok: false; error: string };
-            if (json.ok && typeof json.data === "string") {
-              setSrc(json.data);
-              setFailed(false);
-            } else {
-              setFailed(true);
-            }
-          } else {
-            setFailed(true);
-          }
-        }
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-      // Slower cadence after a failure — avoid hammering when the
-      // source name is wrong or OBS is gone.
-      timer = setTimeout(tick, failed ? 5000 : 1000);
+    const tile: Tile = {
+      sourceName,
+      width,
+      height,
+      obsId,
+      update: (nextSrc, nextFailed) => {
+        if (nextSrc !== null) setSrc(nextSrc);
+        setFailed(nextFailed);
+      },
     };
-    tick();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [sourceName, width, height, failed, obsId]);
+    return registerTile(tile);
+  }, [sourceName, width, height, obsId]);
 
   return (
     <div
@@ -103,10 +149,7 @@ export function ObsThumbnail({
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
       ) : (
-        <span
-          className="font-mono"
-          style={{ fontSize: 9, color: "var(--sub)" }}
-        >
+        <span className="font-mono" style={{ fontSize: 9, color: "var(--sub)" }}>
           {failed ? "no preview" : "…"}
         </span>
       )}

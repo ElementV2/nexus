@@ -51,25 +51,33 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Resolve target devicePath either directly or by serial-pairing.
-  let devicePath = typeof body.devicePath === "string" ? body.devicePath : null;
+  // Resolve target devicePaths: either a single explicit path, or EVERY
+  // connected deck the layout is paired with (one layout can drive many).
+  const explicitPath =
+    typeof body.devicePath === "string" ? body.devicePath : null;
   const layoutId = typeof body.layoutId === "string" ? body.layoutId : null;
   const store = getStreamdeckStore();
   const layout = layoutId
     ? store.layouts.find((l) => l.id === layoutId)
     : undefined;
-  if (!devicePath && layout?.deviceSerial) {
+
+  let devicePaths: string[] = [];
+  if (explicitPath) {
+    devicePaths = [explicitPath];
+  } else if (layout && layout.deviceSerials.length > 0) {
     const devices = await streamdeckDriver.listDevices();
-    const match = devices.find((d) => d.serialNumber === layout.deviceSerial);
-    devicePath = match?.path ?? null;
+    devicePaths = layout.deviceSerials
+      .map((serial) => devices.find((d) => d.serialNumber === serial)?.path)
+      .filter((p): p is string => !!p);
   }
-  if (!devicePath) {
+
+  if (devicePaths.length === 0) {
     return NextResponse.json(
       {
         ok: false,
         error: layout
-          ? layout.deviceSerial
-            ? `Paired device ${layout.deviceSerial} not connected`
+          ? layout.deviceSerials.length > 0
+            ? `None of the paired devices (${layout.deviceSerials.join(", ")}) are connected`
             : `Layout "${layoutId}" is not paired with a device`
           : "devicePath or layoutId required",
       },
@@ -78,12 +86,15 @@ export async function POST(req: NextRequest) {
   }
 
   if (body.clear === true) {
-    await streamdeckDriver.clearAll(devicePath);
+    await Promise.all(devicePaths.map((p) => streamdeckDriver.clearAll(p)));
     return NextResponse.json({ ok: true });
   }
 
   if (typeof body.brightness === "number") {
-    await streamdeckDriver.setBrightness(devicePath, body.brightness);
+    const b = body.brightness;
+    await Promise.all(
+      devicePaths.map((p) => streamdeckDriver.setBrightness(p, b))
+    );
   }
 
   // Single-key path — prefer the binding supplied in the body so
@@ -91,13 +102,18 @@ export async function POST(req: NextRequest) {
   // `null` explicitly means "clear this key"; missing falls back to
   // the persisted store.
   if (typeof body.keyIndex === "number") {
+    const keyIndex = body.keyIndex;
     const liveBinding =
       body.binding === null
         ? undefined
         : body.binding && typeof body.binding === "object"
           ? (body.binding as Parameters<typeof streamdeckDriver.renderKey>[2])
-          : layout?.bindings[body.keyIndex];
-    await streamdeckDriver.renderKey(devicePath, body.keyIndex, liveBinding);
+          : layout?.bindings[keyIndex];
+    await Promise.all(
+      devicePaths.map((p) =>
+        streamdeckDriver.renderKey(p, keyIndex, liveBinding)
+      )
+    );
     return NextResponse.json({ ok: true });
   }
 
@@ -108,6 +124,8 @@ export async function POST(req: NextRequest) {
       { status: 404 }
     );
   }
-  await streamdeckDriver.pushLayout(devicePath, layout.bindings);
+  await Promise.all(
+    devicePaths.map((p) => streamdeckDriver.pushLayout(p, layout.bindings))
+  );
   return NextResponse.json({ ok: true });
 }

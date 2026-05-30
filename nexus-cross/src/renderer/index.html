@@ -34,14 +34,28 @@
       </section>
 
       <section class="card">
-        <label class="field-label" for="server">Nexus server URL</label>
-        <input
-          id="server"
-          type="text"
-          spellcheck="false"
-          placeholder="http://192.168.1.10:9088"
-        />
-        <label class="field-label" for="label">Label (shown in the app)</label>
+        <div class="row">
+          <div class="row-ip">
+            <label class="field-label" for="ip">Nexus server IP</label>
+            <input
+              id="ip"
+              type="text"
+              spellcheck="false"
+              placeholder="192.168.1.10"
+            />
+          </div>
+          <div class="row-port">
+            <label class="field-label" for="port">Port</label>
+            <input
+              id="port"
+              type="text"
+              inputmode="numeric"
+              spellcheck="false"
+              placeholder="9088"
+            />
+          </div>
+        </div>
+        <label class="field-label" for="label">Name (on network)</label>
         <input id="label" type="text" spellcheck="false" placeholder="Booth PC" />
         <button id="save" class="primary">Save &amp; connect</button>
         <div id="hint" class="hint"></div>

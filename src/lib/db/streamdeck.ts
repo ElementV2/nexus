@@ -1,4 +1,4 @@
-import { readJson, writeJson } from "./index";
+import { fileMtimeMs, readJson, writeJson } from "./index";
 
 /**
  * Persisted Stream Deck button layouts. Stored in a dedicated file so
@@ -83,17 +83,19 @@ export interface DeckBinding {
 
 export interface DeckLayout {
   /** Stable id. Free-form ("default", "deck-…"). Doesn't have to be
-   *  the HID serial — pairing to a physical device lives on
-   *  `deviceSerial` so layouts survive USB path changes (re-plug,
+   *  the HID serial — pairing to physical devices lives on
+   *  `deviceSerials` so layouts survive USB path changes (re-plug,
    *  different port, OS upgrade). */
   id: string;
   model: DeckModel;
   label: string;
-  /** HID serial number this layout is paired with. When a physical
-   *  device with the matching serial fires a key, this layout's
-   *  bindings are consulted. Unpaired layouts (`undefined`) are
-   *  design-only — visible in the editor, ignored by hardware. */
-  deviceSerial?: string;
+  /** HID serial numbers this layout is paired with. ONE layout can drive
+   *  MANY decks at once — local or across satellites (e.g. the same page
+   *  loaded onto 15 satellite decks). A press from any of these serials
+   *  consults this layout's bindings, and feedback renders to all of
+   *  them. A given serial belongs to at most one layout (enforced by
+   *  `applyLayoutUpsert`). Empty = design-only, ignored by hardware. */
+  deviceSerials: string[];
   /** Sparse: only filled keys appear. Key index is row * cols + col. */
   bindings: Record<number, DeckBinding>;
 }
@@ -108,21 +110,63 @@ const DEFAULT_STORE: StreamdeckStore = {
       id: "default",
       model: "xl",
       label: "My Stream Deck",
+      deviceSerials: [],
       bindings: {},
     },
   ],
 };
 
+/**
+ * Normalise a persisted/posted layout: coerce pairing into the
+ * `deviceSerials: string[]` shape. Migrates the legacy single
+ * `deviceSerial` field transparently and drops empties/dupes, so old
+ * stores and older clients keep working.
+ */
+export function normalizeLayout(raw: DeckLayout): DeckLayout {
+  const legacy = (raw as { deviceSerial?: unknown }).deviceSerial;
+  const fromArray = Array.isArray(raw.deviceSerials) ? raw.deviceSerials : [];
+  const all = [
+    ...fromArray,
+    ...(typeof legacy === "string" ? [legacy] : []),
+  ];
+  const deviceSerials = [
+    ...new Set(
+      all.filter((s): s is string => typeof s === "string" && s.trim() !== "")
+    ),
+  ];
+  // Strip the legacy field if present so it never lingers in the store.
+  const { ...rest } = raw as DeckLayout & { deviceSerial?: unknown };
+  delete (rest as { deviceSerial?: unknown }).deviceSerial;
+  return { ...rest, deviceSerials };
+}
+
+// mtime-gated cache: the feedback coordinator reads the store on every
+// variable burst (≈every vMix poll tick) and the press dispatcher on every
+// press. Without this, each call was a synchronous readFileSync + JSON.parse
+// + normalize on the event loop — directly competing with HID writes and the
+// satellite SSE on the broadcast tally path. A write bumps the file mtime so
+// the cache self-invalidates and external launcher edits are still picked up.
+let storeCache: { mtime: number | null; value: StreamdeckStore } | null = null;
+
 export function getStreamdeckStore(): StreamdeckStore {
-  const raw = readJson<Partial<StreamdeckStore>>(FILE, {});
-  if (!raw.layouts || !Array.isArray(raw.layouts) || raw.layouts.length === 0) {
-    return DEFAULT_STORE;
+  const mtime = fileMtimeMs(FILE);
+  if (storeCache && storeCache.mtime === mtime) {
+    return structuredClone(storeCache.value);
   }
-  return { layouts: raw.layouts as DeckLayout[] };
+  const raw = readJson<Partial<StreamdeckStore>>(FILE, {});
+  const value: StreamdeckStore =
+    !raw.layouts || !Array.isArray(raw.layouts) || raw.layouts.length === 0
+      ? DEFAULT_STORE
+      : { layouts: (raw.layouts as DeckLayout[]).map(normalizeLayout) };
+  storeCache = { mtime, value };
+  return structuredClone(value);
 }
 
 export function setStreamdeckStore(next: StreamdeckStore): StreamdeckStore {
   writeJson(FILE, next);
+  // Prime the cache with the just-written value + its fresh mtime so the
+  // immediate read-back (coordinator refresh after a layout save) hits cache.
+  storeCache = { mtime: fileMtimeMs(FILE), value: next };
   return next;
 }
 
@@ -130,17 +174,46 @@ export function getLayout(id: string): DeckLayout | undefined {
   return getStreamdeckStore().layouts.find((l) => l.id === id);
 }
 
+/**
+ * Pure upsert enforcing the **one-serial-one-layout** invariant: a layout
+ * may drive MANY decks (`deviceSerials`), but each physical deck (serial)
+ * belongs to at most ONE layout. When the upserted layout claims serials,
+ * those serials are removed from every OTHER layout.
+ *
+ * Without this, loading page B onto a deck already showing page A leaves
+ * BOTH pages claiming that serial. The press dispatcher resolves a press
+ * via the FIRST layout matching the serial (stale page A), so the deck
+ * shows B's keys but fires A's shortcuts. Keeping serials unique at write
+ * time fixes the press dispatcher and feedback coordinator alike.
+ */
+export function applyLayoutUpsert(
+  layouts: DeckLayout[],
+  layout: DeckLayout
+): DeckLayout[] {
+  const norm = normalizeLayout(layout);
+  const idx = layouts.findIndex((l) => l.id === norm.id);
+  let next =
+    idx >= 0
+      ? layouts.map((l, i) => (i === idx ? norm : l))
+      : [...layouts, norm];
+  const claimed = new Set(norm.deviceSerials);
+  if (claimed.size > 0) {
+    next = next.map((l) =>
+      l.id === norm.id
+        ? l
+        : l.deviceSerials.some((s) => claimed.has(s))
+          ? { ...l, deviceSerials: l.deviceSerials.filter((s) => !claimed.has(s)) }
+          : l
+    );
+  }
+  return next;
+}
+
 export function upsertLayout(layout: DeckLayout): StreamdeckStore {
   const cur = getStreamdeckStore();
-  const idx = cur.layouts.findIndex((l) => l.id === layout.id);
-  const next: StreamdeckStore = { ...cur };
-  if (idx >= 0) {
-    next.layouts = [...cur.layouts];
-    next.layouts[idx] = layout;
-  } else {
-    next.layouts = [...cur.layouts, layout];
-  }
-  return setStreamdeckStore(next);
+  return setStreamdeckStore({
+    layouts: applyLayoutUpsert(cur.layouts, layout),
+  });
 }
 
 export function removeLayout(id: string): StreamdeckStore {
