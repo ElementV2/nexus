@@ -193,24 +193,24 @@ function vmixFeedback(
   if (action === "sc-audio" || action === "sc-audioon" || action === "sc-audiooff") {
     if (inputOpt === undefined) return null;
     return vars[`input_${inputOpt}_muted`] === true
-      ? { bgcolor: "#ff3b30", fgcolor: "#ffffff", text: "MUTE" }
+      ? { bgcolor: "#ff3b30", fgcolor: "#ffffff" }
       : null;
   }
 
   // Stream / Record / FTB toggles.
   if (VMIX_STREAM.has(action)) {
     return vars.streaming === true
-      ? { bgcolor: "#ff3b30", fgcolor: "#ffffff", text: "● LIVE" }
+      ? { bgcolor: "#ff3b30", fgcolor: "#ffffff" }
       : null;
   }
   if (VMIX_RECORD.has(action)) {
     return vars.recording === true
-      ? { bgcolor: "#8e44ad", fgcolor: "#ffffff", text: "● REC" }
+      ? { bgcolor: "#8e44ad", fgcolor: "#ffffff" }
       : null;
   }
   if (action === "sc-fadetoblack") {
     return vars.fade_to_black === true
-      ? { bgcolor: "#000000", fgcolor: "#ff3b30", text: "● FTB" }
+      ? { bgcolor: "#000000", fgcolor: "#ff3b30" }
       : null;
   }
 
@@ -252,7 +252,6 @@ function obsFeedback(
       return {
         bgcolor: "#ff3b30",
         fgcolor: "#ffffff",
-        text: "● LIVE",
       };
     }
     return null;
@@ -266,7 +265,6 @@ function obsFeedback(
       return {
         bgcolor: "#8e44ad",
         fgcolor: "#ffffff",
-        text: "● REC",
       };
     }
     return null;
@@ -289,7 +287,7 @@ function abletonFeedback(
 ): FeedbackOverride | null {
   if (action === "play" || action === "stop" || action === "continue") {
     if (vars.is_playing === true) {
-      return { bgcolor: "#34c759", fgcolor: "#000000", text: "● PLAY" };
+      return { bgcolor: "#34c759", fgcolor: "#000000" };
     }
     return null;
   }
