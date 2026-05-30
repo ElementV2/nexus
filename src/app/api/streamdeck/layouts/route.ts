@@ -58,6 +58,19 @@ export async function PUT(req: NextRequest) {
         : {},
   } as DeckLayout);
   const next = upsertLayout(cleaned);
+
+  // The binding may have changed which input/scene/etc a key targets, which
+  // changes its FEEDBACK (tally colour, overlay state…). The editor's live
+  // key-push only sends the static face — the feedback override is applied
+  // by the coordinator, which otherwise only re-renders on a variable
+  // change. So nudge it here too, or a paired deck shows stale colours until
+  // the next tally tick (or a manual press). Fire-and-forget + debounced.
+  void import("@/lib/streamdeck/feedback-coordinator")
+    .then((m) => m.feedbackCoordinator.refresh())
+    .catch(() => {
+      /* coordinator not booted / no devices — nothing to push */
+    });
+
   return NextResponse.json({ ok: true, store: next });
 }
 
