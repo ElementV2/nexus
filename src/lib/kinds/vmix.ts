@@ -258,10 +258,14 @@ const vmixVariables: VariableDefinition[] = [
   { id: "streaming", label: "Streaming on/off", hint: "boolean" },
   { id: "recording", label: "Recording on/off", hint: "boolean" },
   { id: "fade_to_black", label: "Fade to black on/off", hint: "boolean" },
-  { id: "overlay_1", label: "Overlay 1 input # (0 = off)", hint: "number" },
-  { id: "overlay_2", label: "Overlay 2 input # (0 = off)", hint: "number" },
-  { id: "overlay_3", label: "Overlay 3 input # (0 = off)", hint: "number" },
-  { id: "overlay_4", label: "Overlay 4 input # (0 = off)", hint: "number" },
+  // Overlay channels 1-8 → live (program) input # on each, 0 = off. The
+  // matching `overlay_<n>_pvw` (preview input #) are published alongside for
+  // feedback but not declared here.
+  ...Array.from({ length: 8 }, (_, i) => ({
+    id: `overlay_${i + 1}`,
+    label: `Overlay ${i + 1} live input # (0 = off)`,
+    hint: "number" as const,
+  })),
   { id: "bus_m_on", label: "Master bus on", hint: "boolean" },
   { id: "bus_a_on", label: "Bus A on", hint: "boolean" },
   { id: "bus_b_on", label: "Bus B on", hint: "boolean" },

@@ -205,6 +205,9 @@ export function parseVmixXml(xml: string): VmixState {
       .map((o: Record<string, unknown>) => ({
         number: Number(o["@_number"] ?? 0),
         inputNumber: Number(o["#text"]),
+        // vMix tags an overlay staged on PREVIEW with @_preview="True";
+        // live (program) overlays have no such attribute.
+        preview: String(o["@_preview"]) === "True",
       })),
     transitions: transitionsArr
       .filter((t: Record<string, unknown>) => t["@_number"] != null)

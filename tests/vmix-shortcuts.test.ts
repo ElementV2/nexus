@@ -63,7 +63,7 @@ describe("family placeholders become one parameterized action", () => {
     // The placeholder is an option picker, not 4 separate presets.
     const chOpt = a.options?.find((o) => o.id === "ch");
     expect(chOpt?.type).toBe("number");
-    expect(chOpt).toMatchObject({ min: 1, max: 4 });
+    expect(chOpt).toMatchObject({ min: 1, max: 8 });
     expect(a.options?.some((o) => o.id === "input")).toBe(true);
 
     expect(cmd("sc-overlayinput", { ch: 2, input: "5", mix: 1 })).toEqual({

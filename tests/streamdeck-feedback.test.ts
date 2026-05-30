@@ -65,20 +65,28 @@ describe("vMix overlay tally feedback (red live / green preview)", () => {
     ).toBe(RED);
   });
 
-  it("GREEN when the button's input is staged on preview", () => {
+  it("GREEN when this overlay channel is previewing this input", () => {
     expect(
       fb(vmixKey("sc-overlayinput", { ch: 2, input: "7" }), {
-        overlay_2: 4,
-        tally_preview: 7,
+        overlay_2: 0,
+        overlay_2_pvw: 7,
       })?.bgcolor
     ).toBe(GREEN);
   });
 
-  it("null when the overlay is off and the input isn't on preview", () => {
+  it("PreviewOverlayInput button reads the same preview tally", () => {
+    expect(
+      fb(vmixKey("sc-previewoverlayinput", { ch: 1, input: "5" }), {
+        overlay_1_pvw: 5,
+      })?.bgcolor
+    ).toBe(GREEN);
+  });
+
+  it("null when the overlay channel is empty for this input", () => {
     expect(
       fb(vmixKey("sc-overlayinput", { ch: 2, input: "7" }), {
         overlay_2: 4,
-        tally_preview: 1,
+        overlay_2_pvw: 0,
       })
     ).toBeNull();
   });

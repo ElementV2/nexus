@@ -58,7 +58,7 @@ interface VmixStateMessage {
     streaming?: boolean;
     recording?: boolean;
     fadeToBlack?: boolean;
-    overlays?: Array<{ number: number; inputNumber: number }>;
+    overlays?: Array<{ number: number; inputNumber: number; preview?: boolean }>;
     audio?: { muted?: boolean };
     audioBuses?: Array<{ name: string; muted: boolean }>;
   };
@@ -80,11 +80,15 @@ function bridgeVmix(connectionId: string, broker: BrokerImpl): () => void {
       recording: s.recording ?? null,
       fade_to_black: s.fadeToBlack ?? null,
     };
-    // Overlay channels 1-4 → the Input number currently on each (0 = empty).
-    // Drives the "overlay live" feedback on OverlayInput buttons.
-    for (let ch = 1; ch <= 4; ch++) {
-      const o = s.overlays?.find((x) => x.number === ch);
-      batch[`overlay_${ch}`] = o ? o.inputNumber : 0;
+    // Overlay channels 1-4 → the Input number on each, split by where it
+    // sits: `overlay_<ch>` = live/program input, `overlay_<ch>_pvw` =
+    // preview input (0 = none). Drives red-live / green-preview tally on
+    // OverlayInput + PreviewOverlayInput buttons.
+    for (let ch = 1; ch <= 8; ch++) {
+      const live = s.overlays?.find((x) => x.number === ch && !x.preview);
+      const pvw = s.overlays?.find((x) => x.number === ch && x.preview);
+      batch[`overlay_${ch}`] = live ? live.inputNumber : 0;
+      batch[`overlay_${ch}_pvw`] = pvw ? pvw.inputNumber : 0;
     }
     // Audio bus on/off (on = NOT muted). Master is bus "M".
     batch.bus_m_on = s.audio ? !s.audio.muted : null;

@@ -120,6 +120,9 @@ export interface VmixInputOverlay {
 export interface VmixOverlay {
   number: number;
   inputNumber: number;
+  /** True when this overlay is staged on PREVIEW (vMix `@_preview`),
+   *  false when it's live on the program output. */
+  preview: boolean;
 }
 
 export interface VmixAudioMaster {
