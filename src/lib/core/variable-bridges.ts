@@ -1,4 +1,4 @@
-import { variableBus } from "./variable-bus";
+import { variableBus, type VariableValue } from "./variable-bus";
 import type { BrokerImpl, KindEvent } from "./types";
 
 /**
@@ -44,17 +44,27 @@ export function attachBridge(
 
 // ─────────────────────────── vMix bridge ──────────────────────────────
 
+interface VmixInputLite {
+  number?: number;
+  muted?: boolean;
+  hasAudio?: boolean;
+}
 interface VmixStateMessage {
   ok: boolean;
   state?: {
     activeInput?: number;
     previewInput?: number;
-    inputs?: unknown[];
+    inputs?: VmixInputLite[];
     streaming?: boolean;
     recording?: boolean;
     fadeToBlack?: boolean;
+    overlays?: Array<{ number: number; inputNumber: number }>;
+    audio?: { muted?: boolean };
+    audioBuses?: Array<{ name: string; muted: boolean }>;
   };
 }
+
+const VMIX_BUS_LETTERS = ["A", "B", "C", "D", "E", "F", "G"] as const;
 
 function bridgeVmix(connectionId: string, broker: BrokerImpl): () => void {
   return broker.subscribe((event: KindEvent) => {
@@ -62,14 +72,35 @@ function bridgeVmix(connectionId: string, broker: BrokerImpl): () => void {
     const msg = event as unknown as VmixStateMessage & KindEvent;
     if (!msg.ok || !msg.state) return;
     const s = msg.state;
-    variableBus.setBatch(connectionId, {
+    const batch: Record<string, VariableValue> = {
       tally_active: s.activeInput ?? null,
       tally_preview: s.previewInput ?? null,
       input_count: Array.isArray(s.inputs) ? s.inputs.length : null,
       streaming: s.streaming ?? null,
       recording: s.recording ?? null,
       fade_to_black: s.fadeToBlack ?? null,
-    });
+    };
+    // Overlay channels 1-4 → the Input number currently on each (0 = empty).
+    // Drives the "overlay live" feedback on OverlayInput buttons.
+    for (let ch = 1; ch <= 4; ch++) {
+      const o = s.overlays?.find((x) => x.number === ch);
+      batch[`overlay_${ch}`] = o ? o.inputNumber : 0;
+    }
+    // Audio bus on/off (on = NOT muted). Master is bus "M".
+    batch.bus_m_on = s.audio ? !s.audio.muted : null;
+    for (const L of VMIX_BUS_LETTERS) {
+      const bus = s.audioBuses?.find((b) => b.name === L);
+      batch[`bus_${L.toLowerCase()}_on`] = bus ? !bus.muted : null;
+    }
+    // Per-input mute (mic-mute tally) for inputs that carry audio.
+    if (Array.isArray(s.inputs)) {
+      for (const inp of s.inputs) {
+        if (inp.hasAudio && typeof inp.number === "number") {
+          batch[`input_${inp.number}_muted`] = Boolean(inp.muted);
+        }
+      }
+    }
+    variableBus.setBatch(connectionId, batch);
   });
 }
 

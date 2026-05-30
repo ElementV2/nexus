@@ -78,7 +78,7 @@ export function evaluateFeedback(
 
   switch (kind) {
     case "vmix":
-      return vmixFeedback(action, opts, scope, binding.preset.id);
+      return vmixFeedback(action, opts, scope);
     case "obs":
       return obsFeedback(action, opts, scope);
     case "ableton":
@@ -93,98 +93,116 @@ export function evaluateFeedback(
 
 // ─────────────────────────── vMix rules ───────────────────────────────
 
+// Generated action ids (from vmix-shortcut-actions.ts, `sc-<fn-kebab>`)
+// whose press takes an Input to PROGRAM via a transition — these double as
+// live tally indicators.
+const VMIX_PROGRAM_TAKE = new Set([
+  "sc-cut",
+  "sc-cutdirect",
+  "sc-quickplay",
+  "sc-fade",
+  "sc-merge",
+  "sc-wipe",
+  "sc-slide",
+  "sc-fly",
+  "sc-flyrotate",
+  "sc-zoom",
+  "sc-crosszoom",
+  "sc-cube",
+  "sc-cubezoom",
+  "sc-alphafade",
+]);
+const VMIX_STREAM = new Set([
+  "sc-startstopstreaming",
+  "sc-startstreaming",
+  "sc-stopstreaming",
+]);
+const VMIX_RECORD = new Set([
+  "sc-startstoprecording",
+  "sc-startrecording",
+  "sc-stoprecording",
+]);
+
+/** The audio bus an action targets, lowercase ("m","a".."g"), or null. */
+function vmixBusOf(
+  action: string,
+  opts: Record<string, unknown>
+): string | null {
+  if (action.startsWith("sc-masteraudio")) return "m";
+  const fixed = /^sc-bus([a-g])audio/.exec(action);
+  if (fixed) return fixed[1];
+  if (action.startsWith("sc-busxaudio")) {
+    const v = typeof opts.value === "string" ? opts.value.toLowerCase() : "";
+    return /^[mabcdefg]$/.test(v) ? v : null;
+  }
+  return null;
+}
+
 function vmixFeedback(
   action: string,
   opts: Record<string, unknown>,
-  vars: Record<string, unknown>,
-  presetId: string
+  vars: Record<string, unknown>
 ): FeedbackOverride | null {
   const num = (v: unknown): number | undefined =>
     typeof v === "number" ? v : typeof v === "string" ? Number(v) : undefined;
   const inputOpt = num(opts.input);
+  const RED: FeedbackOverride = { bgcolor: "#ff3b30", fgcolor: "#ffffff" };
+  const GREEN: FeedbackOverride = { bgcolor: "#34c759", fgcolor: "#000000" };
 
-  // Cut / Preview tally — fire-red when this input is currently PGM,
-  // green when it's on PVW. Lets the operator use a "Cut to input"
-  // button as a live tally indicator at the same time.
-  // PROGRAM always wins over PREVIEW: an input that's live (on PGM) stays
-  // red even when it's also queued on PVW — live is the priority signal
-  // the operator must never miss. So `tally_active` is checked first on
-  // BOTH the cut/pgm and the preview buttons.
-  if (action === "cut" || action === "pgm") {
-    if (inputOpt !== undefined && num(vars.tally_active) === inputOpt) {
-      return { bgcolor: "#ff3b30", fgcolor: "#ffffff" };
-    }
-    if (inputOpt !== undefined && num(vars.tally_preview) === inputOpt) {
-      return { bgcolor: "#34c759", fgcolor: "#000000" };
-    }
-    return null;
-  }
-  if (action === "preview-input" || action === "prv") {
-    if (inputOpt !== undefined && num(vars.tally_active) === inputOpt) {
-      return { bgcolor: "#ff3b30", fgcolor: "#ffffff" };
-    }
-    if (inputOpt !== undefined && num(vars.tally_preview) === inputOpt) {
-      return { bgcolor: "#34c759", fgcolor: "#000000" };
-    }
+  // Tally — fire-red when this input is on PROGRAM, green when on PREVIEW.
+  // PROGRAM always wins (live priority), on both cut/transition and preview
+  // buttons.
+  if (VMIX_PROGRAM_TAKE.has(action) || action === "sc-previewinput") {
+    if (inputOpt !== undefined && num(vars.tally_active) === inputOpt) return RED;
+    if (inputOpt !== undefined && num(vars.tally_preview) === inputOpt) return GREEN;
     return null;
   }
 
-  // Stream toggle — show red "LIVE" when streaming.
-  if (
-    action === "start-stop-streaming" ||
-    action === "start-streaming" ||
-    action === "stop-streaming"
-  ) {
-    if (vars.streaming === true) {
-      return {
-        bgcolor: "#ff3b30",
-        fgcolor: "#ffffff",
-        text: "● LIVE",
-      };
+  // Overlay live — green when this overlay channel is currently showing the
+  // button's Input. Off/Out/Zoom buttons carry no Input → light up whenever
+  // the channel is up at all (so you can see there's something to clear).
+  if (action.startsWith("sc-overlayinput")) {
+    const ch = num(opts.ch);
+    if (ch === undefined) return null;
+    const onInput = num(vars[`overlay_${ch}`]); // input # on channel, 0 = empty
+    if (inputOpt !== undefined) {
+      return onInput && onInput === inputOpt ? GREEN : null;
     }
+    return onInput ? GREEN : null;
+  }
+
+  // Audio bus on/off — green when the bus is ON, dim when muted.
+  const bus = vmixBusOf(action, opts);
+  if (bus) {
+    const on = vars[`bus_${bus}_on`];
+    if (on === true) return GREEN;
+    if (on === false) return { bgcolor: "#3a3a3c", fgcolor: "#8e8e93" };
     return null;
   }
 
-  // Record toggle — purple/recording badge when active.
-  if (
-    action === "start-stop-recording" ||
-    action === "start-recording" ||
-    action === "stop-recording"
-  ) {
-    if (vars.recording === true) {
-      return {
-        bgcolor: "#8e44ad",
-        fgcolor: "#ffffff",
-        text: "● REC",
-      };
-    }
-    return null;
+  // Per-input audio mute — red MUTE when that input is muted (mic-mute tally).
+  if (action === "sc-audio" || action === "sc-audioon" || action === "sc-audiooff") {
+    if (inputOpt === undefined) return null;
+    return vars[`input_${inputOpt}_muted`] === true
+      ? { bgcolor: "#ff3b30", fgcolor: "#ffffff", text: "MUTE" }
+      : null;
   }
 
-  // FTB — dimmed indicator when active.
-  if (action === "fade-to-black") {
-    if (vars.fade_to_black === true) {
-      return {
-        bgcolor: "#000000",
-        fgcolor: "#ff3b30",
-        text: "● FTB",
-      };
-    }
-    return null;
+  // Stream / Record / FTB toggles.
+  if (VMIX_STREAM.has(action)) {
+    return vars.streaming === true
+      ? { bgcolor: "#ff3b30", fgcolor: "#ffffff", text: "● LIVE" }
+      : null;
   }
-
-  // Go Live / End Show bundles — derive from streaming + recording
-  // composite state so the bundle key visually confirms both ops
-  // landed.
-  if (presetId === "go-live" || presetId === "fn-go-live") {
-    if (vars.streaming === true && vars.recording === true) {
-      return {
-        bgcolor: "#ff3b30",
-        fgcolor: "#ffffff",
-        text: "● LIVE\n● REC",
-      };
-    }
-    return null;
+  if (VMIX_RECORD.has(action)) {
+    return vars.recording === true
+      ? { bgcolor: "#8e44ad", fgcolor: "#ffffff", text: "● REC" }
+      : null;
+  }
+  if (action === "sc-fadetoblack") {
+    return vars.fade_to_black === true
+      ? { bgcolor: "#000000", fgcolor: "#ff3b30", text: "● FTB" }
+      : null;
   }
 
   return null;

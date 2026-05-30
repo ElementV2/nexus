@@ -30,6 +30,15 @@ shared release tag.
   kind exists**. You can delete every connection and end up with none;
   the Deck page always stays so you can prepare shortcuts in advance.
 
+### Stream Deck feedback — vMix
+- Keys now reflect live state: **tally** (cut/transition + preview keys go
+  red on PGM, green on PVW, PGM wins), **overlay live** (an OverlayInput key
+  turns green when its overlay channel is showing its input; Off/Out keys
+  light up whenever the channel is up), **audio bus on/off** (green when the
+  bus/master is on, dim when muted), **per-input mute** (red MUTE), and
+  stream/record/FTB. The vMix broker now publishes overlay, bus and
+  per-input-mute variables; feedback is keyed on the generated action ids.
+
 ### vMix — full shortcut coverage
 - The preset browser now lists **every vMix Function**, generated from the
   scraped reference (`src/lib/vmix/shortcuts.ts`) plus the named
