@@ -1,0 +1,928 @@
+/**
+ * Stream Deck HID driver. All HID access goes through here so the
+ * routes and the streamdeck page don't have to know about the
+ * underlying packages.
+ *
+ * The packages (`@elgato-stream-deck/node`, `node-hid`, `usb`,
+ * `@napi-rs/canvas`) are declared as `optionalDependencies` in
+ * `package.json` — Nexus still builds and runs when they're not
+ * installed. The driver detects this at module load time and reports
+ * `state: "deps-missing"` so the UI can grey out HID affordances and
+ * point the user to `npm install`.
+ *
+ * Hotplug: we subscribe to `usb.attach` / `detach` and re-list decks
+ * on every event. SSE consumers get a `devices-changed` push so the
+ * UI can re-render without polling.
+ *
+ * Rendering: each key image is composed via `@napi-rs/canvas` from
+ * the bound preset's bg/fg/text. The composed RGB buffer is handed
+ * to `fillKeyBuffer` directly — no PNG roundtrip on the hot path.
+ */
+
+import type { Canvas } from "@napi-rs/canvas";
+import type { DeckBinding } from "@/lib/db/streamdeck";
+import { hmrSingleton } from "@/lib/utils/hmr-singleton";
+import { satelliteRegistry } from "./satellite-registry";
+
+// The @elgato-stream-deck/node v7 type surface is rich; we only need
+// the slices the driver actually touches. Importing as types keeps
+// tsc happy when the optional dep isn't installed yet — the runtime
+// `await import("...")` still gates whether anything actually runs.
+type StreamDeckDeviceInfo = {
+  path: string;
+  serialNumber?: string;
+  model: string;
+  productId?: number;
+  vendorId?: number;
+};
+type ControlDef = {
+  type: string;
+  row: number;
+  column: number;
+  index: number;
+  feedbackType?: string;
+  pixelSize?: { width: number; height: number };
+};
+type StreamDeck = {
+  readonly CONTROLS: readonly ControlDef[];
+  readonly MODEL: string;
+  readonly PRODUCT_NAME: string;
+  fillKeyBuffer(
+    keyIndex: number,
+    buffer: Uint8Array,
+    options: { format: "rgb" | "rgba" | "bgr" | "bgra" }
+  ): Promise<void>;
+  fillKeyColor(
+    keyIndex: number,
+    r: number,
+    g: number,
+    b: number
+  ): Promise<void>;
+  clearKey(keyIndex: number): Promise<void>;
+  clearPanel(): Promise<void>;
+  setBrightness(percent: number): Promise<void>;
+  close(): Promise<void>;
+  on(event: "down" | "up", cb: (control: ControlDef) => void): void;
+  on(event: "error", cb: (err: Error) => void): void;
+  removeAllListeners(event?: string): void;
+};
+
+// ─────────────────────────── Module shape ─────────────────────────────
+
+export interface DeviceSummary {
+  path: string;
+  serialNumber?: string;
+  model: string;
+  productId?: number;
+  vendorId?: number;
+  /** True if the driver already has an open handle for this device.
+   *  Satellite-owned devices always report `true` (they're claimed
+   *  by the remote agent, not by us). */
+  opened: boolean;
+  /** Convenience: row × col rendered by the driver based on the
+   *  device's reported `KEY_ROWS` / `KEY_COLUMNS`. */
+  rows?: number;
+  cols?: number;
+  iconSize?: number;
+  /** True for devices forwarded by a `nexus-cross` satellite (i.e.
+   *  physically plugged into a different machine on the LAN). The
+   *  pairing / inspector UI labels these with a `(remote)` chip. */
+  remote?: boolean;
+  /** Satellite id owning this remote device. Only set when `remote`
+   *  is true. Useful for the UI to group decks by host. */
+  remoteSatelliteId?: string;
+  /** Friendly label the satellite announced (the name the operator
+   *  typed in nexus-cross). Shown next to the deck so it's obvious
+   *  which machine it lives on. Falls back to the id when unset. */
+  satelliteLabel?: string;
+}
+
+export type DriverState =
+  | { state: "deps-missing"; reason: string }
+  | { state: "ready"; devicesKnown: number }
+  | { state: "error"; reason: string };
+
+export interface DriverEvent {
+  type: "devices-changed" | "key-down" | "key-up" | "error" | "status";
+  devicePath?: string;
+  /** HID serial number of the device — included on key events so
+   *  consumers can resolve a paired layout without round-tripping
+   *  through the device list. */
+  serialNumber?: string;
+  keyIndex?: number;
+  state?: DriverState;
+  reason?: string;
+}
+
+type DriverListener = (event: DriverEvent) => void;
+
+// ─────────────────────────── Lazy module load ─────────────────────────
+
+interface LoadedModules {
+  streamdeck: typeof import("@elgato-stream-deck/node");
+  canvas: typeof import("@napi-rs/canvas");
+  usb?: typeof import("usb");
+}
+
+let loadPromise: Promise<LoadedModules | null> | null = null;
+let lastLoadError: string | null = null;
+
+/** Per-key render coalescing window. 60 ms catches a typical
+ *  edit → save echo → variable change burst (~30-50 ms span) and
+ *  collapses it into one HID write. Larger windows feel laggy on
+ *  manual edits; smaller ones let glitches through. */
+const RENDER_DEBOUNCE_MS = 60;
+
+/** TTL for the cached `listDevices()` enumeration (see usage). */
+const LIST_TTL_MS = 1000;
+
+async function loadModules(): Promise<LoadedModules | null> {
+  if (loadPromise) return loadPromise;
+  loadPromise = (async () => {
+    try {
+      const streamdeck = await import("@elgato-stream-deck/node");
+      const canvas = await import("@napi-rs/canvas");
+      // usb is optional even within the driver — without it we lose
+      // hotplug but the rest still works. Wrap in its own try/catch.
+      let usb: typeof import("usb") | undefined;
+      try {
+        usb = await import("usb");
+      } catch {
+        usb = undefined;
+      }
+      lastLoadError = null;
+      return { streamdeck, canvas, usb };
+    } catch (err) {
+      lastLoadError = err instanceof Error ? err.message : String(err);
+      return null;
+    }
+  })();
+  return loadPromise;
+}
+
+// ─────────────────────────── Driver impl ──────────────────────────────
+
+class DriverImpl {
+  private openHandles = new Map<string, StreamDeck>();
+  /**
+   * In-flight `openStreamDeck` calls keyed by devicePath. Without
+   * this, concurrent callers (e.g. pushLayout calling renderKey 32
+   * times in parallel) each find an empty `openHandles`, each fire
+   * `openStreamDeck`, each attach `on("down"/"up")` handlers — and
+   * a single physical key press then triggers N event emissions.
+   * The dedupe ensures only the first call actually opens the
+   * device; everyone else awaits the same promise.
+   */
+  private openInFlight = new Map<string, Promise<StreamDeck | null>>();
+  /** path → device info from the last `listDevices()` call. We keep
+   *  this in parallel to `openHandles` so key events can attach a
+   *  serial number without a fresh HID enumeration (which would
+   *  block the event loop briefly on every press). */
+  private deviceInfo = new Map<string, StreamDeckDeviceInfo>();
+  private listeners = new Set<DriverListener>();
+  private hotplugBound = false;
+
+  /**
+   * Per-key render coalescing. When multiple render requests land
+   * for the same key within `RENDER_DEBOUNCE_MS`, only the last
+   * one's binding+override is composed and written. Eliminates the
+   * visible glitch on rapid var-change → edit → tally bursts and
+   * cuts HID bandwidth roughly in half during a flurry.
+   *
+   * Key: `${devicePath}:${keyIndex}`. Value: a pending state
+   * holding the latest payload + the timer.
+   */
+  private pendingRenders = new Map<
+    string,
+    {
+      binding: DeckBinding | undefined;
+      override:
+        | {
+            bgcolor?: string;
+            fgcolor?: string;
+            text?: string;
+            badge?: { color: string; symbol?: string };
+          }
+        | undefined;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
+
+  /** Connection to the satellite registry — wired once, drops the
+   *  unsubscribe on dispose. Created lazily so importing the
+   *  driver from a route that doesn't actually fire HID doesn't
+   *  drag the registry into a stale singleton state.  */
+  private satelliteUnsub: (() => void) | null = null;
+
+  /** Last resolved face signature per `devicePath:keyIndex`. The
+   *  feedback coordinator re-pushes EVERY bound key on EVERY variable
+   *  change; without change-detection a single tally tick recomposes +
+   *  HID-writes (or SSE-sends to a satellite) all 32 keys even though
+   *  only one changed. We skip when the signature is unchanged. */
+  private lastFace = new Map<string, string>();
+
+  /** Short-TTL cache of `listDevices()`. The coordinator calls it on
+   *  every recompute (every variable change) and each call otherwise
+   *  does a full HID enumeration (`listStreamDecks()`), which briefly
+   *  blocks the event loop. Invalidated on hotplug + satellite change. */
+  private devicesCache: { ts: number; list: DeviceSummary[] } | null = null;
+
+  subscribe(cb: DriverListener): () => void {
+    this.listeners.add(cb);
+    // First subscriber wires up the satellite registry → driver
+    // emit channel. Satellite presses are normalized into the same
+    // `key-down` / `key-up` shape the local SDK uses so the press
+    // dispatcher doesn't have to special-case them.
+    if (!this.satelliteUnsub) {
+      this.satelliteUnsub = satelliteRegistry.subscribePresses((event) => {
+        this.emit({
+          type: event.type === "down" ? "key-down" : "key-up",
+          // Remote decks have no device path on this side — set a
+          // synthetic marker prefixed with `satellite:` so any
+          // downstream logic that wants to differentiate still can.
+          devicePath: `satellite:${event.serial}`,
+          serialNumber: event.serial,
+          keyIndex: event.keyIndex,
+        });
+      });
+    }
+    return () => this.listeners.delete(cb);
+  }
+
+  private emit(event: DriverEvent): void {
+    for (const l of this.listeners) {
+      try {
+        l(event);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  async status(): Promise<DriverState> {
+    const mods = await loadModules();
+    if (!mods) {
+      // Even if the local HID deps failed to load, satellites can
+      // still bridge remote decks — the renderKey path doesn't need
+      // them for `satellite:` paths. Report "ready" when at least
+      // one satellite is connected so the UI doesn't grey out
+      // controls that DO work.
+      let satelliteCount = 0;
+      satelliteRegistry.forEachDevice(() => {
+        satelliteCount += 1;
+      });
+      if (satelliteCount > 0) {
+        return { state: "ready", devicesKnown: satelliteCount };
+      }
+      return {
+        state: "deps-missing",
+        reason:
+          lastLoadError ??
+          "Install @elgato-stream-deck/node + node-hid + @napi-rs/canvas",
+      };
+    }
+    return { state: "ready", devicesKnown: this.openHandles.size };
+  }
+
+  async listDevices(): Promise<DeviceSummary[]> {
+    // Short-TTL cache: the coordinator calls this on every variable
+    // change, and a fresh `listStreamDecks()` HID enumeration per tally
+    // tick briefly blocks the event loop. Hotplug + satellite changes
+    // null the cache, so staleness is bounded to LIST_TTL_MS anyway.
+    if (this.devicesCache && Date.now() - this.devicesCache.ts < LIST_TTL_MS) {
+      return this.devicesCache.list;
+    }
+    const mods = await loadModules();
+    if (!mods) {
+      // Local HID failed to load, but satellites can still bridge —
+      // return whatever the registry knows about so the UI can
+      // pair against remote decks.
+      const out: DeviceSummary[] = [];
+      satelliteRegistry.forEachDevice((satelliteId, d, satelliteLabel) => {
+        out.push({
+          path: `satellite:${d.serial}`,
+          serialNumber: d.serial,
+          model: d.model,
+          opened: true,
+          rows: d.rows,
+          cols: d.cols,
+          iconSize: d.iconSize,
+          remote: true,
+          remoteSatelliteId: satelliteId,
+          satelliteLabel: satelliteLabel ?? satelliteId,
+        });
+      });
+      this.devicesCache = { ts: Date.now(), list: out };
+      return out;
+    }
+    let infos: StreamDeckDeviceInfo[] = [];
+    try {
+      infos = await mods.streamdeck.listStreamDecks();
+    } catch (err) {
+      this.emit({
+        type: "error",
+        reason: err instanceof Error ? err.message : String(err),
+      });
+      return [];
+    }
+    // Bind hotplug now that we've shown the modules load — the first
+    // listDevices call typically fires after the user opens
+    // /streamdeck so the timing is right.
+    this.bindHotplug(mods);
+
+    const out: DeviceSummary[] = [];
+    // Refresh the cached info map — drop entries that are no longer
+    // enumerated (unplugged) so we don't keep emitting their serial
+    // on stray events.
+    const seen = new Set<string>();
+    for (const info of infos) {
+      seen.add(info.path);
+      this.deviceInfo.set(info.path, info);
+      const open = this.openHandles.get(info.path);
+      const dims = open ? deriveDims(open) : undefined;
+      out.push({
+        path: info.path,
+        serialNumber: info.serialNumber,
+        model: info.model,
+        productId: info.productId,
+        vendorId: info.vendorId,
+        opened: !!open,
+        rows: dims?.rows,
+        cols: dims?.cols,
+        iconSize: dims?.iconSize,
+      });
+    }
+    for (const [k] of this.deviceInfo) {
+      if (!seen.has(k)) this.deviceInfo.delete(k);
+    }
+
+    // Merge in satellite-owned devices. Their `path` is a synthetic
+    // marker the rest of the pipeline routes through the satellite
+    // registry instead of HID. The UI treats local and remote
+    // identically — same serial-based pairing, same renders.
+    satelliteRegistry.forEachDevice((satelliteId, d, satelliteLabel) => {
+      out.push({
+        path: `satellite:${d.serial}`,
+        serialNumber: d.serial,
+        model: d.model,
+        productId: undefined,
+        vendorId: undefined,
+        opened: true,
+        rows: d.rows,
+        cols: d.cols,
+        iconSize: d.iconSize,
+        // Tagged so the device picker / pairing UI can hint
+        // "(remote)" alongside the serial.
+        remote: true,
+        remoteSatelliteId: satelliteId,
+        satelliteLabel: satelliteLabel ?? satelliteId,
+      });
+    });
+    this.devicesCache = { ts: Date.now(), list: out };
+    return out;
+  }
+
+  private bindHotplug(mods: LoadedModules): void {
+    if (this.hotplugBound || !mods.usb) return;
+    this.hotplugBound = true;
+    const onUsbChange = () => {
+      // Debounce: re-list after a tick to let the OS finish
+      // enumerating before we ask. Stream Deck takes ~50 ms.
+      this.devicesCache = null; // device set changed → drop the cache
+      setTimeout(() => {
+        this.emit({ type: "devices-changed" });
+      }, 80);
+    };
+    // usb v2 exposes the hotplug EventEmitter under `usb.usb`, not
+    // the top-level export. Top-level has Device/findByIds/etc.
+    mods.usb.usb.on("attach", onUsbChange);
+    mods.usb.usb.on("detach", onUsbChange);
+  }
+
+  async open(devicePath: string): Promise<StreamDeck | null> {
+    const mods = await loadModules();
+    if (!mods) return null;
+    const existing = this.openHandles.get(devicePath);
+    if (existing) return existing;
+    // Coalesce concurrent open() callers onto a single open promise.
+    // Without this, the 32 renderKey calls fired by pushLayout each
+    // raced past the openHandles check, each opened the device, each
+    // attached `down/up` handlers — a 1× key press would then route
+    // through N listeners. Map entry is cleared in the finally so a
+    // subsequent open after a close succeeds.
+    const inFlight = this.openInFlight.get(devicePath);
+    if (inFlight) return inFlight;
+
+    const promise = (async (): Promise<StreamDeck | null> => {
+      try {
+        // Cast through unknown: the published `@elgato-stream-deck/node`
+        // `StreamDeck` type re-export drops `CONTROLS` (it lives on
+        // the wrapped `device` in v7), but every implementation
+        // forwards the constants we rely on. Our local `StreamDeck`
+        // shape pins the surface we actually call.
+        const deck = (await mods.streamdeck.openStreamDeck(
+          devicePath
+        )) as unknown as StreamDeck;
+        deck.on("down", (control) => {
+          if (control.type !== "button") return;
+          this.emit({
+            type: "key-down",
+            devicePath,
+            serialNumber: this.deviceInfo.get(devicePath)?.serialNumber,
+            keyIndex: control.index,
+          });
+        });
+        deck.on("up", (control) => {
+          if (control.type !== "button") return;
+          this.emit({
+            type: "key-up",
+            devicePath,
+            serialNumber: this.deviceInfo.get(devicePath)?.serialNumber,
+            keyIndex: control.index,
+          });
+        });
+        deck.on("error", (err: Error) => {
+          this.emit({ type: "error", devicePath, reason: err.message });
+        });
+        this.openHandles.set(devicePath, deck);
+        return deck;
+      } catch (err) {
+        this.emit({
+          type: "error",
+          devicePath,
+          reason: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      }
+    })();
+
+    this.openInFlight.set(devicePath, promise);
+    try {
+      return await promise;
+    } finally {
+      this.openInFlight.delete(devicePath);
+    }
+  }
+
+  async close(devicePath: string): Promise<void> {
+    const handle = this.openHandles.get(devicePath);
+    if (!handle) return;
+    try {
+      handle.removeAllListeners();
+      await handle.close();
+    } catch {
+      /* ignore — device may already be unplugged */
+    }
+    this.openHandles.delete(devicePath);
+  }
+
+  /**
+   * Render one key from a binding's preset and push to the device.
+   * Coalesces rapid successive calls for the same key into a single
+   * write (60 ms debounce) so a burst of edits / variable updates
+   * doesn't ghost-flicker the LCD with intermediate frames.
+   *
+   * `override` applies a runtime style change (e.g. tally lit) on
+   * top of the preset's static face. Used by the feedback
+   * coordinator without mutating the stored binding.
+   */
+  renderKey(
+    devicePath: string,
+    keyIndex: number,
+    binding: DeckBinding | undefined,
+    override?: {
+      bgcolor?: string;
+      fgcolor?: string;
+      text?: string;
+      badge?: { color: string; symbol?: string };
+    }
+  ): void {
+    // Satellite-owned devices skip the local debounce + HID write
+    // path — they're handled by the agent on the remote machine.
+    // We forward the latest payload through the registry; the
+    // agent does its own per-key coalescing on the receiving end.
+    if (devicePath.startsWith("satellite:")) {
+      const serial = devicePath.slice("satellite:".length);
+      // Skip the SSE send when the resolved face is unchanged — the
+      // coordinator re-pushes every key on every variable tick.
+      const ck = `${devicePath}:${keyIndex}`;
+      const sig = faceSignature(binding, override);
+      if (this.lastFace.get(ck) === sig) return;
+      this.lastFace.set(ck, sig);
+      // Send only the visual fields the satellite renders from — not
+      // the whole binding (steps/options/connection pins stay server
+      // side). Keeps the SSE payload tiny on busy tally updates.
+      satelliteRegistry.send({
+        type: "render",
+        serial,
+        keyIndex,
+        binding: binding
+          ? {
+              preset: {
+                label: binding.preset.label,
+                text: binding.preset.text,
+                bgcolor: binding.preset.bgcolor,
+                fgcolor: binding.preset.fgcolor,
+              },
+            }
+          : null,
+        override,
+      });
+      return;
+    }
+    const cacheKey = `${devicePath}:${keyIndex}`;
+    const existing = this.pendingRenders.get(cacheKey);
+    if (existing) {
+      // Latest writer wins — replace the pending payload + reset
+      // the timer so the user always sees the freshest face.
+      clearTimeout(existing.timer);
+    }
+    const timer = setTimeout(() => {
+      this.pendingRenders.delete(cacheKey);
+      void this.writeKey(devicePath, keyIndex, binding, override);
+    }, RENDER_DEBOUNCE_MS);
+    this.pendingRenders.set(cacheKey, { binding, override, timer });
+  }
+
+  /**
+   * Internal: the actual HID write. Called from the debounce timer
+   * with the *latest* payload for that key. Returns void so the
+   * caller (timer) doesn't keep dangling promises.
+   */
+  private async writeKey(
+    devicePath: string,
+    keyIndex: number,
+    binding: DeckBinding | undefined,
+    override:
+      | {
+          bgcolor?: string;
+          fgcolor?: string;
+          text?: string;
+          badge?: { color: string; symbol?: string };
+        }
+      | undefined
+  ): Promise<void> {
+    // Skip recompose + HID write when the resolved face is identical to
+    // what's already on the key. The coordinator fans a full-layout
+    // re-push on every variable change; this collapses that to only the
+    // keys that actually changed.
+    const ck = `${devicePath}:${keyIndex}`;
+    const sig = faceSignature(binding, override);
+    if (this.lastFace.get(ck) === sig) return;
+    const mods = await loadModules();
+    if (!mods) return;
+    const deck = await this.open(devicePath);
+    if (!deck) return;
+    if (!binding) {
+      try {
+        await deck.clearKey(keyIndex);
+        this.lastFace.set(ck, sig);
+      } catch {
+        /* ignore — leave cache unset so the next attempt retries */
+      }
+      return;
+    }
+    const dims = deriveDims(deck);
+    const size = dims.iconSize;
+    const png = composeKeyImage(mods.canvas, size, binding, override);
+    try {
+      await deck.fillKeyBuffer(keyIndex, png, { format: "rgb" });
+      this.lastFace.set(ck, sig);
+    } catch (err) {
+      this.emit({
+        type: "error",
+        devicePath,
+        keyIndex,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  async clearAll(devicePath: string): Promise<void> {
+    // clearPanel blanks every key, so the per-key face cache is now
+    // stale for this device — drop its entries so the next render of an
+    // unchanged face still re-draws onto the freshly-blanked panel.
+    this.invalidateFaceCache(devicePath);
+    if (devicePath.startsWith("satellite:")) {
+      const serial = devicePath.slice("satellite:".length);
+      satelliteRegistry.send({ type: "clear-panel", serial });
+      return;
+    }
+    const deck = await this.open(devicePath);
+    if (!deck) return;
+    try {
+      await deck.clearPanel();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async setBrightness(devicePath: string, percent: number): Promise<void> {
+    if (devicePath.startsWith("satellite:")) {
+      const serial = devicePath.slice("satellite:".length);
+      satelliteRegistry.send({
+        type: "brightness",
+        serial,
+        percent: Math.max(0, Math.min(100, percent | 0)),
+      });
+      return;
+    }
+    const deck = await this.open(devicePath);
+    if (!deck) return;
+    try {
+      await deck.setBrightness(Math.max(0, Math.min(100, percent | 0)));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Drop the per-key face cache for one device (all its keys). */
+  private invalidateFaceCache(devicePath: string): void {
+    const prefix = `${devicePath}:`;
+    for (const k of this.lastFace.keys()) {
+      if (k.startsWith(prefix)) this.lastFace.delete(k);
+    }
+  }
+
+  /**
+   * Forget everything cached for a satellite's deck — its face cache
+   * AND the device-list cache. Called when a satellite (re)announces:
+   * its decks may have just reopened blank (restart), so the next
+   * re-render must actually re-send every key instead of being skipped
+   * by the change-detection above.
+   */
+  invalidateSatellite(serial: string): void {
+    this.invalidateFaceCache(`satellite:${serial}`);
+    this.devicesCache = null;
+  }
+
+  /**
+   * Tell every SSE subscriber (the browser editor) that the device set
+   * changed — a satellite just (re)announced or dropped, which local
+   * USB hotplug can't signal. The editor re-fetches `/api/streamdeck/
+   * devices` on this, so a remote deck appears/disappears live instead
+   * of only on a manual refresh / page reload. Also drops the list
+   * cache so that refetch is fresh.
+   */
+  notifyDevicesChanged(): void {
+    this.devicesCache = null;
+    this.emit({ type: "devices-changed" });
+  }
+
+  async pushLayout(
+    devicePath: string,
+    bindings: Record<number, DeckBinding>
+  ): Promise<void> {
+    // Satellite path: we don't have a HID handle here — look up the
+    // device's key count from the satellite registry instead, then
+    // forward a render per key. The satellite agent applies them.
+    if (devicePath.startsWith("satellite:")) {
+      const serial = devicePath.slice("satellite:".length);
+      let total = 0;
+      satelliteRegistry.forEachDevice((_id, d) => {
+        if (d.serial === serial) total = d.rows * d.cols;
+      });
+      if (total === 0) return;
+      for (let i = 0; i < total; i++) {
+        this.renderKey(devicePath, i, bindings[i]);
+      }
+      return;
+    }
+
+    const mods = await loadModules();
+    if (!mods) return;
+    const deck = await this.open(devicePath);
+    if (!deck) return;
+    // v7 publishes a CONTROLS array with one entry per physical
+    // surface element (button, encoder, lcd-segment). We only render
+    // buttons here; encoder LEDs / LCD segments will plug into their
+    // own renderKey-like helpers when we wire Stream Deck +.
+    //
+    // renderKey is now fire-and-forget (returns void) — it schedules
+    // a debounced HID write internally. All 32 keys land within the
+    // debounce window, then the SDK's own queue serialises the
+    // actual writes. No need to await per-key.
+    const buttons = deck.CONTROLS.filter((c) => c.type === "button");
+    for (const ctrl of buttons) {
+      this.renderKey(devicePath, ctrl.index, bindings[ctrl.index]);
+    }
+  }
+
+  dispose(): void {
+    this.satelliteUnsub?.();
+    this.satelliteUnsub = null;
+    for (const { timer } of this.pendingRenders.values()) {
+      clearTimeout(timer);
+    }
+    this.pendingRenders.clear();
+    for (const [, handle] of this.openHandles) {
+      try {
+        handle.removeAllListeners();
+        handle.close();
+      } catch {
+        /* swallow */
+      }
+    }
+    this.openHandles.clear();
+    this.listeners.clear();
+    this.lastFace.clear();
+    this.devicesCache = null;
+  }
+}
+
+// ─────────────────────────── Geometry helper ─────────────────────────
+
+/**
+ * Derive rows / cols / iconSize from the deck's CONTROLS array.
+ * Older SDKs exposed KEY_ROWS / KEY_COLUMNS / ICON_SIZE directly;
+ * v7+ replaced them with a richer CONTROLS list — same numbers,
+ * different access path. Fallbacks (72px) mirror the Stream Deck MK.2
+ * key size so a never-seen-before model still renders something.
+ */
+function deriveDims(deck: StreamDeck): {
+  rows: number;
+  cols: number;
+  iconSize: number;
+} {
+  const buttons = deck.CONTROLS.filter((c) => c.type === "button");
+  let maxRow = 0;
+  let maxCol = 0;
+  let size = 72;
+  for (const c of buttons) {
+    if (c.row > maxRow) maxRow = c.row;
+    if (c.column > maxCol) maxCol = c.column;
+    if (c.pixelSize?.width) size = c.pixelSize.width;
+  }
+  return {
+    rows: maxRow + 1,
+    cols: maxCol + 1,
+    iconSize: size,
+  };
+}
+
+// ─────────────────────────── Image composer ───────────────────────────
+
+/**
+ * Render a key face as a raw RGB buffer the Stream Deck SDK can write
+ * directly. Mirrors the look of the preset tiles in the browser:
+ *   • Solid bg color (square).
+ *   • Centered text — auto-shrunk to fit, dark stroke outline for
+ *     contrast on any bg colour, larger base size than before so the
+ *     label is readable at arm's length.
+ *   • Optional badge dot top-right (active/state indicator).
+ *   • Tiny `kind` watermark bottom-right.
+ *
+ * The output is RGB (3 bytes per pixel) because that's what
+ * `fillKeyBuffer({format: "rgb"})` expects — slightly more efficient
+ * than the RGBA path for our use case.
+ */
+
+/** Cheap signature of the RESOLVED key face — what actually gets drawn.
+ *  Two payloads with the same signature produce an identical image, so
+ *  we can skip the recompose + HID write / SSE send. */
+function faceSignature(
+  binding: DeckBinding | undefined,
+  override?: {
+    bgcolor?: string;
+    fgcolor?: string;
+    text?: string;
+    badge?: { color: string; symbol?: string };
+  }
+): string {
+  if (!binding) return "∅";
+  const bg = override?.bgcolor ?? binding.preset.bgcolor ?? "";
+  const fg = override?.fgcolor ?? binding.preset.fgcolor ?? "";
+  const face = override?.text ?? binding.preset.text ?? binding.preset.label ?? "";
+  const badge = override?.badge
+    ? `${override.badge.color}|${override.badge.symbol ?? ""}`
+    : "";
+  return `${bg}|${fg}|${face}|${badge}`;
+}
+
+function composeKeyImage(
+  canvasModule: LoadedModules["canvas"],
+  size: number,
+  binding: DeckBinding,
+  override?: {
+    bgcolor?: string;
+    fgcolor?: string;
+    text?: string;
+    badge?: { color: string; symbol?: string };
+  }
+): Buffer {
+  const canvas: Canvas = canvasModule.createCanvas(size, size);
+  const ctx = canvas.getContext("2d");
+
+  const bg = override?.bgcolor ?? binding.preset.bgcolor ?? "#000000";
+  const fg = override?.fgcolor ?? binding.preset.fgcolor ?? "#ffffff";
+  const face = override?.text ?? binding.preset.text ?? binding.preset.label ?? "";
+
+  // Background
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, size, size);
+
+  // Main label — split by explicit newlines first, then auto-shrink
+  // each line so the longest one fits within the safe area.
+  drawAutoFitText(ctx, face, size, fg);
+
+  // Badge dot (active indicator)
+  if (override?.badge) {
+    const r = Math.max(5, Math.round(size * 0.06));
+    const pad = Math.round(size * 0.08);
+    ctx.beginPath();
+    ctx.arc(size - pad, pad, r, 0, Math.PI * 2);
+    ctx.fillStyle = override.badge.color;
+    ctx.fill();
+    if (override.badge.symbol) {
+      ctx.fillStyle = "#ffffff";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = `700 ${Math.round(r * 1.2)}px sans-serif`;
+      ctx.fillText(override.badge.symbol, size - pad, pad);
+    }
+  }
+
+  // (Kind watermark removed at user request — the operator already
+  // knows the binding's target from context, the corner tag was
+  // visual noise on small keys.)
+
+  // Extract RGBA via getImageData (the only way to get raw pixel
+  // bytes from @napi-rs/canvas — its toBuffer() only emits encoded
+  // formats). Strip alpha for the Stream Deck SDK's RGB path.
+  const img = ctx.getImageData(0, 0, size, size);
+  const rgba = img.data;
+  const out = Buffer.alloc(size * size * 3);
+  for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
+    out[j] = rgba[i];
+    out[j + 1] = rgba[i + 1];
+    out[j + 2] = rgba[i + 2];
+  }
+  return out;
+}
+
+/**
+ * Centered multi-line text with auto-shrink + stroke outline.
+ *
+ * Sizing strategy:
+ *   • Start at 32% of key height (vs old 22%) — much bigger.
+ *   • Measure widest line; if it overflows the safe area, scale the
+ *     font down until it fits. Floor at 14% so very long labels
+ *     remain legible-ish rather than disappearing.
+ *
+ * Stroke: 2-3 px black outline so light-on-dark and dark-on-light
+ * both stay readable when the bg is something nasty (yellow, lime,
+ * etc.). A standard trick for surface key rendering.
+ */
+function drawAutoFitText(
+  ctx: import("@napi-rs/canvas").CanvasRenderingContext2D,
+  face: string,
+  size: number,
+  color: string
+): void {
+  const lines = face.split(/\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+  if (lines.length === 0) return;
+
+  const safeWidth = size - Math.max(8, Math.round(size * 0.1));
+  const maxFontSize = Math.round(size * 0.32);
+  const minFontSize = Math.max(10, Math.round(size * 0.14));
+  // Reserve a bit more space when there are multiple lines.
+  const perLineCap =
+    lines.length === 1 ? maxFontSize : Math.round((size * 0.7) / lines.length);
+
+  // Binary-search-ish: start at the cap, shrink until the widest
+  // line fits the safe area.
+  let fontSize = Math.min(maxFontSize, perLineCap);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (; fontSize >= minFontSize; fontSize -= 1) {
+    ctx.font = `800 ${fontSize}px sans-serif`;
+    const widest = Math.max(...lines.map((l) => ctx.measureText(l).width));
+    if (widest <= safeWidth) break;
+  }
+  ctx.font = `800 ${fontSize}px sans-serif`;
+
+  // Line layout — tight leading so multi-line uses vertical space
+  // efficiently. Even-line case centers around midpoint; odd-line
+  // case sits the middle line on midpoint.
+  const lineHeight = Math.round(fontSize * 1.02);
+  const totalHeight = lineHeight * lines.length;
+  let y = Math.round(size / 2 - totalHeight / 2 + lineHeight / 2);
+
+  // Stroke first (acts as a halo) then fill.
+  ctx.strokeStyle = "rgba(0,0,0,0.65)";
+  const strokeWidth = Math.max(2, Math.round(size * 0.025));
+  // @napi-rs/canvas honours `lineWidth` even though our shim doesn't
+  // declare it — set via the underlying ctx (cast). Falls back to
+  // default 1px stroke if unsupported, still readable.
+  (ctx as unknown as { lineWidth: number }).lineWidth = strokeWidth;
+  ctx.fillStyle = color;
+  for (const line of lines) {
+    ctx.strokeText(line, size / 2, y);
+    ctx.fillText(line, size / 2, y);
+    y += lineHeight;
+  }
+}
+
+// ─────────────────────────── HMR-safe singleton ───────────────────────
+
+export const streamdeckDriver = hmrSingleton("streamdeck-driver", DriverImpl);

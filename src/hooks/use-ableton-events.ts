@@ -2,13 +2,19 @@
 
 import { useCallback } from "react";
 import { useAbletonStore } from "@/stores/ableton-store";
-import { useSSE } from "./use-sse";
+import { useConnections } from "./use-connections";
+import { useConnectionEvents } from "./use-connection-events";
+import { useConnectionId } from "./use-connection-command";
 import type { AbletonEvent } from "@/lib/ableton/types";
 
 /**
- * Subscribe to the server-side AbletonOSC broker via SSE. Boilerplate
- * (visibility, retry, cleanup) is shared with `useVmixEvents` through
- * the `useSSE` helper.
+ * Subscribe to the AbletonOSC broker via the generic connection events
+ * stream. Same dispatch shape as the legacy hook; only the SSE URL
+ * changed.
+ *
+ * Meta envelopes (`__status`, `__snapshot`) from the connection
+ * manager are skipped — the broker's own status/snapshot replay on
+ * subscribe carries the richer payloads the store expects.
  */
 export function useAbletonEvents() {
   const setStatus = useAbletonStore((s) => s.setStatus);
@@ -17,39 +23,42 @@ export function useAbletonEvents() {
   const applyTransportPatch = useAbletonStore((s) => s.applyTransportPatch);
   const setClipPosition = useAbletonStore((s) => s.setClipPosition);
 
+  const { data: connectionsData } = useConnections();
+  const abletonId = useConnectionId(
+    connectionsData?.connections ?? null,
+    "ableton",
+    connectionsData?.defaults
+  );
+
   const onMessage = useCallback(
     (e: MessageEvent) => {
-      let event: AbletonEvent;
+      let event: AbletonEvent | { type: string };
       try {
-        event = JSON.parse(e.data) as AbletonEvent;
+        event = JSON.parse(e.data);
       } catch {
         return;
       }
-      switch (event.type) {
+      if (event.type === "__status" || event.type === "__snapshot") return;
+      const ev = event as AbletonEvent;
+      switch (ev.type) {
         case "status":
-          setStatus(
-            event.status,
-            event.host,
-            event.port,
-            event.version,
-            event.error
-          );
+          setStatus(ev.status, ev.host, ev.port, ev.version, ev.error);
           break;
         case "snapshot":
-          setSnapshot(event.snapshot);
+          setSnapshot(ev.snapshot);
           break;
         case "playing-slot":
-          setPlayingSlot(event.trackIndex, event.playingSlotIndex);
+          setPlayingSlot(ev.trackIndex, ev.playingSlotIndex);
           break;
         case "transport":
-          applyTransportPatch(event.patch);
+          applyTransportPatch(ev.patch);
           break;
         case "clip-position":
           setClipPosition({
-            trackIndex: event.trackIndex,
-            clipIndex: event.clipIndex,
-            position: event.position,
-            ts: event.ts,
+            trackIndex: ev.trackIndex,
+            clipIndex: ev.clipIndex,
+            position: ev.position,
+            ts: ev.ts,
           });
           break;
       }
@@ -63,5 +72,5 @@ export function useAbletonEvents() {
     ]
   );
 
-  useSSE("/api/ableton/events", onMessage);
+  useConnectionEvents(abletonId, onMessage);
 }

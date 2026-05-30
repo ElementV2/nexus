@@ -14,3 +14,4 @@ export { MonoInput, SetButton } from "./MonoInput";
 export { MonoChip } from "./MonoChip";
 export { Stat } from "./Stat";
 export { PrimaryButton, SecondaryButton } from "./PrimaryButton";
+export { ConfirmProvider, useConfirm, type ConfirmOptions } from "./ConfirmDialog";

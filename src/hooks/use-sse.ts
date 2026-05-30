@@ -23,6 +23,13 @@ export function useSSE(
   onMessage: (e: MessageEvent) => void
 ): void {
   useEffect(() => {
+    // Falsy url = disabled. Callers in bootstrap states (e.g. waiting
+    // for a connection id to resolve) pass "" to suspend the
+    // subscription without unmounting the hook. We still install the
+    // effect so React keeps the hook order stable across renders, but
+    // skip all the EventSource work.
+    if (!url) return;
+
     let es: EventSource | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let hideTimer: ReturnType<typeof setTimeout> | null = null;

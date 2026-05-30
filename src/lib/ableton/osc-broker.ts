@@ -1,5 +1,4 @@
 import { createSocket, type Socket } from "node:dgram";
-import { getPreferences } from "@/lib/db/preferences";
 import { decodePacket, encodeMessage, type OscArg } from "./osc-codec";
 // Namespace import: lets us call `cmd.fireClip(...)` etc. without the
 // `as cmdFireClip` alias dance that was required to avoid collisions
@@ -15,10 +14,9 @@ import type {
 } from "./types";
 
 /**
- * Shared AbletonOSC broker. Mirrors the design of vMix's `state-broker`:
+ * Per-instance AbletonOSC broker. ONE per configured Ableton connection
+ * — each owns its own UDP socket + state.
  *
- *   • Singleton — one UDP socket for the whole Node process, no matter how
- *     many browsers are connected.
  *   • Subscriber model — SSE handlers `subscribe()` to receive snapshot
  *     and incremental events.
  *   • Push-driven — we ask Ableton ONCE for a snapshot then rely on
@@ -28,11 +26,16 @@ import type {
  *     re-fetch the snapshot and re-subscribe.
  */
 
+export interface AbletonBrokerConfig {
+  host: string;
+  sendPort: number;
+  recvPort: number;
+}
+
 type Subscriber = (e: AbletonEvent) => void;
 
 const PING_MS = 2_000;
 const STALE_MS = 5_000;
-const CONFIG_REFRESH_MS = 5_000;
 /** Tracks per track_data call. Keeps packets under typical UDP MTU. */
 const TRACK_DATA_CHUNK = 6;
 /** How often we resync current_song_time while playing. Cheap (1 msg). */
@@ -46,13 +49,19 @@ const SONGTIME_RESYNC_MS = 1_500;
  */
 const STOP_GRACE_MS = 3_000;
 
-class AbletonBroker {
+export class AbletonBroker {
   private subscribers = new Set<Subscriber>();
   private socket: Socket | null = null;
 
-  private host = "127.0.0.1";
-  private sendPort = 11000;
-  private recvPort = 11001;
+  private host: string;
+  private sendPort: number;
+  private recvPort: number;
+
+  constructor(config: AbletonBrokerConfig) {
+    this.host = config.host;
+    this.sendPort = config.sendPort;
+    this.recvPort = config.recvPort;
+  }
 
   private connected = false;
   private lastReplyTs = 0;
@@ -61,7 +70,6 @@ class AbletonBroker {
   private lastStatusEvent: AbletonEvent | null = null;
 
   private pingTimer: ReturnType<typeof setInterval> | null = null;
-  private configTimer: ReturnType<typeof setInterval> | null = null;
   private songTimeTimer: ReturnType<typeof setInterval> | null = null;
   /** Deferred-stop handle. See STOP_GRACE_MS — gives consecutive
    *  testConnection() calls a chance to reuse the warm socket. */
@@ -163,10 +171,37 @@ class AbletonBroker {
     return this.sendRaw(m.address, m.args);
   }
 
-  /** Re-read preferences immediately. Called by the prefs PUT route so
-   *  host/port edits take effect without waiting for the 5s poll. */
-  refreshConfig() {
-    this.readConfig();
+  /** Apply a new config and rebind on the new recv port if host/ports
+   *  changed. Called by the registry on reconcile (per-instance). */
+  updateConfig(config: AbletonBrokerConfig) {
+    const changed =
+      config.host !== this.host ||
+      config.sendPort !== this.sendPort ||
+      config.recvPort !== this.recvPort;
+    this.host = config.host;
+    this.sendPort = config.sendPort;
+    this.recvPort = config.recvPort;
+    if (changed && this.socket) {
+      // Unsubscribe cleanly from the OLD host before tearing down the
+      // socket so we don't leave it spraying listener replies at us.
+      this.sendUnsubscribeAll();
+      this.closeSocket();
+      this.openSocket();
+      this.connected = false;
+      this.snapshot = null;
+      this.listening.clear();
+      this.positionListening.clear();
+      this.publishStatus("connecting");
+    }
+  }
+
+  /**
+   * Current connection state. Public read of the otherwise-internal
+   * `connected` flag so the device-registry adapter can report health
+   * without subscribing to events.
+   */
+  getStatus(): "connected" | "disconnected" {
+    return this.connected ? "connected" : "disconnected";
   }
 
   /**
@@ -223,10 +258,8 @@ class AbletonBroker {
   // ─── Lifecycle ────────────────────────────────────────────────
 
   private start() {
-    this.readConfig();
     this.openSocket();
     this.pingTimer = setInterval(() => this.tickPing(), PING_MS);
-    this.configTimer = setInterval(() => this.readConfig(), CONFIG_REFRESH_MS);
     // While playing, fetch current_song_time so the UI can resync. Keeps
     // the position counter accurate after tempo changes or scrubbing.
     this.songTimeTimer = setInterval(() => {
@@ -255,10 +288,8 @@ class AbletonBroker {
       this.stopGraceTimer = null;
     }
     if (this.pingTimer) clearInterval(this.pingTimer);
-    if (this.configTimer) clearInterval(this.configTimer);
     if (this.songTimeTimer) clearInterval(this.songTimeTimer);
     this.pingTimer = null;
-    this.configTimer = null;
     this.songTimeTimer = null;
     // Politely tell AbletonOSC we're going away. Without this it keeps
     // every `start_listen` registered and spams packets to a port we
@@ -315,31 +346,6 @@ class AbletonBroker {
       }
     } catch {
       /* never throw from disconnect cleanup */
-    }
-  }
-
-  private readConfig() {
-    const p = getPreferences();
-    const changed =
-      p.ableton_host !== this.host ||
-      p.ableton_send_port !== this.sendPort ||
-      p.ableton_recv_port !== this.recvPort;
-    this.host = p.ableton_host;
-    this.sendPort = p.ableton_send_port;
-    this.recvPort = p.ableton_recv_port;
-    if (changed && this.socket) {
-      // Rebind on the new recv port. Forces a fresh snapshot from the
-      // new host on next ping. Unsubscribe cleanly from the OLD host
-      // before tearing down the socket so we don't leave it spraying
-      // listener replies at us.
-      this.sendUnsubscribeAll();
-      this.closeSocket();
-      this.openSocket();
-      this.connected = false;
-      this.snapshot = null;
-      this.listening.clear();
-      this.positionListening.clear();
-      this.publishStatus("connecting");
     }
   }
 
@@ -795,13 +801,3 @@ class AbletonBroker {
   }
 }
 
-// Survive Next dev hot-reload across module re-imports — see
-// `hmrSingleton` for the class-identity-tracking trick. The key
-// includes a schema marker we bump when AbletonSnapshot's shape
-// changes so a stale cached snapshot from a prior version can't
-// crash the new UI.
-import { hmrSingleton } from "@/lib/utils/hmr-singleton";
-export const abletonBroker = hmrSingleton(
-  "ableton-broker-v2",
-  AbletonBroker
-);

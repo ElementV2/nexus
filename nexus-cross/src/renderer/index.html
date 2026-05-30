@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';"
+    />
+    <title>Nexus Cross</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="drag-strip"></div>
+
+    <main>
+      <header>
+        <div class="brand">
+          <div class="logo">NX</div>
+          <div>
+            <div class="title">Nexus Cross</div>
+            <div class="sub">Stream Deck satellite</div>
+          </div>
+        </div>
+        <div id="state" class="pill pill-off">Idle</div>
+      </header>
+
+      <section
+        id="update-banner"
+        class="banner"
+        hidden
+      >
+        <span id="update-text">Update available</span>
+        <button id="update-btn" class="link">Download</button>
+      </section>
+
+      <section class="card">
+        <label class="field-label" for="server">Nexus server URL</label>
+        <input
+          id="server"
+          type="text"
+          spellcheck="false"
+          placeholder="http://192.168.1.10:9088"
+        />
+        <label class="field-label" for="label">Label (shown in the app)</label>
+        <input id="label" type="text" spellcheck="false" placeholder="Booth PC" />
+        <button id="save" class="primary">Save &amp; connect</button>
+        <div id="hint" class="hint"></div>
+      </section>
+
+      <section class="card">
+        <div class="field-label">Local Stream Decks</div>
+        <div id="devices" class="devices">
+          <div class="muted">No deck detected.</div>
+        </div>
+      </section>
+
+      <footer>
+        <span id="version" class="muted"></span>
+        <div class="footer-actions">
+          <button id="hide" class="ghost">Hide</button>
+          <button id="quit" class="ghost danger">Quit</button>
+        </div>
+      </footer>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

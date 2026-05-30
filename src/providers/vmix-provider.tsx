@@ -3,12 +3,14 @@
 import { useEffect, useRef } from "react";
 import { useVmixEvents } from "@/hooks/use-vmix-events";
 import { useAbletonEvents } from "@/hooks/use-ableton-events";
+import { useObsEvents } from "@/hooks/use-obs-events";
 import { useVmixStore } from "@/stores/vmix-store";
 
 export function VmixProvider({ children }: { children: React.ReactNode }) {
   useLoadPreferences();
   useVmixEvents();
   useAbletonEvents();
+  useObsEvents();
   return <>{children}</>;
 }
 

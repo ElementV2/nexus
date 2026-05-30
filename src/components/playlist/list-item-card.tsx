@@ -1,10 +1,12 @@
 "use client";
 
-import { memo, useRef, useCallback, useEffect } from "react";
+import { memo, useRef, useCallback, useEffect, useMemo } from "react";
 import { TransportControls } from "./transport-controls";
 import { formatTime } from "@/lib/utils/time";
 import { VuMeter } from "@/components/audio/vu-meter";
+import { BusButton } from "@/components/audio/bus-button";
 import { useVmixCommand } from "@/hooks/use-vmix-command";
+import { useVmixStore } from "@/stores/vmix-store";
 import { useOptimisticValue } from "@/hooks/use-optimistic-value";
 import {
   selectIndex,
@@ -12,8 +14,13 @@ import {
   previousItem,
   setPosition,
   listRemove,
+  audioOn,
+  audioOff,
+  audioBusOn,
+  audioBusOff,
 } from "@/lib/vmix/commands";
 import { THROTTLE_RATE_MS } from "@/lib/vmix/constants";
+import type { AudioBus } from "@/lib/vmix/constants";
 import { ChevronUp, ChevronDown, X } from "lucide-react";
 import type { VmixInput } from "@/lib/vmix/types";
 
@@ -174,6 +181,29 @@ interface ListItemCardProps {
 
 function ListItemCardImpl({ input }: ListItemCardProps) {
   const send = useVmixCommand();
+  const audioBuses = useVmixStore((s) => s.vmixState?.audioBuses);
+  const availableBuses = useMemo(
+    () => (audioBuses ?? []).map((b) => b.name),
+    [audioBuses]
+  );
+  const activeBuses = useMemo(
+    () => input.audioBusses.split(",").filter(Boolean),
+    [input.audioBusses]
+  );
+  const handleMuteToggle = useCallback(() => {
+    send(input.muted ? audioOn(input.number) : audioOff(input.number));
+  }, [send, input.muted, input.number]);
+  const handleBusToggle = useCallback(
+    (bus: string) => {
+      const isActive = activeBuses.includes(bus);
+      send(
+        isActive
+          ? audioBusOff(input.number, bus)
+          : audioBusOn(input.number, bus)
+      );
+    },
+    [send, input.number, activeBuses]
+  );
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
 
@@ -296,6 +326,34 @@ function ListItemCardImpl({ input }: ListItemCardProps) {
         <VuMeter amplitude={input.meterF1} muted={input.muted} />
         <VuMeter amplitude={input.meterF2} muted={input.muted} />
       </div>
+
+      {/* Audio routing — mute + bus assignment, mirrors live details panel */}
+      {input.hasAudio && (
+        <div className="flex items-stretch gap-1">
+          <button
+            onClick={handleMuteToggle}
+            data-active="true"
+            data-role={input.muted ? "red" : "green"}
+            className="sw-cell shrink-0"
+            style={{ width: 44, fontSize: 10 }}
+            aria-pressed={input.muted}
+            aria-label={input.muted ? "Unmute" : "Mute"}
+          >
+            {input.muted ? "MUTE" : "LIVE"}
+          </button>
+          <div className="flex flex-1 flex-wrap pr-px pb-px">
+            {["M", ...availableBuses].map((bus) => (
+              <div key={bus} style={{ width: 30 }}>
+                <BusButton
+                  bus={bus as AudioBus}
+                  active={activeBuses.includes(bus)}
+                  onToggle={() => handleBusToggle(bus)}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Progress + transport */}
       <div

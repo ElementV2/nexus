@@ -1,0 +1,53 @@
+name: Checks
+
+# Reusable quality gate: version lockstep, lint, type safety across the
+# three packages, and the unit suite. Called by ci.yml (pull requests +
+# feature pushes) and by release.yml (before any installer is built), so a
+# broken or version-drifted tree can never ship.
+
+on:
+  workflow_call:
+
+jobs:
+  checks:
+    # Windows mirrors the release/build environment exactly (native HID /
+    # canvas / usb modules resolve the same way as in packaging).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            launcher/package-lock.json
+            nexus-cross/package-lock.json
+
+      - name: Install root deps
+        run: npm ci
+      - name: Install launcher deps
+        working-directory: launcher
+        run: npm ci
+      - name: Install nexus-cross deps
+        working-directory: nexus-cross
+        run: npm ci
+
+      - name: Versions in lockstep
+        run: npm run version:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check (web app)
+        run: npx tsc --noEmit
+      - name: Type-check (launcher)
+        working-directory: launcher
+        run: npx tsc --noEmit
+      - name: Type-check (nexus-cross)
+        working-directory: nexus-cross
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npm test

@@ -34,8 +34,8 @@ interface LauncherSettings {
 }
 
 // 9088 — visually echoes vMix's 8088 (just bumped the leading digit) and
-// avoids Companion (8000), vMix HTTP (8088), vMix SRT (5000), and the usual
-// dev/AV ports (3000, 4444/4455 OBS, 1935 RTMP, 9000).
+// avoids the usual broadcast/AV/dev ports: vMix HTTP (8088), vMix SRT
+// (5000), 3000, 4444/4455 (OBS), 1935 (RTMP), 8000, 9000.
 const DEFAULT_SETTINGS: LauncherSettings = {
   port: 9088,
   gui_interface: "0.0.0.0",
@@ -207,6 +207,11 @@ function wireIpc(srv: ServerManager) {
   ipcMain.handle("launcher:get-settings", () => loadSettings());
   ipcMain.handle("launcher:get-interfaces", () => listInterfaces());
   ipcMain.handle("launcher:set-port", async (_e, port: number) => {
+    // Reject out-of-range ports before persisting / restarting — a 0 or
+    // negative value would otherwise wedge the server in a restart loop.
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new Error(`Invalid port ${port} — must be an integer 1-65535`);
+    }
     const s = loadSettings();
     s.port = port;
     saveSettings(s);

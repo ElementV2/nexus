@@ -1,0 +1,74 @@
+{
+  "name": "nexus-cross",
+  "version": "0.1.8",
+  "private": true,
+  "description": "LAN satellite agent for Nexus — bridges a local Stream Deck to a Nexus server running on another machine.",
+  "author": "ElementV2 <death0factory@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ElementV2/nexus.git"
+  },
+  "main": "build/main.js",
+  "scripts": {
+    "compile": "tsc && node ../scripts/copy-renderer.mjs",
+    "dev": "npm run compile && electron .",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit",
+    "package:win": "npm run compile && electron-builder --win --x64 --publish never",
+    "release:win": "npm run package:win"
+  },
+  "build": {
+    "appId": "com.nexus.cross",
+    "productName": "Nexus Cross",
+    "directories": {
+      "output": "dist",
+      "buildResources": "resources"
+    },
+    "files": [
+      "build/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "resources/icon.ico", "to": "icon.ico" }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "node_modules/@napi-rs/**",
+      "node_modules/@julusian/**",
+      "node_modules/@elgato-stream-deck/**",
+      "node_modules/usb/**"
+    ],
+    "compression": "maximum",
+    "electronLanguages": ["en-US"],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Nexus-Cross-Setup-${version}.exe",
+      "shortcutName": "Nexus Cross"
+    }
+  },
+  "dependencies": {
+    "@elgato-stream-deck/node": "^7.2.0",
+    "@napi-rs/canvas": "^0.1.56",
+    "undici": "^6.19.8",
+    "usb": "^2.14.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "electron": "^32.2.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2"
+  }
+}

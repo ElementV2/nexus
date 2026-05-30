@@ -5,6 +5,17 @@ import type { OverlayConfig } from "@/lib/web-assets/types";
 
 export const dynamic = "force-dynamic";
 
+/** Escape a string for safe interpolation into HTML text/attributes —
+ *  the `name` here comes straight from the URL path. */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ name: string }> }
@@ -52,7 +63,7 @@ export async function GET(
 <body>
   <div id="overlay">
     <p style="color: white; padding: 20px; font-family: sans-serif;">
-      Web Asset: ${name}
+      Web Asset: ${escapeHtml(name)}
     </p>
   </div>
   <script>

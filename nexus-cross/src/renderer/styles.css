@@ -1,0 +1,226 @@
+:root {
+  --bg: #0d1310;
+  --panel: #141b16;
+  --panel-2: #181f19;
+  --card: #11160f;
+  --line: #243027;
+  --line-hi: #2f3d31;
+  --ink: #dde2d6;
+  --mid: #9aa890;
+  --muted: #6f7d68;
+  --amber: #d8a657;
+  --green: #7bd88f;
+  --red: #e06c6c;
+  --font-mono: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  user-select: none;
+}
+
+.drag-strip {
+  height: 32px;
+  -webkit-app-region: drag;
+}
+
+main {
+  padding: 4px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo {
+  width: 30px;
+  height: 30px;
+  background: var(--amber);
+  color: var(--bg);
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: -0.02em;
+}
+
+.title {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.sub {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.pill {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 4px 10px;
+  border: 1px solid var(--line-hi);
+}
+
+.pill-off {
+  color: var(--muted);
+  background: var(--card);
+}
+.pill-connecting {
+  color: var(--amber);
+  background: rgba(216, 166, 87, 0.12);
+  border-color: var(--amber);
+}
+.pill-on {
+  color: var(--green);
+  background: rgba(123, 216, 143, 0.12);
+  border-color: var(--green);
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(216, 166, 87, 0.12);
+  border: 1px solid var(--amber);
+  color: var(--amber);
+  font-size: 12px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+input {
+  background: var(--panel-2);
+  border: 1px solid var(--line-hi);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 7px 9px;
+  outline: none;
+  user-select: text;
+}
+input:focus {
+  border-color: var(--amber);
+}
+
+button {
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+
+.primary {
+  background: var(--amber);
+  color: var(--bg);
+  border: 1px solid var(--amber);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 11px;
+  padding: 8px 12px;
+}
+
+.ghost {
+  background: transparent;
+  border: 1px solid var(--line-hi);
+  color: var(--mid);
+  font-size: 11px;
+  padding: 6px 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.ghost.danger {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.link {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  text-decoration: underline;
+  font-size: 12px;
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--muted);
+  min-height: 14px;
+}
+
+.devices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.device {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+.device .meta {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.footer-actions {
+  display: flex;
+  gap: 8px;
+}

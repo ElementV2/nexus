@@ -29,7 +29,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The Electron sub-apps are separate TS projects with their own
+    // tooling; lint their sources there. Never lint compiled output.
     "launcher/**",
+    "nexus-cross/build/**",
+    "nexus-cross/dist/**",
+    "**/dist/**",
   ]),
 ]);
 

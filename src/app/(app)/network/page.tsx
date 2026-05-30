@@ -25,6 +25,8 @@ interface ScannedHost {
   vmixVersion: string;
   vmixEdition: string;
   isVmix: boolean;
+  isObs?: boolean;
+  obsWebSocketVersion?: string;
 }
 
 interface ScanData {
@@ -35,24 +37,97 @@ interface ScanData {
 
 const PORT_LABELS: Record<number, string> = {
   22: "SSH", 80: "HTTP", 443: "HTTPS", 445: "SMB",
-  548: "AFP", 554: "RTSP", 3389: "RDP", 8088: "vMix",
-  8080: "HTTP", 9100: "Print", 62078: "iOS",
+  548: "AFP", 554: "RTSP", 3389: "RDP", 4455: "OBS-WS",
+  8088: "vMix", 8080: "HTTP", 9100: "Print", 62078: "iOS",
+  // Console + lighting OSC. The TCP-port test in the scanner only
+  // tells us "something's listening" — there's no protocol handshake
+  // so we can't auto-detect X32 vs MA3 vs another OSC peer. The
+  // `+ Add connection` flow in the connections panel covers the
+  // manual case; these labels just give the operator a hint.
+  8000: "OSC / MA2",
+  9000: "OSC / MA3",
+  10023: "OSC / X32",
 };
 
-function deviceTypeLabel(h: ScannedHost): string {
-  if (h.isVmix) return "vMix";
+/**
+ * Classify a discovered host into a device category so the unified
+ * list can badge every machine — not just vMix. vMix and OBS are
+ * confirmed via an actual protocol handshake in the scanner; the rest
+ * are best-effort guesses from open TCP ports (an OSC control port
+ * open = "probably this console"). The operator finishes wiring any
+ * non-auto-detected device through the connections panel above.
+ */
+type DeviceCat =
+  | "vmix"
+  | "obs"
+  | "x32"
+  | "grandma"
+  | "ios"
+  | "camera"
+  | "printer"
+  | "mac"
+  | "windows"
+  | "linux"
+  | "web"
+  | "device";
+
+interface DeviceClass {
+  cat: DeviceCat;
+  label: string;
+  /** Whether this category has a one-click connect action wired. */
+  connectable: "vmix" | "obs" | null;
+}
+
+function classifyHost(h: ScannedHost): DeviceClass {
+  if (h.isVmix) return { cat: "vmix", label: "vMix", connectable: "vmix" };
+  if (h.isObs) return { cat: "obs", label: "OBS", connectable: "obs" };
   const p = h.openPorts;
-  if (p.includes(62078)) return "iPhone / iPad";
-  if (p.includes(554)) return "Camera / RTSP";
-  if (p.includes(9100)) return "Printer";
-  if (p.includes(548)) return "Mac";
-  if (p.includes(3389) && p.includes(445)) return "Windows PC";
-  if (p.includes(3389)) return "Windows";
-  if (p.includes(445)) return "Windows / NAS";
-  if (p.includes(22) && p.includes(80)) return "Linux / Server";
-  if (p.includes(22)) return "Linux";
-  if (p.includes(80) || p.includes(443) || p.includes(8080)) return "Web Device";
-  return "Device";
+  if (p.includes(10023)) return { cat: "x32", label: "X32 / M32 (OSC)", connectable: null };
+  if (p.includes(9000)) return { cat: "grandma", label: "grandMA3 (OSC?)", connectable: null };
+  if (p.includes(8000)) return { cat: "grandma", label: "grandMA2 (OSC?)", connectable: null };
+  if (p.includes(62078)) return { cat: "ios", label: "iPhone / iPad", connectable: null };
+  if (p.includes(554)) return { cat: "camera", label: "Camera / RTSP", connectable: null };
+  if (p.includes(9100)) return { cat: "printer", label: "Printer", connectable: null };
+  if (p.includes(548)) return { cat: "mac", label: "Mac", connectable: null };
+  if (p.includes(3389) && p.includes(445)) return { cat: "windows", label: "Windows PC", connectable: null };
+  if (p.includes(3389)) return { cat: "windows", label: "Windows", connectable: null };
+  if (p.includes(445)) return { cat: "windows", label: "Windows / NAS", connectable: null };
+  if (p.includes(22) && p.includes(80)) return { cat: "linux", label: "Linux / Server", connectable: null };
+  if (p.includes(22)) return { cat: "linux", label: "Linux", connectable: null };
+  if (p.includes(80) || p.includes(443) || p.includes(8080)) return { cat: "web", label: "Web device", connectable: null };
+  return { cat: "device", label: "Device", connectable: null };
+}
+
+/** Pill role per category — AV gear gets loud colours, infra stays muted. */
+function catPill(cat: DeviceCat): {
+  role: "red" | "green" | "amber" | "blue" | "purple" | "muted";
+  solid: boolean;
+} {
+  switch (cat) {
+    case "vmix": return { role: "red", solid: true };
+    case "obs": return { role: "green", solid: true };
+    case "x32": return { role: "blue", solid: true };
+    case "grandma": return { role: "amber", solid: true };
+    case "camera": return { role: "purple", solid: false };
+    case "ios":
+    case "mac":
+    case "windows":
+    case "linux":
+    case "web":
+    case "printer":
+    case "device":
+    default: return { role: "muted", solid: false };
+  }
+}
+
+/** Sort weight so AV gear floats to the top of the unified list. */
+function catWeight(cat: DeviceCat): number {
+  const order: DeviceCat[] = [
+    "vmix", "obs", "x32", "grandma", "camera",
+    "ios", "mac", "windows", "linux", "web", "printer", "device",
+  ];
+  const i = order.indexOf(cat);
+  return i < 0 ? 99 : i;
 }
 
 export default function NetworkPageWrapper() {
@@ -101,7 +176,23 @@ function NetworkPage() {
   const scannedSubnet = scanData?.subnet || null;
   const publicIP = scanData?.publicIP || null;
   const vmixHosts = hosts.filter((h) => h.isVmix);
-  const otherHosts = hosts.filter((h) => !h.isVmix);
+  // One unified, classified list — every machine on the subnet, AV
+  // gear first. This is a network scanner, not a vMix-only finder.
+  const classified = hosts
+    .map((h) => ({ host: h, dev: classifyHost(h) }))
+    .sort((a, b) => {
+      const w = catWeight(a.dev.cat) - catWeight(b.dev.cat);
+      if (w !== 0) return w;
+      // Then by last IP octet so rows are stable + readable.
+      return (
+        Number(a.host.ip.split(".").pop()) -
+        Number(b.host.ip.split(".").pop())
+      );
+    });
+  // Count of auto-detected AV devices for the summary chip.
+  const avCount = classified.filter((c) =>
+    ["vmix", "obs", "x32", "grandma"].includes(c.dev.cat)
+  ).length;
 
   async function connectVmix(ip: string) {
     if (connected && currentHost === ip) {
@@ -120,6 +211,20 @@ function NetworkPage() {
       router.push("/dashboard");
     } catch {
       setVmixConnecting(null);
+    }
+  }
+
+  async function connectObs(ip: string) {
+    try {
+      const res = await fetch("/api/preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ obs_host: ip, obs_port: 4455 }),
+      });
+      if (!res.ok) throw new Error("Failed to save preferences");
+      router.push("/obs");
+    } catch {
+      /* surfaced via the OBS card */
     }
   }
 
@@ -207,108 +312,116 @@ function NetworkPage() {
         </Section>
       )}
 
-      {/* Scan results */}
+      {/* Scan results — one unified list of EVERY machine found on the
+          subnet, AV gear (vMix / OBS / X32 / grandMA) sorted first with
+          a one-click connect where we can. */}
       {hosts.length > 0 && (
         <>
-          {vmixHosts.length > 0 && (
-            <>
-              <div className="px-[24px] pt-[14px] pb-[8px] border-b-[1px] border-sw-line">
-                <Eyebrow tone="amber">vMix instances</Eyebrow>
-              </div>
-              {vmixHosts.map((h) => {
-                const isCurrent = connected && currentHost === h.ip;
-                return (
-                  <HairlineRow
-                    key={h.ip}
-                    state={isCurrent ? "pgm" : "default"}
-                    className="flex items-center gap-4"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline gap-3 flex-wrap">
-                        <span className="font-mono text-[15px] font-bold text-sw-text">
-                          {h.ip}
-                        </span>
-                        <StatusPill role="red" variant="solid">vMix</StatusPill>
-                        {h.vmixVersion && (
-                          <MonoChip>v{h.vmixVersion}</MonoChip>
-                        )}
-                        {h.vmixEdition && (
-                          <MonoChip>{h.vmixEdition}</MonoChip>
-                        )}
-                      </div>
-                      <div className="flex gap-3 mt-1 text-[10px] text-sw-muted">
-                        {h.hostname && <span className="truncate max-w-[240px]">{h.hostname}</span>}
-                        {h.vendor && <span>{h.vendor}</span>}
-                        {h.mac && <span className="font-mono">{h.mac}</span>}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => connectVmix(h.ip)}
-                      disabled={vmixConnecting === h.ip}
-                      className="font-mono uppercase transition-colors"
-                      style={{
-                        padding: "8px 16px",
-                        fontSize: 11,
-                        fontWeight: 600,
-                        letterSpacing: "1.4px",
-                        background: isCurrent
-                          ? "var(--pvw-tint)"
-                          : "var(--pgm-tint)",
-                        color: isCurrent ? "var(--pvw)" : "var(--pgm)",
-                        border: `1px solid ${
-                          isCurrent ? "var(--pvw)" : "var(--pgm)"
-                        }`,
-                        opacity: vmixConnecting === h.ip ? 0.5 : 1,
-                        cursor:
-                          vmixConnecting === h.ip ? "wait" : "pointer",
-                        transitionDuration: "80ms",
-                      }}
+          <div className="px-[24px] pt-[14px] pb-[8px] border-b-[1px] border-sw-line flex items-center gap-3">
+            <Eyebrow tone="amber">Discovered devices</Eyebrow>
+            <span className="text-[10px] text-sw-muted font-mono">
+              {hosts.length} host{hosts.length !== 1 ? "s" : ""}
+              {avCount > 0 ? ` · ${avCount} AV` : ""}
+            </span>
+          </div>
+          {classified.map(({ host: h, dev }) => {
+            const isCurrent =
+              dev.cat === "vmix" && connected && currentHost === h.ip;
+            const pill = catPill(dev.cat);
+            const isAv = ["vmix", "obs", "x32", "grandma"].includes(dev.cat);
+            return (
+              <HairlineRow
+                key={h.ip}
+                state={isCurrent ? "pgm" : "default"}
+                className="flex items-center gap-3"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-3 flex-wrap">
+                    <span
+                      className={`font-mono font-bold ${
+                        isAv ? "text-[15px] text-sw-text" : "text-[13px] text-sw-text-dim"
+                      }`}
                     >
-                      {vmixConnecting === h.ip
-                        ? "Connecting…"
-                        : isCurrent
-                          ? "Active →"
-                          : "Connect →"}
-                    </button>
-                  </HairlineRow>
-                );
-              })}
-            </>
-          )}
-
-          {otherHosts.length > 0 && (
-            <>
-              <div className="px-[24px] pt-[14px] pb-[8px] border-b-[1px] border-sw-line">
-                <Eyebrow tone="muted">Other devices</Eyebrow>
-              </div>
-              {otherHosts.map((h) => {
-                const label = deviceTypeLabel(h);
-                return (
-                  <HairlineRow key={h.ip} className="flex items-center gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline gap-3 flex-wrap">
-                        <span className="font-mono text-[13px] text-sw-text-dim">{h.ip}</span>
-                        <span className="text-[11px] text-sw-muted">{label}</span>
-                      </div>
-                      <div className="flex gap-3 mt-1 text-[10px] text-sw-sub">
-                        {h.hostname && <span className="truncate max-w-[240px]">{h.hostname}</span>}
-                        {h.vendor && <span>{h.vendor}</span>}
-                        {h.mac && <span className="font-mono">{h.mac}</span>}
-                        {h.openPorts.length > 0 && (
-                          <span className="font-mono">
-                            tcp:{" "}
-                            {h.openPorts
-                              .map((p) => `${p}${PORT_LABELS[p] ? `(${PORT_LABELS[p]})` : ""}`)
-                              .join(" · ")}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </HairlineRow>
-                );
-              })}
-            </>
-          )}
+                      {h.ip}
+                    </span>
+                    <StatusPill
+                      role={pill.role}
+                      variant={pill.solid ? "solid" : undefined}
+                    >
+                      {dev.label}
+                    </StatusPill>
+                    {h.vmixVersion && <MonoChip>v{h.vmixVersion}</MonoChip>}
+                    {h.vmixEdition && <MonoChip>{h.vmixEdition}</MonoChip>}
+                    {h.obsWebSocketVersion && (
+                      <MonoChip>ws {h.obsWebSocketVersion}</MonoChip>
+                    )}
+                  </div>
+                  <div className="flex gap-3 mt-1 text-[10px] text-sw-muted flex-wrap">
+                    {h.hostname && (
+                      <span className="truncate max-w-[240px]">{h.hostname}</span>
+                    )}
+                    {h.vendor && <span>{h.vendor}</span>}
+                    {h.mac && <span className="font-mono">{h.mac}</span>}
+                    {h.openPorts.length > 0 && (
+                      <span className="font-mono">
+                        tcp:{" "}
+                        {h.openPorts
+                          .map(
+                            (p) =>
+                              `${p}${PORT_LABELS[p] ? `(${PORT_LABELS[p]})` : ""}`
+                          )
+                          .join(" · ")}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {dev.connectable === "vmix" && (
+                  <button
+                    onClick={() => connectVmix(h.ip)}
+                    disabled={vmixConnecting === h.ip}
+                    className="font-mono uppercase transition-colors"
+                    style={{
+                      padding: "8px 16px",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      letterSpacing: "1.4px",
+                      background: isCurrent ? "var(--pvw-tint)" : "var(--pgm-tint)",
+                      color: isCurrent ? "var(--pvw)" : "var(--pgm)",
+                      border: `1px solid ${isCurrent ? "var(--pvw)" : "var(--pgm)"}`,
+                      opacity: vmixConnecting === h.ip ? 0.5 : 1,
+                      cursor: vmixConnecting === h.ip ? "wait" : "pointer",
+                      transitionDuration: "80ms",
+                    }}
+                  >
+                    {vmixConnecting === h.ip
+                      ? "Connecting…"
+                      : isCurrent
+                        ? "Active →"
+                        : "Connect →"}
+                  </button>
+                )}
+                {dev.connectable === "obs" && (
+                  <button
+                    onClick={() => connectObs(h.ip)}
+                    className="font-mono uppercase transition-colors"
+                    style={{
+                      padding: "8px 16px",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      letterSpacing: "1.4px",
+                      background: "var(--pvw-tint)",
+                      color: "var(--pvw)",
+                      border: "1px solid var(--pvw)",
+                      cursor: "pointer",
+                      transitionDuration: "80ms",
+                    }}
+                  >
+                    Connect →
+                  </button>
+                )}
+              </HairlineRow>
+            );
+          })}
         </>
       )}
 
@@ -338,8 +451,8 @@ function NetworkPage() {
             : "Run this script on your control PC. It probes the local subnet and pushes the results back here automatically."}
         </p>
         <div className="flex items-center gap-3 flex-wrap">
-          <a href="/api/network/script" download="vmix-scanner.bat">
-            <PrimaryButton>↓ vmix-scanner.bat</PrimaryButton>
+          <a href="/api/network/script" download="network-scanner.bat">
+            <PrimaryButton>↓ network-scanner.bat</PrimaryButton>
           </a>
           {hosts.length === 0 && !scanId && (
             <SecondaryButton disabled>Waiting for first run…</SecondaryButton>
@@ -353,7 +466,7 @@ function NetworkPage() {
             </li>
             <li>
               <span className="font-mono text-sw-text-dim mr-2">02</span>
-              Double-click <span className="font-mono text-sw-text-dim">vmix-scanner.bat</span> on the control PC.
+              Double-click <span className="font-mono text-sw-text-dim">network-scanner.bat</span> on the control PC.
             </li>
             <li>
               <span className="font-mono text-sw-text-dim mr-2">03</span>

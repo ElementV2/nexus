@@ -5,6 +5,7 @@ import {
   getActiveOverlay,
 } from "@/stores/overlay-editor-store";
 import type { ActiveTool } from "@/stores/overlay-editor-store";
+import { useConfirm } from "@/components/sw";
 
 function ToolBtn({
   onClick,
@@ -76,6 +77,7 @@ function ToolButton({
 }
 
 export function EditorToolbar() {
+  const confirm = useConfirm();
   const overlays = useOverlayEditorStore((s) => s.overlays);
   const activeOverlayId = useOverlayEditorStore((s) => s.activeOverlayId);
   const setActiveOverlay = useOverlayEditorStore((s) => s.setActiveOverlay);
@@ -128,8 +130,15 @@ export function EditorToolbar() {
               </button>
               {overlays.length > 1 && (
                 <button
-                  onClick={() => {
-                    if (confirm(`Supprimer "${o.name}" ?`)) removeOverlay(o.id);
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: `Supprimer "${o.name}" ?`,
+                      message:
+                        "L'overlay et tous ses éléments seront effacés. Cette action ne peut pas être annulée.",
+                      dangerous: true,
+                      confirmLabel: "Supprimer",
+                    });
+                    if (ok) removeOverlay(o.id);
                   }}
                   className="sw-cell"
                   style={{

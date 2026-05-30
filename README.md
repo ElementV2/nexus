@@ -264,6 +264,26 @@ between the desktop shell and the in-browser UI.
 
 ---
 
+## Troubleshooting
+
+- **Windows SmartScreen warns on first install.** The installer isn't
+  code-signed yet → click *More info → Run anyway*. (Tracked under
+  Roadmap.)
+- **`npm ci` fails with a version mismatch.** The three `package.json`
+  and their lockfiles drifted. Run `npm run version:sync`, commit, retry.
+  CI runs `npm run version:check` and fails fast on drift.
+- **A device's sidebar pages don't show up.** Pages appear only when a
+  connection of that kind exists — add one in *Network › Connections*.
+  The Deck page always stays.
+- **OBS won't connect.** Enable *Tools → WebSocket Server Settings* in
+  OBS, then check host / port / password in *Network › Connections*.
+- **Nexus Cross can't reach the server.** Type just the host/IP (the app
+  adds `http://` and `:9088`); for a reverse proxy include the explicit
+  port. Check the LAN firewall allows the Nexus port.
+- **Nexus Cross doesn't see a Stream Deck.** Another app (e.g. Elgato's
+  software) may already own the device — close it. The status window
+  reports a *blocked* count when a deck is enumerated but can't be opened.
+
 ## Roadmap / known gaps
 
 - No code-signing certificate yet → Windows SmartScreen warns on
@@ -279,6 +299,7 @@ between the desktop shell and the in-browser UI.
 
 ## License
 
-Not yet licensed. All rights reserved by the author until a license
-file is added. Open an issue if you want to use Nexus commercially or
-contribute.
+Nexus is **source-available, not open-source** — see [`LICENSE`](./LICENSE).
+The code is published for reference; all rights are reserved by the
+author. Contact death0factory@gmail.com to request a license to use it
+or to discuss other terms.

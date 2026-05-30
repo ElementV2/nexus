@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Sidebar, MobileSidebar, BurgerButton } from "@/components/layout/sidebar";
 import { VmixProvider } from "@/providers/vmix-provider";
 import { FloatingPlayer } from "@/components/stream/floating-player";
+import { ConfirmProvider } from "@/components/sw";
 
 function useBreakpoint() {
   const [bp, setBp] = useState<"mobile" | "tablet" | "desktop">("desktop");
@@ -31,6 +32,7 @@ export default function DashboardLayout({
 
   return (
     <VmixProvider>
+    <ConfirmProvider>
       {/* Skip-to-content target for keyboard users: they otherwise have
           to tab past 12 sidebar items before reaching the page body. */}
       <a
@@ -97,6 +99,7 @@ export default function DashboardLayout({
         open={streamOpen}
         onClose={() => setStreamOpen(false)}
       />
+    </ConfirmProvider>
     </VmixProvider>
   );
 }

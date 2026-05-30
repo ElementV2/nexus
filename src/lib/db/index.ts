@@ -1,4 +1,11 @@
-import { mkdirSync, existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
+import {
+  mkdirSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  statSync,
+} from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -57,6 +64,16 @@ export function readJson<T>(name: string, fallback: T): T {
 /**
  * Atomic write: serialize → write to a sibling .tmp file → rename.
  * Prevents partial-file corruption if the process is killed mid-write.
+ *
+ * Concurrency note: all read-modify-write helpers in this app are fully
+ * SYNCHRONOUS (readFileSync → mutate → writeFileSync with no `await`
+ * between), so two overlapping requests in THIS process can't interleave
+ * — Node runs each transaction to completion before yielding. The only
+ * residual race is cross-PROCESS (the Electron launcher also edits
+ * `preferences.json`): the atomic rename still prevents corruption, but
+ * a simultaneous launcher+server edit could lose one update. That window
+ * is tiny (both require a human editing two UIs at once) and recoverable
+ * (re-save); full cross-process file locking isn't worth its hang risk.
  */
 export function writeJson<T>(name: string, value: T): void {
   ensureDir();
@@ -64,4 +81,19 @@ export function writeJson<T>(name: string, value: T): void {
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, JSON.stringify(value, null, 2), "utf-8");
   renameSync(tmp, path);
+}
+
+/**
+ * Last-modified time (ms) of a data file, or null if it doesn't exist.
+ * Used by callers (e.g. `getPreferences`) to mtime-gate an in-memory
+ * cache so a hot path doesn't re-read + re-parse + re-sanitize the same
+ * unchanged file dozens of times per request, while still picking up
+ * external writes from the launcher process.
+ */
+export function fileMtimeMs(name: string): number | null {
+  try {
+    return statSync(join(DATA_DIR, name)).mtimeMs;
+  } catch {
+    return null;
+  }
 }

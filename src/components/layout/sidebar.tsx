@@ -1,9 +1,11 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useVmixStore } from "@/stores/vmix-store";
+import { useConnections } from "@/hooks/use-connections";
 import {
   Monitor,
   Volume2,
@@ -18,6 +20,11 @@ import {
   Menu,
   X,
   Music2,
+  Video,
+  Plug,
+  Gamepad2,
+  Sliders,
+  Lightbulb,
 } from "lucide-react";
 
 type Icon = typeof Monitor;
@@ -27,18 +34,53 @@ interface NavItem {
   icon: Icon;
 }
 
-const NAV: NavItem[] = [
-  { href: "/dashboard",   label: "Home",    icon: Activity },
-  { href: "/live",        label: "Live",    icon: Monitor },
-  { href: "/audio",       label: "Audio",   icon: Volume2 },
-  { href: "/replay",      label: "Replay",  icon: Clapperboard },
-  { href: "/playlist",    label: "Playlist", icon: ListMusic },
-  { href: "/titles",      label: "Titles",  icon: Type },
-  { href: "/colorimetry", label: "Color",   icon: Palette },
-  { href: "/ableton",     label: "Ableton", icon: Music2 },
-  { href: "/web-assets",  label: "Assets",  icon: Layers },
-  { href: "/network",     label: "Network", icon: Wifi },
+/**
+ * Hard-wired pages that exist regardless of which devices are
+ * configured. Just the cross-cutting ones (home/dashboard) — every
+ * device-specific page is contributed by its kind via the registry,
+ * so adding or removing a connection toggles them automatically.
+ */
+const STATIC_NAV: NavItem[] = [
+  { href: "/dashboard",  label: "Home", icon: Activity },
+  { href: "/streamdeck", label: "Deck", icon: Gamepad2 },
 ];
+
+const TRAILING_NAV: NavItem[] = [
+  { href: "/web-assets", label: "Assets", icon: Layers },
+  { href: "/network",    label: "Network", icon: Wifi },
+];
+
+/**
+ * Icon registry for kind-contributed pages. The API response strips
+ * the icon component (it can't cross JSON), so we map (kind, label)
+ * tuples to lucide components here. Falls back to a per-kind default
+ * icon, then to a generic plug for unknown kinds.
+ *
+ * Per-page entries take precedence — e.g. vMix contributes 6 pages
+ * (live, audio, replay, ...) and each gets its own icon, while the
+ * kind-level fallback covers OBS / Ableton's single pages.
+ */
+const KIND_ICONS: Record<string, Icon> = {
+  obs: Video,
+  vmix: Monitor,
+  ableton: Music2,
+  x32: Sliders,
+  grandma3: Lightbulb,
+  grandma2: Lightbulb,
+};
+const PAGE_ICONS: Record<string, Icon> = {
+  "/live": Monitor,
+  "/audio": Volume2,
+  "/replay": Clapperboard,
+  "/playlist": ListMusic,
+  "/titles": Type,
+  "/colorimetry": Palette,
+  "/obs": Video,
+  "/ableton": Music2,
+  "/x32": Sliders,
+  "/grandma3": Lightbulb,
+  "/grandma2": Lightbulb,
+};
 
 interface SidebarProps {
   onToggleStream?: () => void;
@@ -139,6 +181,36 @@ function NavTile({
 export function Sidebar({ onToggleStream, streamOpen }: SidebarProps) {
   const pathname = usePathname();
   const connected = useVmixStore((s) => s.connected);
+  const { data: connectionsData } = useConnections();
+
+  // Compose the final nav: STATIC + dynamic kind pages + TRAILING.
+  // A kind page only appears if at least one enabled connection of
+  // that kind exists, so adding/removing a device toggles the page
+  // automatically without touching this file.
+  const nav: NavItem[] = useMemo(() => {
+    const kinds = connectionsData?.kinds ?? [];
+    const connections = connectionsData?.connections ?? [];
+    const activeKinds = new Set(
+      connections.filter((c) => c.enabled).map((c) => c.kind)
+    );
+    const dynamic: NavItem[] = [];
+    const seenHrefs = new Set<string>();
+    for (const k of kinds) {
+      if (!activeKinds.has(k.kind)) continue;
+      if (!k.pages) continue;
+      for (const p of k.pages) {
+        if (seenHrefs.has(p.href)) continue;
+        seenHrefs.add(p.href);
+        dynamic.push({
+          href: p.href,
+          label: p.label,
+          // Page-level icon override > kind default > generic plug.
+          icon: PAGE_ICONS[p.href] ?? KIND_ICONS[k.kind] ?? Plug,
+        });
+      }
+    }
+    return [...STATIC_NAV, ...dynamic, ...TRAILING_NAV];
+  }, [connectionsData]);
 
   return (
     <nav
@@ -152,7 +224,7 @@ export function Sidebar({ onToggleStream, streamOpen }: SidebarProps) {
       <Brand />
 
       <div className="flex-1 overflow-y-auto">
-        {NAV.map((item) => {
+        {nav.map((item) => {
           const isActive =
             item.href === "/dashboard"
               ? pathname === "/dashboard"

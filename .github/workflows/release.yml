@@ -17,7 +17,13 @@ permissions:
   contents: write
 
 jobs:
+  # Gate the release on the same quality checks as every PR. If versions
+  # drift, lint/types break, or a test fails, no installer is built.
+  checks:
+    uses: ./.github/workflows/checks.yml
+
   release:
+    needs: checks
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +38,7 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             launcher/package-lock.json
+            nexus-cross/package-lock.json
 
       - name: Read launcher version
         id: version
@@ -75,6 +82,36 @@ jobs:
           # step below handles that explicitly.
           GH_TOKEN: ''
 
+      - name: Install nexus-cross deps
+        if: steps.tag-check.outputs.exists == 'false'
+        working-directory: nexus-cross
+        run: npm ci
+
+      - name: Build nexus-cross installer
+        if: steps.tag-check.outputs.exists == 'false'
+        working-directory: nexus-cross
+        # Compiles the satellite TS + copies its renderer, then runs
+        # electron-builder (which rebuilds the native HID/canvas deps for
+        # the Electron runtime). Output: nexus-cross/dist/
+        # Nexus-Cross-Setup-<version>.exe
+        run: npm run package:win
+        env:
+          GH_TOKEN: ''
+
+      # Keep the built installers even if the release step below fails
+      # (e.g. a transient GitHub API error) — both builds are long, so
+      # they should be recoverable without a full rerun.
+      - name: Upload installers as workflow artifacts
+        if: steps.tag-check.outputs.exists == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ steps.version.outputs.version }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            launcher/dist/Nexus-Setup-*.exe
+            nexus-cross/dist/Nexus-Cross-Setup-*.exe
+
       - name: Create release
         if: steps.tag-check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
@@ -83,4 +120,9 @@ jobs:
           name: ${{ steps.version.outputs.tag }}
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: launcher/dist/Nexus-Setup-*.exe
+          # Both installers ride the same release: the main app and the
+          # Stream Deck satellite. The in-app updaters each match their
+          # own asset name (Nexus-Setup-* vs Nexus-Cross-Setup-*).
+          files: |
+            launcher/dist/Nexus-Setup-*.exe
+            nexus-cross/dist/Nexus-Cross-Setup-*.exe

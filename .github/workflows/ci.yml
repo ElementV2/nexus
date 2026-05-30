@@ -1,0 +1,14 @@
+name: CI
+
+# Fast feedback on pull requests and feature-branch pushes. Master pushes
+# are covered by release.yml (which runs the same gate before building),
+# so they're excluded here to avoid duplicate runs.
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [master]
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml

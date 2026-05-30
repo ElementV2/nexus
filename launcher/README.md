@@ -1,8 +1,8 @@
 # Nexus Launcher
 
 Electron app that runs the Nexus Next.js server locally and exposes it
-on the LAN. Designed to feel like Companion: a small status window with
-the LAN URLs, system tray icon, settings.
+on the LAN. A small status window with the LAN URLs, system tray icon,
+and settings.
 
 Default port: **9088** (configurable in the launcher window).
 
@@ -59,4 +59,4 @@ The final binary bundles:
 - launcher code
 
 …around 200 MB total. Distribute the single `.exe`, the user double-clicks
-and gets a Companion-style launcher.
+and gets a local control-surface launcher.

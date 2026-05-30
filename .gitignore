@@ -70,7 +70,14 @@ next-env.d.ts
 launcher/build/
 launcher/dist/
 launcher/node_modules/
-public/downloads/*.exe
+
+# nexus-cross (satellite) build artifacts
+nexus-cross/build/
+nexus-cross/dist/
+nexus-cross/node_modules/
+
+# downloads dir is build-output only (installers, blockmaps, latest.yml)
+public/downloads/
 
 # network scan output (local-only)
 api.json

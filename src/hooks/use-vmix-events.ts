@@ -3,43 +3,59 @@
 import { useCallback } from "react";
 import { useVmixStore } from "@/stores/vmix-store";
 import { useXmlStore } from "@/stores/xml-store";
-import { useSSE } from "./use-sse";
+import { useConnections } from "./use-connections";
+import { useConnectionEvents } from "./use-connection-events";
+import { useConnectionId } from "./use-connection-command";
 import type { VmixState } from "@/lib/vmix/types";
 
-type Message =
-  | { ok: true; state: VmixState; raw: string; ts: number }
-  | { ok: false; error: string; ts: number };
-
 /**
- * Subscribe to the server-side state broker via SSE. One open connection
- * per client; the server holds a single shared poller against vMix.
+ * Subscribe to the vMix state-broker via the generic connection events
+ * stream. The kind adapter wraps each broker message as
+ * `{ type: "state", ok, state?, raw?, error?, ts }` so we dispatch on
+ * the discriminator the same way every other kind's hook does.
  *
- * Boilerplate (visibility, retry, cleanup) lives in `useSSE`.
+ * Meta envelopes (`__status`, `__snapshot`) emitted by the connection
+ * manager are ignored — the broker's own subscribe-replay covers the
+ * initial hydration with richer payloads.
  */
+
+type StateEvent =
+  | { type: "state"; ok: true; state: VmixState; raw: string; ts: number }
+  | { type: "state"; ok: false; error: string; ts: number };
+
 export function useVmixEvents() {
   const setVmixState = useVmixStore((s) => s.setVmixState);
   const setRawXml = useXmlStore((s) => s.setRawXml);
   const setConnected = useVmixStore((s) => s.setConnected);
   const setError = useVmixStore((s) => s.setError);
 
+  const { data: connectionsData } = useConnections();
+  const vmixId = useConnectionId(
+    connectionsData?.connections ?? null,
+    "vmix",
+    connectionsData?.defaults
+  );
+
   const onMessage = useCallback(
     (e: MessageEvent) => {
-      let msg: Message;
+      let event: { type: string } & Record<string, unknown>;
       try {
-        msg = JSON.parse(e.data) as Message;
+        event = JSON.parse(e.data);
       } catch {
         return;
       }
-      if (msg.ok) {
-        setVmixState(msg.state);
-        setRawXml(msg.raw);
+      if (event.type !== "state") return;
+      const ev = event as StateEvent;
+      if (ev.ok) {
+        setVmixState(ev.state);
+        setRawXml(ev.raw);
         setConnected(true);
       } else {
-        setError(msg.error);
+        setError(ev.error);
       }
     },
     [setVmixState, setRawXml, setConnected, setError]
   );
 
-  useSSE("/api/vmix/events", onMessage);
+  useConnectionEvents(vmixId, onMessage);
 }

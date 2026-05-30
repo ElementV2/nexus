@@ -1,10 +1,16 @@
 import { app, net } from "electron";
 import { EventEmitter } from "node:events";
+import { buildUpdateInfo, type ReleasePayload, type UpdateInfo } from "./update-core";
+
+export type { UpdateInfo } from "./update-core";
 
 // GitHub repo to poll for releases. If the repo is ever renamed,
 // only this constant needs to change.
 const REPO = "ElementV2/nexus";
 const API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
+// The launcher watches for the main app installer asset.
+const ASSET_RE = /^Nexus-Setup-.+\.exe$/i;
+const USER_AGENT = "Nexus-Launcher";
 
 // Re-check every 6 hours after the initial check. Long enough to avoid
 // burning the unauthenticated GitHub API quota (60 req/hr/IP), short
@@ -14,41 +20,16 @@ const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000;
 // before we hit the network on the launcher's behalf.
 const INITIAL_DELAY_MS = 5_000;
 
-export interface UpdateInfo {
-  /** Strictly greater than the running version per semver compare. */
-  available: boolean;
-  currentVersion: string;
-  latestVersion: string | null;
-  /** GitHub release page (for the "Open release notes" link). */
-  releaseUrl: string | null;
-  /** Direct download URL of the matching `Nexus-Setup-*.exe` asset. */
-  installerUrl: string | null;
-  publishedAt: string | null;
-  checkedAt: number;
-  /** Populated when the check itself failed (network, 404, etc.). */
-  error?: string;
-}
-
-interface UpdaterEvents {
-  info: (info: UpdateInfo) => void;
-}
-
-interface ReleasePayload {
-  tag_name: string;
-  html_url: string;
-  published_at: string;
-  assets: Array<{ name: string; browser_download_url: string }>;
-}
-
-export declare interface Updater {
-  on<E extends keyof UpdaterEvents>(event: E, listener: UpdaterEvents[E]): this;
-  emit<E extends keyof UpdaterEvents>(
-    event: E,
-    ...args: Parameters<UpdaterEvents[E]>
-  ): boolean;
-}
-
 export class Updater extends EventEmitter {
+  // Narrow the EventEmitter surface to our single typed event without the
+  // unsafe class/interface declaration merge eslint flags.
+  override on(event: "info", listener: (info: UpdateInfo) => void): this {
+    return super.on(event, listener);
+  }
+  override emit(event: "info", info: UpdateInfo): boolean {
+    return super.emit(event, info);
+  }
+
   private timer: NodeJS.Timeout | null = null;
   private initialTimer: NodeJS.Timeout | null = null;
   private last: UpdateInfo | null = null;
@@ -77,20 +58,7 @@ export class Updater extends EventEmitter {
     const currentVersion = app.getVersion();
     try {
       const raw = await this.fetchLatest();
-      const tag = String(raw.tag_name || "");
-      const latestVersion = tag.startsWith("v") ? tag.slice(1) : tag;
-      const installerAsset = (raw.assets || []).find((a) =>
-        /^Nexus-Setup-.+\.exe$/i.test(a.name)
-      );
-      const info: UpdateInfo = {
-        available: compareSemver(latestVersion, currentVersion) > 0,
-        currentVersion,
-        latestVersion,
-        releaseUrl: raw.html_url || null,
-        installerUrl: installerAsset?.browser_download_url || null,
-        publishedAt: raw.published_at || null,
-        checkedAt: Date.now(),
-      };
+      const info = buildUpdateInfo(raw, currentVersion, ASSET_RE, Date.now());
       this.publish(info);
       return info;
     } catch (err) {
@@ -122,7 +90,7 @@ export class Updater extends EventEmitter {
         redirect: "follow",
       });
       request.setHeader("Accept", "application/vnd.github+json");
-      request.setHeader("User-Agent", `Nexus-Launcher/${app.getVersion()}`);
+      request.setHeader("User-Agent", `${USER_AGENT}/${app.getVersion()}`);
 
       let body = "";
       request.on("response", (res) => {
@@ -151,27 +119,4 @@ export class Updater extends EventEmitter {
       request.end();
     });
   }
-}
-
-/**
- * Compare two semver-ish strings. Returns positive if `a` is newer than
- * `b`, negative if older, 0 if equal. Pre-release suffixes are stripped
- * before comparison (`1.2.3-rc.1` and `1.2.3` compare equal). Good
- * enough for the launcher's needs without pulling in a semver dep.
- */
-function compareSemver(a: string | null, b: string): number {
-  if (!a) return -1;
-  const parse = (v: string): number[] =>
-    v
-      .split("-")[0]
-      .split(".")
-      .map((n) => parseInt(n, 10) || 0);
-  const aP = parse(a);
-  const bP = parse(b);
-  for (let i = 0; i < 3; i++) {
-    const av = aP[i] ?? 0;
-    const bv = bP[i] ?? 0;
-    if (av !== bv) return av - bv;
-  }
-  return 0;
 }

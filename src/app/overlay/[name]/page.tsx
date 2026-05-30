@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, use } from "react";
+import { useEffect, useState, useCallback, useRef, use } from "react";
 import type {
   OverlayConfig,
   OverlayElement,
@@ -168,6 +168,18 @@ export default function OverlayLivePage({
   const decodedName = decodeURIComponent(name);
   const [config, setConfig] = useState<OverlayConfig | null>(null);
 
+  // Diff-gate: this overlay is the live browser-source output polled
+  // every 500 ms. Without a change check, each poll called setConfig and
+  // re-rendered the entire overlay tree 2×/s even when nothing changed.
+  // Only publish a new config when the payload actually differs.
+  const lastJson = useRef("");
+  const applyConfig = useCallback((next: OverlayConfig | null) => {
+    const json = next ? JSON.stringify(next) : "";
+    if (json === lastJson.current) return;
+    lastJson.current = json;
+    setConfig(next);
+  }, []);
+
   const fetchFromDb = useCallback(async (): Promise<OverlayConfig | null> => {
     try {
       const res = await fetch(
@@ -183,13 +195,8 @@ export default function OverlayLivePage({
 
   const refresh = useCallback(async () => {
     const remote = await fetchFromDb();
-    if (remote) {
-      setConfig(remote);
-      return;
-    }
-    const local = findOverlayLocal(decodedName);
-    setConfig(local);
-  }, [decodedName, fetchFromDb]);
+    applyConfig(remote ?? findOverlayLocal(decodedName));
+  }, [decodedName, fetchFromDb, applyConfig]);
 
   useEffect(() => {
     const id = setInterval(refresh, POLL_MS);
@@ -200,9 +207,9 @@ export default function OverlayLivePage({
   // periodic refresh effect above keeps it fresh after that.
   useEffect(() => {
     void fetchFromDb().then((remote) => {
-      setConfig(remote ?? findOverlayLocal(decodedName));
+      applyConfig(remote ?? findOverlayLocal(decodedName));
     });
-  }, [decodedName, fetchFromDb]);
+  }, [decodedName, fetchFromDb, applyConfig]);
 
   if (!config) {
     return (

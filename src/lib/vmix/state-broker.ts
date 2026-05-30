@@ -1,16 +1,20 @@
 import { parseVmixXml } from "./xml-parser";
-import { getPreferences } from "@/lib/db/preferences";
 import { STATE_FETCH_TIMEOUT_MS } from "./constants";
 import type { VmixState } from "./types";
 
 /**
- * Single shared poller against vMix. Every connected browser subscribes
- * to this broker via SSE instead of polling individually — so N clients
- * generate exactly one vMix request per tick, not N.
- *
- * Lives in the Next.js Node process; the standalone build runs a single
- * process so a module-level singleton is safe.
+ * Per-instance vMix poller. ONE per configured vMix connection — each
+ * owns its own host/port/cadence + cached state, so multiple vMix
+ * machines poll independently (their tally/feedback no longer share one
+ * default). Within a connection, N browsers still fan out from this
+ * single poller (one request per tick, not N).
  */
+export interface VmixBrokerConfig {
+  host: string;
+  port: number;
+  pollingInterval: number;
+}
+
 export type StateMessage =
   | { ok: true; state: VmixState; raw: string; ts: number }
   | { ok: false; error: string; ts: number };
@@ -22,13 +26,21 @@ const STARTUP_DELAY_MS = 0;
 const ERROR_BACKOFF_MS_INITIAL = 1000;
 const ERROR_BACKOFF_MS_MAX = 30_000;
 
-class StateBroker {
+export class VmixStateBroker {
   private subscribers = new Set<Subscriber>();
   private lastMessage: StateMessage | null = null;
   private pollHandle: ReturnType<typeof setTimeout> | null = null;
   private inFlight = false;
   private stopped = true;
   private currentErrorBackoff = ERROR_BACKOFF_MS_INITIAL;
+
+  constructor(private config: VmixBrokerConfig) {}
+
+  /** Apply a new config — the next poll tick reads it (host/port/cadence
+   *  are read fresh each tick, so no restart needed). */
+  updateConfig(config: VmixBrokerConfig): void {
+    this.config = config;
+  }
 
   subscribe(cb: Subscriber): () => void {
     this.subscribers.add(cb);
@@ -74,9 +86,9 @@ class StateBroker {
     }
     this.inFlight = true;
 
-    const { vmix_host, vmix_port, polling_interval } = getPreferences();
-    const url = `http://${vmix_host}:${vmix_port}/api`;
-    const interval = Math.max(FLOOR_MS, polling_interval);
+    const { host, port, pollingInterval } = this.config;
+    const url = `http://${host}:${port}/api`;
+    const interval = Math.max(FLOOR_MS, pollingInterval);
 
     let backoff = interval;
     try {
@@ -147,10 +159,3 @@ class StateBroker {
     this.stopPolling();
   }
 }
-
-// Survive Next dev hot-reload: HMR re-imports this module but the
-// constructed singleton's timers and HTTP poller keep firing from the
-// dead bundle until process restart. `hmrSingleton` detects the class
-// identity mismatch and disposes the stale instance for us.
-import { hmrSingleton } from "@/lib/utils/hmr-singleton";
-export const stateBroker = hmrSingleton("vmix-state-broker", StateBroker);

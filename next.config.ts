@@ -2,7 +2,19 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
-  serverExternalPackages: ["sharp"],
+  // Native modules that must NOT be bundled by Turbopack — Node
+  // resolves them at runtime from `node_modules` so their prebuilt
+  // binaries are picked up correctly. `sharp` was the original entry;
+  // the rest came in with the Stream Deck HID driver. These are
+  // declared as `optionalDependencies` so Nexus still builds when
+  // they're missing — the driver detects the load failure and
+  // surfaces `state: "deps-missing"` to the UI.
+  serverExternalPackages: [
+    "sharp",
+    "@elgato-stream-deck/node",
+    "@napi-rs/canvas",
+    "usb",
+  ],
   // The app is local-LAN by design — anyone on the subnet must be
   // able to hit /_next/* in dev mode. Without this, Next 16+ logs a
   // cross-origin warning per request and will hard-block it in a
@@ -35,6 +47,7 @@ const nextConfig: NextConfig = {
   outputFileTracingExcludes: {
     "*": [
       "launcher/**",
+      "nexus-cross/**",
       "public/downloads/**",
       "**/node_modules/electron/**",
       "**/node_modules/electron-builder/**",
