@@ -98,18 +98,13 @@ export function useVmixInputSuggestions(
         const snap = (await resSnap.json()) as ConnectionSnapshotResponse;
         const inputs = snap.snapshot?.inputs ?? [];
         if (cancelled) return;
-        // Suggest the number first (most common — operators bind by
-        // index) followed by the title as a second entry per input.
-        // The datalist deduplicates on `value`, so we make sure the
-        // two entries differ when title === number.
-        const out: VmixInputSuggestion[] = [];
-        for (const inp of inputs) {
+        // ONE suggestion per input. The selected VALUE is always the input
+        // NUMBER (stable; a List's title is a long filename that breaks the
+        // binding if inserted verbatim) — the title is shown as a label only.
+        const out: VmixInputSuggestion[] = inputs.map((inp) => {
           const n = String(inp.number);
-          out.push({ value: n, label: `${n} · ${inp.title}` });
-          if (inp.title && inp.title !== n) {
-            out.push({ value: inp.title, label: `${inp.title} · #${n}` });
-          }
-        }
+          return { value: n, label: inp.title ? `${n} · ${inp.title}` : n };
+        });
         setSuggestions(out);
       } catch {
         /* leave stale */
