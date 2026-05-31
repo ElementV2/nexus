@@ -53,8 +53,8 @@ function resourcePath(file: string): string {
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
-    width: 420,
-    height: 520,
+    width: 400,
+    height: 560,
     resizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -177,6 +177,9 @@ app.whenReady().then(async () => {
 
   agent = new Agent();
   agent.on("status", (s) => broadcast("cross:status", s));
+  // Continuously watch for a Nexus server on this same machine; the agent
+  // blocks itself (and releases the deck) whenever one is up.
+  agent.watchLocalServer();
 
   updater = new Updater();
   updater.on("info", (info) => broadcast("cross:update-info", info));

@@ -1,248 +1,397 @@
-:root {
-  --bg: #0d1310;
-  --panel: #141b16;
-  --panel-2: #181f19;
-  --card: #11160f;
-  --line: #243027;
-  --line-hi: #2f3d31;
-  --ink: #dde2d6;
-  --mid: #9aa890;
-  --muted: #6f7d68;
-  --amber: #d8a657;
-  --green: #7bd88f;
-  --red: #e06c6c;
-  --font-mono: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
-}
+/* ──────────────────────────────────────────────────────────────
+ *  Nexus Cross (satellite) — Tactical Refined (dark sage).
+ *  Deliberately mirrors launcher/src/renderer/styles.css so the
+ *  satellite and the main launcher read as one app. Shared token
+ *  source: ../../../src/styles/tokens.css
+ * ────────────────────────────────────────────────────────────── */
 
 * {
   box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
-html,
-body {
-  margin: 0;
+/* Author rules like `.row { display: flex }` share specificity with the
+   UA's `[hidden] { display: none }` and win the cascade (declared later),
+   so the `hidden` attribute would be silently ignored. Force it to hide. */
+[hidden] {
+  display: none !important;
+}
+
+:root {
+  /* surfaces */
+  --bg:        #0d1310;
+  --panel:     #141a15;
+  --panel-2:   #181f19;
+  --card:      #1c241d;
+  --card-hi:   #222a23;
+  /* lines */
+  --line:      #2c352d;
+  --line-hi:   #3a4439;
+  /* text */
+  --ink:       #dde2d6;
+  --mid:       #9aa498;
+  --muted:     #8b948a;
+  --sub:       #6c7569;
+  /* signal */
+  --pgm:        #d94459;
+  --pgm-tint:   #3b1f24;
+  --pvw:        #4eb771;
+  --pvw-tint:   #1f2e24;
+  --amber:      #d4a13b;
+  --amber-tint: #2e2517;
+
+  --pad-x: 20px;
+
+  --font-sans: "Geist", "Inter", "Helvetica Neue", -apple-system,
+               BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, "SF Mono",
+               Consolas, Menlo, monospace;
+}
+
+html, body {
   height: 100%;
   background: var(--bg);
   color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+  overflow: hidden;
+  font-feature-settings: "ss01", "cv11";
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.mono {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-feature-settings: "tnum";
+}
+
+/* ── Drag strip (replaces OS title bar) ─────────────── */
+.titlebar {
+  height: 32px;
+  background: var(--panel-2);
+  flex-shrink: 0;
+  -webkit-app-region: drag;
   user-select: none;
 }
 
-.drag-strip {
-  height: 32px;
-  -webkit-app-region: drag;
+/* ── Hero block ─────────────────────────────────────── */
+.hero {
+  position: relative;
+  padding: 22px var(--pad-x) 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  overflow: hidden;
+  flex-shrink: 0;
 }
-
-main {
-  padding: 4px 16px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.logo {
-  width: 30px;
-  height: 30px;
-  background: var(--amber);
-  color: var(--bg);
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  letter-spacing: -0.02em;
-}
-
-.title {
+.numeral {
+  position: absolute;
+  top: -24px;
+  right: -8px;
+  font-family: var(--font-mono);
+  font-size: 150px;
   font-weight: 700;
-  font-size: 14px;
+  letter-spacing: -0.06em;
+  line-height: 0.9;
+  color: var(--ink);
+  opacity: 0.04;
+  pointer-events: none;
+  user-select: none;
 }
-
-.sub {
-  font-size: 10px;
-  color: var(--muted);
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.20em;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
+  color: var(--muted);
+  margin-bottom: 10px;
 }
+.eyebrow--accent { color: var(--amber); }
 
-.pill {
-  font-size: 10px;
+.display {
+  font-size: 34px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  padding: 4px 10px;
-  border: 1px solid var(--line-hi);
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--ink);
+  margin-bottom: 10px;
 }
-
-.pill-off {
-  color: var(--muted);
-  background: var(--card);
-}
-.pill-connecting {
-  color: var(--amber);
-  background: rgba(216, 166, 87, 0.12);
-  border-color: var(--amber);
-}
-.pill-on {
-  color: var(--green);
-  background: rgba(123, 216, 143, 0.12);
-  border-color: var(--green);
-}
-
-.banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px;
-  background: rgba(216, 166, 87, 0.12);
-  border: 1px solid var(--amber);
-  color: var(--amber);
+.subline {
   font-size: 12px;
+  color: var(--mid);
+  line-height: 1.5;
 }
-
-.card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.field-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--muted);
+.subline .mono {
+  color: var(--ink);
   font-weight: 600;
 }
 
-/* IP + port on one line: IP takes the room, port stays narrow. */
-.row {
-  display: flex;
-  gap: 8px;
+/* state-driven hero colour cues (set on <body> by app.js) */
+body.is-offline    .display { color: var(--muted); }
+body.is-connecting .display { color: var(--amber); }
+body.is-connected  .display { color: var(--pvw); }
+body.is-blocked    .display { color: var(--pgm); }
+
+/* ── Config cells ───────────────────────────────────── */
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  flex-shrink: 0;
 }
-.row-ip {
+.cell {
+  position: relative;
+  padding: 14px var(--pad-x);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+}
+.grid-2 .cell {
+  border-right: 1px solid var(--line);
+}
+.grid-2 .cell:last-child { border-right: 0; }
+.cell--full {
+  border-bottom: 1px solid var(--line);
+}
+/* Decks list takes its natural height; only the long "no deck" helper
+   text scrolls (capped) instead of stretching the whole window. */
+.cell--grow {
+  flex: 0 1 auto;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+/* Absorbs the slack so the action stack + meta strip pin to the bottom,
+   leaving one clean neutral gap rather than padding every section. */
+.spacer {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-.row-port {
-  width: 88px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.row input {
-  width: 100%;
+  min-height: 0;
+  background: var(--panel);
 }
 
-input {
-  background: var(--panel-2);
-  border: 1px solid var(--line-hi);
+/* Always-editable value field, styled like the launcher's inline edit. */
+.cell-input {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
   color: var(--ink);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  padding: 7px 9px;
-  outline: none;
-  user-select: text;
-}
-input:focus {
-  border-color: var(--amber);
-}
-
-button {
-  font-family: var(--font-mono);
-  cursor: pointer;
-}
-
-.primary {
-  background: var(--amber);
-  color: var(--bg);
-  border: 1px solid var(--amber);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-size: 11px;
-  padding: 8px 12px;
-}
-
-.ghost {
-  background: transparent;
-  border: 1px solid var(--line-hi);
-  color: var(--mid);
-  font-size: 11px;
-  padding: 6px 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-.ghost.danger {
-  color: var(--red);
-  border-color: var(--red);
-}
-
-.link {
   background: transparent;
   border: 0;
-  color: inherit;
-  text-decoration: underline;
-  font-size: 12px;
+  border-bottom: 1px solid var(--line-hi);
+  padding: 2px 0 4px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.08s ease;
+}
+.cell-input.mono {
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+}
+.cell-input::placeholder { color: var(--sub); }
+.cell-input:focus {
+  border-bottom-color: var(--amber);
+  caret-color: var(--amber);
 }
 
-.hint {
-  font-size: 11px;
-  color: var(--muted);
-  min-height: 14px;
-}
-
+/* ── Device list ────────────────────────────────────── */
 .devices {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-
 .device {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 8px;
+  gap: 10px;
+  padding: 9px 11px;
   background: var(--card);
   border: 1px solid var(--line);
-  font-size: 12px;
+}
+.device > span:first-child {
+  font-weight: 600;
+  color: var(--ink);
 }
 .device .meta {
-  color: var(--muted);
+  font-family: var(--font-mono);
   font-size: 10px;
+  color: var(--muted);
+  flex-shrink: 0;
 }
-
 .muted {
   color: var(--muted);
   font-size: 11px;
+  line-height: 1.55;
 }
+.muted b { color: var(--mid); font-weight: 600; }
 
-footer {
+/* ── Update row (matches launcher's accent-tinted row) ── */
+.row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 4px;
+  padding: 12px var(--pad-x);
+  background: var(--panel);
+  border: 0;
+  border-top: 1px solid var(--line);
+  width: 100%;
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  flex-shrink: 0;
+}
+.row--clickable { cursor: pointer; transition: background 0.08s ease, filter 0.08s ease; }
+.row .eyebrow { margin-bottom: 4px; }
+.row-title { font-size: 12px; font-weight: 500; color: var(--ink); }
+.arrow { font-weight: 400; }
+.arrow--big { font-size: 16px; line-height: 1; color: var(--muted); }
+.row--update {
+  background: var(--amber-tint);
+  border-top-color: var(--amber);
+}
+.row--update:hover { filter: brightness(1.15); }
+.row--update .arrow--big { color: var(--amber); }
+.row--update .row-title { color: var(--amber); font-weight: 600; }
+
+/* ── Same-PC conflict warning ───────────────────────── */
+.row--warn {
+  padding: 12px var(--pad-x) 13px;
+  background: var(--pgm-tint);
+  border-bottom: 1px solid var(--pgm);
+  flex-shrink: 0;
+}
+.eyebrow--warn {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--pgm);
+  margin-bottom: 6px;
+}
+.warn-text {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink);
 }
 
-.footer-actions {
-  display: flex;
-  gap: 8px;
+/* A conflict banner replaces the deck list — drop section 05 so the whole
+   window stays visible (no scrollbar) on this fixed-size mini launcher. */
+body.has-conflict .cell--grow { display: none; }
+
+/* ── Inline hint line ───────────────────────────────── */
+.hint {
+  flex-shrink: 0;
+  min-height: 18px;
+  padding: 4px var(--pad-x) 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: var(--panel);
 }
+
+/* ── CTA + secondary actions ────────────────────────── */
+.cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 50px;
+  padding: 0 var(--pad-x);
+  background: var(--amber);
+  color: var(--bg);
+  border: 0;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.08s ease;
+  flex-shrink: 0;
+}
+.cta:hover { background: #e1b04a; }
+.cta-arrow { font-size: 16px; }
+.cta:disabled {
+  background: var(--card);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.cta:disabled:hover { background: var(--card); }
+
+/* Locked (a local Nexus server is up): dim the dead controls and point
+   the operator at Quit — the only sensible action here. */
+.cell-input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-bottom-color: var(--line);
+}
+body.is-locked .ghost--muted { color: var(--pgm); font-weight: 700; }
+
+.secondary-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--panel);
+  flex-shrink: 0;
+}
+.ghost {
+  height: 38px;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--mid);
+  cursor: pointer;
+  transition: background 0.08s ease, color 0.08s ease;
+}
+.ghost:last-child { border-right: 0; }
+.ghost:hover { background: var(--card-hi); color: var(--ink); }
+.ghost--muted { color: var(--muted); }
+.ghost--muted:hover { color: var(--pgm); }
+
+/* ── Meta strip (app name + version, always visible) ── */
+.meta-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px var(--pad-x);
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.meta-strip-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.meta-strip-version {
+  font-size: 11px;
+  color: var(--ink);
+  font-feature-settings: "tnum";
+}
+
+/* Scrollbar (decks overflow) */
+.cell--grow::-webkit-scrollbar { width: 6px; }
+.cell--grow::-webkit-scrollbar-thumb { background: var(--line-hi); }

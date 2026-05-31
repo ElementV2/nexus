@@ -6,17 +6,20 @@
 const api = window.cross;
 
 const $ = (id) => document.getElementById(id);
-const stateEl = $("state");
+const displayEl = $("display");
+const linkSubEl = $("linkSub");
 const ipEl = $("ip");
 const portEl = $("port");
 const labelEl = $("label");
 const saveEl = $("save");
 const hintEl = $("hint");
 const devicesEl = $("devices");
+const conflictEl = $("conflict");
+const conflictEyebrowEl = $("conflict-eyebrow");
+const conflictTextEl = $("conflict-text");
 const versionEl = $("version");
 const bannerEl = $("update-banner");
 const updateTextEl = $("update-text");
-const updateBtnEl = $("update-btn");
 
 let updateUrl = null;
 
@@ -39,35 +42,59 @@ function composeServer(ip, port) {
   return p ? `${host}:${p}` : host;
 }
 
+// Hero subline shows whichever server the satellite targets.
+function renderLink() {
+  const link = composeServer(ipEl.value, portEl.value);
+  linkSubEl.textContent = link || "—";
+}
+
+const STATES = {
+  offline: { word: "Offline.", cls: "is-offline" },
+  connecting: { word: "Connecting…", cls: "is-connecting" },
+  connected: { word: "Connected.", cls: "is-connected" },
+  blocked: { word: "Blocked.", cls: "is-blocked" },
+};
+
+// When a Nexus server runs on this PC the agent blocks itself; lock every
+// control so the operator can't reconnect into the conflict — the only
+// way out is to close Cross (or stop the local server).
+function applyLock(locked) {
+  for (const el of [ipEl, portEl, labelEl, saveEl]) el.disabled = locked;
+  document.body.classList.toggle("is-locked", locked);
+}
+
 function renderState(status) {
-  if (!status || !status.running) {
-    stateEl.textContent = "Idle";
-    stateEl.className = "pill pill-off";
-  } else if (status.connected) {
-    stateEl.textContent = "Connected";
-    stateEl.className = "pill pill-on";
-  } else {
-    stateEl.textContent = "Connecting…";
-    stateEl.className = "pill pill-connecting";
-  }
-  if (status && status.lastError && !status.connected) {
+  let key = "offline";
+  if (status && status.localServer) key = "blocked";
+  else if (status && status.running) key = status.connected ? "connected" : "connecting";
+  const s = STATES[key];
+  displayEl.textContent = s.word;
+  document.body.classList.remove(
+    "is-offline",
+    "is-connecting",
+    "is-connected",
+    "is-blocked"
+  );
+  document.body.classList.add(s.cls);
+  applyLock(!!(status && status.localServer));
+  // Surface a live link error only while disconnected — but not the
+  // local-server block, which the conflict banner explains in full.
+  if (status && status.lastError && !status.connected && !status.localServer) {
     hintEl.textContent = status.lastError;
+  } else if (status && status.localServer) {
+    hintEl.textContent = "";
   }
 }
 
 function renderDevices(status) {
   const devices = (status && status.devices) || [];
   if (devices.length === 0) {
-    // On the SAME PC as the Nexus server / Elgato software the deck is
-    // held exclusively, so it either fails to open (blocked>0) or isn't
-    // even enumerated (blocked==0). Both look like "no deck" to users,
-    // so always point at the most common cause.
+    // Keep this terse — the same-PC / deck-in-use explanation lives in
+    // the conflict warning above when it applies. A bare "no deck" here
+    // covers the plain case (remote box, nothing plugged in yet).
     devicesEl.innerHTML =
-      '<div class="muted">No deck detected.<br><br>' +
-      'If a Stream Deck <b>is</b> plugged into this PC, it’s probably already in use by another app ' +
-      '(the Nexus app or Elgato Stream Deck software) — a deck can only be opened by one program at a time. ' +
-      'Nexus Cross is meant to run on a <b>different</b> machine than the Nexus server; ' +
-      'on the same PC, close the other app first.</div>';
+      '<div class="muted">No deck detected. If one is plugged in, another app may ' +
+      "be using it (a deck opens in one program at a time).</div>";
     return;
   }
   const satLabel = (status && status.label) || "";
@@ -77,8 +104,7 @@ function renderDevices(status) {
     row.className = "device";
     const left = document.createElement("span");
     // Prefix the model with this satellite's label so it's obvious which
-    // machine the deck is on (matches what the Nexus app shows for
-    // remote decks). Falls back to just the model when no label is set.
+    // machine the deck is on (matches what the Nexus app shows).
     left.textContent = satLabel ? `${satLabel} · ${d.model}` : d.model;
     const right = document.createElement("span");
     right.className = "meta";
@@ -89,9 +115,49 @@ function renderDevices(status) {
   }
 }
 
+// Warn loudly when Cross is running on the SAME PC as the Nexus server.
+// Two tells: the server URL resolves to this machine (sameHost), or a
+// local deck is already claimed by another app (blocked). In both cases
+// the satellite is in the wrong place — it belongs on another box.
+function renderConflict(status) {
+  // localServer is set by the agent only when a real Nexus server answers
+  // on this machine — so this never fires from a local IP with nothing
+  // listening (no false alarm).
+  let shown = true;
+  if (status && status.localServer) {
+    conflictEyebrowEl.textContent = "⚠ Server running on this PC";
+    conflictTextEl.textContent =
+      "A Nexus server is running on this PC, so Cross is blocked — both here " +
+      "would fight over the Stream Deck. Run Cross on another PC, or just " +
+      "close it with Quit below. Unblocks if the local server stops.";
+  } else if (status && status.blocked > 0) {
+    conflictEyebrowEl.textContent = "⚠ Deck already in use";
+    conflictTextEl.textContent =
+      "A Stream Deck here is held by another app (Nexus or Elgato). A deck " +
+      "opens in one program at a time — close it, or run Cross elsewhere.";
+  } else {
+    shown = false;
+  }
+  conflictEl.hidden = !shown;
+  // Free vertical space (and avoid a scrollbar) by dropping the now-moot
+  // deck list whenever a conflict banner is up.
+  document.body.classList.toggle("has-conflict", shown);
+}
+
 function render(status) {
   renderState(status);
+  renderConflict(status);
   renderDevices(status);
+}
+
+function showUpdate(info) {
+  if (!info || !info.available) {
+    bannerEl.hidden = true;
+    return;
+  }
+  updateUrl = info.installerUrl || info.releaseUrl;
+  updateTextEl.textContent = `Version ${info.latestVersion} available`;
+  bannerEl.hidden = false;
 }
 
 async function init() {
@@ -101,20 +167,11 @@ async function init() {
   ipEl.value = ip;
   portEl.value = port;
   labelEl.value = settings.label || "";
+  renderLink();
   render(await api.getStatus());
 
   const info = await api.getUpdateInfo();
   if (info) showUpdate(info);
-}
-
-function showUpdate(info) {
-  if (!info || !info.available) {
-    bannerEl.hidden = true;
-    return;
-  }
-  updateUrl = info.installerUrl || info.releaseUrl;
-  updateTextEl.textContent = `Update ${info.latestVersion} available`;
-  bannerEl.hidden = false;
 }
 
 saveEl.addEventListener("click", async () => {
@@ -130,16 +187,18 @@ saveEl.addEventListener("click", async () => {
     ipEl.value = ip;
     portEl.value = port;
   }
+  renderLink();
   hintEl.textContent = "Saved.";
 });
 
 for (const el of [ipEl, portEl, labelEl]) {
+  el.addEventListener("input", renderLink);
   el.addEventListener("keydown", (e) => {
     if (e.key === "Enter") saveEl.click();
   });
 }
 
-updateBtnEl.addEventListener("click", () => {
+bannerEl.addEventListener("click", () => {
   if (updateUrl) api.openExternal(updateUrl);
 });
 

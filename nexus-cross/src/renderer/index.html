@@ -9,73 +9,106 @@
     <title>Nexus Cross</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
-    <div class="drag-strip"></div>
+  <body class="is-offline">
+    <!-- Drag strip — replaces the OS title bar. The native Windows caption
+         buttons overlay its right side via `titleBarOverlay`, matching the
+         launcher exactly so both windows feel like one app. -->
+    <header class="titlebar"></header>
 
-    <main>
-      <header>
-        <div class="brand">
-          <div class="logo">NX</div>
-          <div>
-            <div class="title">Nexus Cross</div>
-            <div class="sub">Stream Deck satellite</div>
-          </div>
-        </div>
-        <div id="state" class="pill pill-off">Idle</div>
-      </header>
+    <!-- 01 / Status (hero) -->
+    <section class="hero">
+      <div class="numeral">NX</div>
+      <div class="eyebrow eyebrow--accent">01 / Satellite</div>
+      <h1 class="display" id="display">Offline.</h1>
+      <p class="subline">
+        Stream Deck bridge to <span class="mono" id="linkSub">—</span>
+      </p>
+    </section>
 
-      <section
-        id="update-banner"
-        class="banner"
-        hidden
-      >
-        <span id="update-text">Update available</span>
-        <button id="update-btn" class="link">Download</button>
-      </section>
+    <!-- Same-PC conflict warning (hidden unless detected): the satellite
+         is pointed at a server on this machine, or a local deck is held
+         by another app. Either way Cross belongs on a DIFFERENT box. -->
+    <section class="row--warn" id="conflict" hidden>
+      <div class="eyebrow eyebrow--warn" id="conflict-eyebrow">⚠ Same PC as the server</div>
+      <div class="warn-text" id="conflict-text"></div>
+    </section>
 
-      <section class="card">
-        <div class="row">
-          <div class="row-ip">
-            <label class="field-label" for="ip">Nexus server IP</label>
-            <input
-              id="ip"
-              type="text"
-              spellcheck="false"
-              placeholder="192.168.1.10"
-            />
-          </div>
-          <div class="row-port">
-            <label class="field-label" for="port">Port</label>
-            <input
-              id="port"
-              type="text"
-              inputmode="numeric"
-              spellcheck="false"
-              placeholder="9088"
-            />
-          </div>
-        </div>
-        <label class="field-label" for="label">Name (on network)</label>
-        <input id="label" type="text" spellcheck="false" placeholder="Booth PC" />
-        <button id="save" class="primary">Save &amp; connect</button>
-        <div id="hint" class="hint"></div>
-      </section>
+    <!-- 02 — Server IP  |  03 — Port -->
+    <section class="grid-2">
+      <div class="cell">
+        <div class="eyebrow">02 — Server IP</div>
+        <input
+          id="ip"
+          class="cell-input mono"
+          type="text"
+          spellcheck="false"
+          placeholder="192.168.1.10"
+        />
+      </div>
+      <div class="cell">
+        <div class="eyebrow">03 — Port</div>
+        <input
+          id="port"
+          class="cell-input mono"
+          type="text"
+          inputmode="numeric"
+          spellcheck="false"
+          placeholder="9088"
+        />
+      </div>
+    </section>
 
-      <section class="card">
-        <div class="field-label">Local Stream Decks</div>
-        <div id="devices" class="devices">
-          <div class="muted">No deck detected.</div>
-        </div>
-      </section>
+    <!-- 04 — Name (on network) -->
+    <section class="cell cell--full">
+      <div class="eyebrow">04 — Name (on network)</div>
+      <input
+        id="label"
+        class="cell-input"
+        type="text"
+        spellcheck="false"
+        placeholder="Booth PC"
+      />
+    </section>
 
-      <footer>
-        <span id="version" class="muted"></span>
-        <div class="footer-actions">
-          <button id="hide" class="ghost">Hide</button>
-          <button id="quit" class="ghost danger">Quit</button>
-        </div>
-      </footer>
-    </main>
+    <!-- 05 — Local Stream Decks -->
+    <section class="cell cell--full cell--grow">
+      <div class="eyebrow">05 — Local Stream Decks</div>
+      <div id="devices" class="devices">
+        <div class="muted">No deck detected.</div>
+      </div>
+    </section>
+
+    <!-- Absorbs slack so the action stack pins to the bottom. -->
+    <div class="spacer"></div>
+
+    <!-- 06 — Update (hidden until the updater finds a newer release) -->
+    <button class="row row--clickable row--update" id="update-banner" hidden>
+      <div>
+        <div class="eyebrow eyebrow--accent">06 — Update</div>
+        <div class="row-title" id="update-text">Update available</div>
+      </div>
+      <span class="arrow arrow--big" id="update-btn">↓</span>
+    </button>
+
+    <!-- Inline status line (Connecting… / Saved. / last error) -->
+    <div id="hint" class="hint"></div>
+
+    <!-- Primary action -->
+    <button class="cta" id="save">
+      <span class="cta-label">Save &amp; connect</span>
+      <span class="arrow cta-arrow">↗</span>
+    </button>
+
+    <div class="secondary-actions">
+      <button class="ghost" id="hide">Hide</button>
+      <button class="ghost ghost--muted" id="quit">Quit</button>
+    </div>
+
+    <!-- Persistent footer: app name + running version (matches launcher). -->
+    <div class="meta-strip">
+      <span class="meta-strip-label">Nexus Cross</span>
+      <span class="meta-strip-version mono" id="version">—</span>
+    </div>
 
     <script src="app.js"></script>
   </body>

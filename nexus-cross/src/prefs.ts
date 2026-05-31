@@ -10,7 +10,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir, hostname, platform } from "node:os";
+import { homedir, hostname, networkInterfaces, platform } from "node:os";
 import { join } from "node:path";
 
 export interface CrossSettings {
@@ -106,6 +106,28 @@ export function normalizeServerUrl(raw: string): string {
   } catch {
     return withScheme;
   }
+}
+
+/**
+ * Every IPv4 address that routes back to THIS machine: loopback plus each
+ * network interface's own address. The satellite probes these for a
+ * running Nexus server — if one answers, Cross is on the same box as the
+ * server (which already owns the Stream Deck) and must block itself. The
+ * launcher binds the server to `0.0.0.0` OR a chosen interface IP, so we
+ * have to check the interface addresses too, not just `127.0.0.1`.
+ */
+export function localAddresses(): string[] {
+  const addrs = new Set<string>(["127.0.0.1"]);
+  try {
+    for (const list of Object.values(networkInterfaces())) {
+      for (const ni of list ?? []) {
+        if (ni.family === "IPv4" && ni.address) addrs.add(ni.address);
+      }
+    }
+  } catch {
+    /* networkInterfaces unavailable — loopback-only fallback */
+  }
+  return [...addrs];
 }
 
 export function saveSettings(partial: Partial<CrossSettings>): CrossSettings {

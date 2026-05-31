@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeServerUrl } from "../nexus-cross/src/prefs";
+import { localAddresses, normalizeServerUrl } from "../nexus-cross/src/prefs";
 
 /**
  * normalizeServerUrl turns whatever an operator types in the Nexus Cross
@@ -57,5 +57,19 @@ describe("normalizeServerUrl", () => {
     // Spaces make this unparseable; we return it rather than throwing so
     // the failure surfaces at fetch time with a clear message.
     expect(normalizeServerUrl("not a host")).toBe("http://not a host");
+  });
+});
+
+/**
+ * localAddresses lists every IPv4 that routes back to this machine — what
+ * the satellite probes for a local Nexus server. Loopback is always
+ * present; the interface IPs are environment-dependent (not asserted).
+ */
+describe("localAddresses", () => {
+  it("always includes loopback and returns unique IPv4 strings", () => {
+    const addrs = localAddresses();
+    expect(addrs).toContain("127.0.0.1");
+    expect(new Set(addrs).size).toBe(addrs.length);
+    for (const a of addrs) expect(a).toMatch(/^\d{1,3}(\.\d{1,3}){3}$/);
   });
 });
