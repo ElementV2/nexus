@@ -228,12 +228,12 @@ export function LoadToDeckModal({
                   value={d.serialNumber ?? ""}
                   disabled={!d.serialNumber}
                 >
-                  {/* Lead with the satellite label so it's obvious which
-                      machine a remote deck is on (e.g. "Booth PC · xl"). */}
+                  {/* Lead with the satellite's NAME (on network) so it's
+                      obvious which machine the deck is on — that already
+                      says where it is, so no misleading "(remote)" tag. */}
                   {d.satelliteLabel ? `${d.satelliteLabel} · ` : ""}
                   {d.model}
                   {d.serialNumber ? ` · ${d.serialNumber}` : " · no serial"}
-                  {d.remote ? " (remote)" : ""}
                 </option>
               ))}
             </select>
