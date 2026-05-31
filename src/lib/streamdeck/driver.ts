@@ -321,11 +321,15 @@ class DriverImpl {
     try {
       infos = await mods.streamdeck.listStreamDecks();
     } catch (err) {
+      // Local HID enumeration failed (e.g. a packaged build missing the
+      // node-hid native binary). Do NOT bail with an empty list — fall
+      // through so the REMOTE satellite decks below still surface. A broken
+      // local HID must never hide working remote decks in "Load to deck".
       this.emit({
         type: "error",
         reason: err instanceof Error ? err.message : String(err),
       });
-      return [];
+      infos = [];
     }
     // Bind hotplug now that we've shown the modules load — the first
     // listDevices call typically fires after the user opens

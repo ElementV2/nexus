@@ -42,6 +42,20 @@ const nextConfig: NextConfig = {
   // Standalone output is what the Electron launcher packages and runs
   // via `node next-server/server.js`. Keeps the bundled web app self-contained.
   output: "standalone",
+  // Force the Stream Deck HID native binaries into the standalone build.
+  // `node-hid` (and `@julusian/jpeg-turbo`) are transitive deps of
+  // `@elgato-stream-deck/node` loaded via a runtime path (`node-gyp-build`),
+  // so NFT traces their JS but NOT their `prebuilds/*.node`. Without this
+  // the PACKAGED server can't enumerate HID → `listStreamDecks()` throws →
+  // no decks (local AND, via the early-return, remote). usb/@napi-rs are
+  // already `serverExternalPackages` and ship their binaries; these two are
+  // the gap. (The `.exe` is win32-x64, but include all prebuilds — small.)
+  outputFileTracingIncludes: {
+    "/api/streamdeck/devices": [
+      "./node_modules/node-hid/prebuilds/**",
+      "./node_modules/@julusian/**/prebuilds/**",
+    ],
+  },
   // Don't drag the launcher's own electron-builder output into the
   // standalone — that creates a recursive ~300 MB include.
   outputFileTracingExcludes: {
