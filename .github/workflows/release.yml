@@ -40,6 +40,14 @@ jobs:
             launcher/package-lock.json
             nexus-cross/package-lock.json
 
+      # electron-builder's @electron/rebuild compiles the native HID/usb/
+      # canvas deps with node-gyp, which still imports `distutils` — removed
+      # from Python 3.12. The runner defaults to 3.12, so pin 3.11 (ships
+      # distutils) or the nexus-cross build fails on `node-hid`.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Read launcher version
         id: version
         shell: bash

@@ -25,6 +25,13 @@ jobs:
             launcher/package-lock.json
             nexus-cross/package-lock.json
 
+      # Native deps (node-hid/usb/canvas) may compile via node-gyp, which
+      # imports `distutils` (gone in Python 3.12, the runner default). Pin
+      # 3.11 so a missing prebuilt doesn't break the install.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install root deps
         run: npm ci
       - name: Install launcher deps
