@@ -379,15 +379,18 @@ const abletonActions: ActionDefinition[] = [
   // ════════════════════════ Clip ops ══════════════════════════════════
   {
     id: "clip-stop",
-    label: "Clip · Stop slot",
+    label: "Clip · Stop",
     category: "Clips",
     options: [
       { id: "track", type: "number", label: "Track #", default: 0, min: 0 },
       { id: "clip", type: "number", label: "Clip slot #", default: 0, min: 0 },
     ],
+    // AbletonOSC stops a specific clip via /live/clip/stop, not a
+    // clip_slot endpoint (the clip_slot namespace only has fire/create/
+    // delete/duplicate/has_clip).
     toCommand: (o) => ({
       action: "raw",
-      address: "/live/clip_slot/stop_clip",
+      address: "/live/clip/stop",
       args: [Number(o.track ?? 0), Number(o.clip ?? 0)],
     }),
   },
@@ -446,33 +449,49 @@ const abletonActions: ActionDefinition[] = [
     }),
   },
   {
-    id: "scene-capture",
-    label: "Scene · Capture & insert",
+    id: "scene-create",
+    label: "Scene · Create",
     category: "Scenes",
+    options: [
+      {
+        id: "index",
+        type: "number",
+        label: "Insert at (-1 = append)",
+        default: -1,
+        min: -1,
+      },
+    ],
+    // AbletonOSC has no capture_and_insert_scene; create_scene(index) is
+    // the supported way to add a scene (-1 appends at the end).
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/song/create_scene",
+      args: [Number(o.index ?? -1)],
+    }),
+  },
+  {
+    id: "scene-fire-selected",
+    label: "Scene · Fire selected",
+    category: "Scenes",
+    // AbletonOSC exposes no fire_prev/next_scene. Pair this with
+    // "View · Select scene" to build prev/next on a surface.
     toCommand: () => ({
       action: "raw",
-      address: "/live/song/capture_and_insert_scene",
+      address: "/live/scene/fire_selected",
       args: [],
     }),
   },
   {
-    id: "scene-fire-prev",
-    label: "Scene · Fire previous",
+    id: "scene-fire-as-selected",
+    label: "Scene · Fire and select",
     category: "Scenes",
-    toCommand: () => ({
+    options: [
+      { id: "scene", type: "number", label: "Scene #", default: 0, min: 0 },
+    ],
+    toCommand: (o) => ({
       action: "raw",
-      address: "/live/song/fire_prev_scene",
-      args: [],
-    }),
-  },
-  {
-    id: "scene-fire-next",
-    label: "Scene · Fire next",
-    category: "Scenes",
-    toCommand: () => ({
-      action: "raw",
-      address: "/live/song/fire_next_scene",
-      args: [],
+      address: "/live/scene/fire_as_selected",
+      args: [Number(o.scene ?? 0)],
     }),
   },
 
@@ -492,10 +511,12 @@ const abletonActions: ActionDefinition[] = [
     id: "tempo-nudge-up",
     label: "Tempo · Nudge up",
     category: "Transport",
+    // nudge_up/down are boolean properties (momentary tempo bend while
+    // set), addressed via /set — not bare trigger endpoints.
     toCommand: () => ({
       action: "raw",
-      address: "/live/song/nudge_up",
-      args: [],
+      address: "/live/song/set/nudge_up",
+      args: [1],
     }),
   },
   {
@@ -504,8 +525,8 @@ const abletonActions: ActionDefinition[] = [
     category: "Transport",
     toCommand: () => ({
       action: "raw",
-      address: "/live/song/nudge_down",
-      args: [],
+      address: "/live/song/set/nudge_down",
+      args: [1],
     }),
   },
   {
@@ -588,20 +609,39 @@ const abletonActions: ActionDefinition[] = [
     options: [
       { id: "track", type: "number", label: "Track #", default: 0, min: 0 },
     ],
+    // Selection lives under the /live/view namespace in AbletonOSC, not
+    // /live/song.
     toCommand: (o) => ({
       action: "raw",
-      address: "/live/song/set/selected_track",
+      address: "/live/view/set/selected_track",
       args: [Number(o.track ?? 0)],
     }),
   },
   {
-    id: "view-toggle-session-arrangement",
-    label: "View · Toggle session/arrangement",
+    id: "view-select-scene",
+    label: "View · Select scene",
     category: "View",
-    toCommand: () => ({
+    options: [
+      { id: "scene", type: "number", label: "Scene #", default: 0, min: 0 },
+    ],
+    toCommand: (o) => ({
       action: "raw",
-      address: "/live/view/show_view",
-      args: ["Session"],
+      address: "/live/view/set/selected_scene",
+      args: [Number(o.scene ?? 0)],
+    }),
+  },
+  {
+    id: "view-select-clip",
+    label: "View · Select clip",
+    category: "View",
+    options: [
+      { id: "track", type: "number", label: "Track #", default: 0, min: 0 },
+      { id: "scene", type: "number", label: "Scene #", default: 0, min: 0 },
+    ],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/view/set/selected_clip",
+      args: [Number(o.track ?? 0), Number(o.scene ?? 0)],
     }),
   },
 
@@ -614,6 +654,313 @@ const abletonActions: ActionDefinition[] = [
       action: "raw",
       address: "/live/song/stop_all_clips",
       args: [],
+    }),
+  },
+
+  // ════════════════════════ Recording / capture ═══════════════════════
+  {
+    id: "trigger-session-record",
+    label: "Trigger session record",
+    description: "Records into the highlighted slot (the big record button).",
+    category: "Recording",
+    toCommand: () => ({
+      action: "raw",
+      address: "/live/song/trigger_session_record",
+      args: [],
+    }),
+  },
+  {
+    id: "capture-midi",
+    label: "Capture MIDI",
+    category: "Recording",
+    toCommand: () => ({
+      action: "raw",
+      address: "/live/song/capture_midi",
+      args: [],
+    }),
+  },
+  {
+    id: "record-mode",
+    label: "Arrangement record (toggle)",
+    category: "Recording",
+    options: [{ id: "on", type: "boolean", label: "Recording", default: true }],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/song/set/record_mode",
+      args: [o.on ? 1 : 0],
+    }),
+  },
+  {
+    id: "arrangement-overdub",
+    label: "Arrangement overdub (toggle)",
+    category: "Recording",
+    options: [{ id: "on", type: "boolean", label: "Overdub", default: true }],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/song/set/arrangement_overdub",
+      args: [o.on ? 1 : 0],
+    }),
+  },
+  {
+    id: "back-to-arranger",
+    label: "Back to arranger (clear)",
+    category: "Recording",
+    toCommand: () => ({
+      action: "raw",
+      address: "/live/song/set/back_to_arranger",
+      args: [0],
+    }),
+  },
+
+  // ════════════════════════ Undo / loop / cues ════════════════════════
+  {
+    id: "song-undo",
+    label: "Undo",
+    category: "Transport",
+    toCommand: () => ({ action: "raw", address: "/live/song/undo", args: [] }),
+  },
+  {
+    id: "song-redo",
+    label: "Redo",
+    category: "Transport",
+    toCommand: () => ({ action: "raw", address: "/live/song/redo", args: [] }),
+  },
+  {
+    id: "loop-toggle",
+    label: "Arrangement loop (toggle)",
+    category: "Transport",
+    options: [{ id: "on", type: "boolean", label: "Loop", default: true }],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/song/set/loop",
+      args: [o.on ? 1 : 0],
+    }),
+  },
+  {
+    id: "jump-by",
+    label: "Jump by (beats)",
+    category: "Transport",
+    options: [
+      {
+        id: "beats",
+        type: "number",
+        label: "Beats (±)",
+        default: 4,
+        step: 1,
+      },
+    ],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/song/jump_by",
+      args: [Number(o.beats ?? 4)],
+    }),
+  },
+  {
+    id: "jump-next-cue",
+    label: "Jump to next cue",
+    category: "Transport",
+    toCommand: () => ({
+      action: "raw",
+      address: "/live/song/jump_to_next_cue",
+      args: [],
+    }),
+  },
+  {
+    id: "jump-prev-cue",
+    label: "Jump to previous cue",
+    category: "Transport",
+    toCommand: () => ({
+      action: "raw",
+      address: "/live/song/jump_to_prev_cue",
+      args: [],
+    }),
+  },
+  {
+    id: "cue-jump",
+    label: "Jump to cue #",
+    category: "Transport",
+    options: [
+      { id: "cue", type: "number", label: "Cue point #", default: 0, min: 0 },
+    ],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/song/cue_point/jump",
+      args: [Number(o.cue ?? 0)],
+    }),
+  },
+
+  // ════════════════════════ Track extras ══════════════════════════════
+  {
+    id: "track-monitoring",
+    label: "Track · Monitoring (In/Auto/Off)",
+    category: "Tracks",
+    options: [
+      { id: "track", type: "number", label: "Track #", default: 0, min: 0 },
+      {
+        id: "state",
+        type: "dropdown",
+        label: "Monitor",
+        default: "1",
+        choices: [
+          { id: "0", label: "In" },
+          { id: "1", label: "Auto" },
+          { id: "2", label: "Off" },
+        ],
+      },
+    ],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/track/set/current_monitoring_state",
+      args: [Number(o.track ?? 0), Number(o.state ?? 1)],
+    }),
+  },
+  {
+    id: "track-stop-all",
+    label: "Track · Stop all clips",
+    category: "Tracks",
+    options: [
+      { id: "track", type: "number", label: "Track #", default: 0, min: 0 },
+    ],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/track/stop_all_clips",
+      args: [Number(o.track ?? 0)],
+    }),
+  },
+  {
+    id: "track-name",
+    label: "Track · Set name",
+    category: "Tracks",
+    options: [
+      { id: "track", type: "number", label: "Track #", default: 0, min: 0 },
+      { id: "name", type: "string", label: "Name", default: "" },
+    ],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/track/set/name",
+      args: [Number(o.track ?? 0), String(o.name ?? "")],
+    }),
+  },
+
+  // ════════════════════════ Clip extras ═══════════════════════════════
+  {
+    id: "clip-fire",
+    label: "Clip · Fire",
+    category: "Clips",
+    options: [
+      { id: "track", type: "number", label: "Track #", default: 0, min: 0 },
+      { id: "clip", type: "number", label: "Clip slot #", default: 0, min: 0 },
+    ],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/clip/fire",
+      args: [Number(o.track ?? 0), Number(o.clip ?? 0)],
+    }),
+  },
+  {
+    id: "clip-mute",
+    label: "Clip · Mute (deactivate)",
+    category: "Clips",
+    options: [
+      { id: "track", type: "number", label: "Track #", default: 0, min: 0 },
+      { id: "clip", type: "number", label: "Clip slot #", default: 0, min: 0 },
+      { id: "muted", type: "boolean", label: "Muted", default: true },
+    ],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/clip/set/muted",
+      args: [Number(o.track ?? 0), Number(o.clip ?? 0), o.muted ? 1 : 0],
+    }),
+  },
+  {
+    id: "clip-warp",
+    label: "Clip · Warp (toggle)",
+    category: "Clips",
+    options: [
+      { id: "track", type: "number", label: "Track #", default: 0, min: 0 },
+      { id: "clip", type: "number", label: "Clip slot #", default: 0, min: 0 },
+      { id: "warping", type: "boolean", label: "Warping", default: true },
+    ],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/clip/set/warping",
+      args: [Number(o.track ?? 0), Number(o.clip ?? 0), o.warping ? 1 : 0],
+    }),
+  },
+  {
+    id: "clip-duplicate-loop",
+    label: "Clip · Duplicate loop",
+    category: "Clips",
+    options: [
+      { id: "track", type: "number", label: "Track #", default: 0, min: 0 },
+      { id: "clip", type: "number", label: "Clip slot #", default: 0, min: 0 },
+    ],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/clip/duplicate_loop",
+      args: [Number(o.track ?? 0), Number(o.clip ?? 0)],
+    }),
+  },
+  {
+    id: "clipslot-create",
+    label: "Clip slot · Create empty clip",
+    category: "Clips",
+    options: [
+      { id: "track", type: "number", label: "Track #", default: 0, min: 0 },
+      { id: "clip", type: "number", label: "Clip slot #", default: 0, min: 0 },
+      {
+        id: "length",
+        type: "number",
+        label: "Length (beats)",
+        default: 4,
+        min: 0.25,
+        step: 0.25,
+      },
+    ],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/clip_slot/create_clip",
+      args: [Number(o.track ?? 0), Number(o.clip ?? 0), Number(o.length ?? 4)],
+    }),
+  },
+
+  // ════════════════════════ Create / delete ═══════════════════════════
+  {
+    id: "create-audio-track",
+    label: "Create audio track",
+    category: "Session",
+    options: [
+      {
+        id: "index",
+        type: "number",
+        label: "Insert at (-1 = end)",
+        default: -1,
+        min: -1,
+      },
+    ],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/song/create_audio_track",
+      args: [Number(o.index ?? -1)],
+    }),
+  },
+  {
+    id: "create-midi-track",
+    label: "Create MIDI track",
+    category: "Session",
+    options: [
+      {
+        id: "index",
+        type: "number",
+        label: "Insert at (-1 = end)",
+        default: -1,
+        min: -1,
+      },
+    ],
+    toCommand: (o) => ({
+      action: "raw",
+      address: "/live/song/create_midi_track",
+      args: [Number(o.index ?? -1)],
     }),
   },
 ];
@@ -813,31 +1160,31 @@ const abletonPresets: PresetDefinition[] = [
     steps: [{ actionId: "scene-launch", options: { scene: 0 } }],
   },
   {
-    id: "scene-capture",
-    label: "Scene · Capture & insert",
+    id: "scene-fire-selected",
+    label: "Scene · Fire selected",
     category: "Scenes",
-    text: "SC\nCAP",
+    text: "SC ▶\nSEL",
+    bgcolor: "#34c759",
+    fgcolor: "#000000",
+    steps: [{ actionId: "scene-fire-selected" }],
+  },
+  {
+    id: "scene-create",
+    label: "Scene · Create",
+    category: "Scenes",
+    text: "SC +",
     bgcolor: "#5856d6",
     fgcolor: "#ffffff",
-    steps: [{ actionId: "scene-capture" }],
+    steps: [{ actionId: "scene-create", options: { index: -1 } }],
   },
   {
-    id: "scene-fire-prev",
-    label: "Scene · Previous",
+    id: "view-select-scene",
+    label: "View · Select scene",
     category: "Scenes",
-    text: "SC ←",
+    text: "SEL\nSCENE",
     bgcolor: "#5ac8fa",
     fgcolor: "#000000",
-    steps: [{ actionId: "scene-fire-prev" }],
-  },
-  {
-    id: "scene-fire-next",
-    label: "Scene · Next",
-    category: "Scenes",
-    text: "SC →",
-    bgcolor: "#5ac8fa",
-    fgcolor: "#000000",
-    steps: [{ actionId: "scene-fire-next" }],
+    steps: [{ actionId: "view-select-scene", options: { scene: 0 } }],
   },
 
   // ── Transport extras ────────────────────────────────────────────────
@@ -919,13 +1266,156 @@ const abletonPresets: PresetDefinition[] = [
     steps: [{ actionId: "view-select-track", options: { track: 0 } }],
   },
   {
-    id: "view-toggle-session",
-    label: "View · Toggle session",
+    id: "view-select-clip",
+    label: "View · Select clip",
     category: "View",
-    text: "VIEW\nSESS",
+    text: "VIEW\nCLIP",
     bgcolor: "#5ac8fa",
     fgcolor: "#000000",
-    steps: [{ actionId: "view-toggle-session-arrangement" }],
+    steps: [{ actionId: "view-select-clip", options: { track: 0, scene: 0 } }],
+  },
+
+  // ── Recording ────────────────────────────────────────────────────────
+  {
+    id: "trigger-session-record",
+    label: "Session record (slot)",
+    category: "Recording",
+    text: "REC\nSLOT",
+    bgcolor: "#ff3b30",
+    fgcolor: "#ffffff",
+    steps: [{ actionId: "trigger-session-record" }],
+  },
+  {
+    id: "capture-midi",
+    label: "Capture MIDI",
+    category: "Recording",
+    text: "CAPT\nMIDI",
+    bgcolor: "#5856d6",
+    fgcolor: "#ffffff",
+    steps: [{ actionId: "capture-midi" }],
+  },
+  {
+    id: "record-mode",
+    label: "Arrangement record",
+    category: "Recording",
+    text: "ARR\nREC",
+    bgcolor: "#ff3b30",
+    fgcolor: "#ffffff",
+    steps: [{ actionId: "record-mode", options: { on: true } }],
+  },
+  {
+    id: "arrangement-overdub",
+    label: "Overdub",
+    category: "Recording",
+    text: "OVR\nDUB",
+    bgcolor: "#ff9500",
+    fgcolor: "#000000",
+    steps: [{ actionId: "arrangement-overdub", options: { on: true } }],
+  },
+
+  // ── Transport extras ──────────────────────────────────────────────────
+  {
+    id: "song-undo",
+    label: "Undo",
+    category: "Transport",
+    text: "UNDO",
+    bgcolor: "#1c1c1e",
+    fgcolor: "#ffffff",
+    steps: [{ actionId: "song-undo" }],
+  },
+  {
+    id: "song-redo",
+    label: "Redo",
+    category: "Transport",
+    text: "REDO",
+    bgcolor: "#1c1c1e",
+    fgcolor: "#ffffff",
+    steps: [{ actionId: "song-redo" }],
+  },
+  {
+    id: "loop-toggle",
+    label: "Arrangement loop",
+    category: "Transport",
+    text: "LOOP",
+    bgcolor: "#5856d6",
+    fgcolor: "#ffffff",
+    steps: [{ actionId: "loop-toggle", options: { on: true } }],
+  },
+  {
+    id: "jump-next-cue",
+    label: "Next cue",
+    category: "Transport",
+    text: "CUE →",
+    bgcolor: "#5ac8fa",
+    fgcolor: "#000000",
+    steps: [{ actionId: "jump-next-cue" }],
+  },
+  {
+    id: "jump-prev-cue",
+    label: "Previous cue",
+    category: "Transport",
+    text: "← CUE",
+    bgcolor: "#5ac8fa",
+    fgcolor: "#000000",
+    steps: [{ actionId: "jump-prev-cue" }],
+  },
+
+  // ── Track / clip extras ────────────────────────────────────────────────
+  {
+    id: "track-monitoring",
+    label: "Track · Monitoring",
+    category: "Tracks",
+    text: "MON",
+    bgcolor: "#af52de",
+    fgcolor: "#ffffff",
+    steps: [{ actionId: "track-monitoring", options: { track: 0, state: "1" } }],
+  },
+  {
+    id: "track-stop-all",
+    label: "Track · Stop all clips",
+    category: "Tracks",
+    text: "T STOP",
+    bgcolor: "#1c1c1e",
+    fgcolor: "#ff3b30",
+    steps: [{ actionId: "track-stop-all", options: { track: 0 } }],
+  },
+  {
+    id: "clip-fire",
+    label: "Clip · Fire",
+    category: "Clips",
+    text: "CLIP ▶",
+    bgcolor: "#34c759",
+    fgcolor: "#000000",
+    steps: [{ actionId: "clip-fire", options: { track: 0, clip: 0 } }],
+  },
+  {
+    id: "clip-mute",
+    label: "Clip · Mute",
+    category: "Clips",
+    text: "CLIP\nMUTE",
+    bgcolor: "#1c1c1e",
+    fgcolor: "#ff9500",
+    steps: [{ actionId: "clip-mute", options: { track: 0, clip: 0, muted: true } }],
+  },
+
+  // ── Session structure ──────────────────────────────────────────────────
+  {
+    id: "create-audio-track",
+    label: "Create audio track",
+    category: "Session",
+    text: "+ AUD\nTRK",
+    bgcolor: "#5856d6",
+    fgcolor: "#ffffff",
+    steps: [{ actionId: "create-audio-track", options: { index: -1 } }],
+  },
+  {
+    id: "create-midi-track",
+    label: "Create MIDI track",
+    category: "Session",
+    text: "+ MIDI\nTRK",
+    bgcolor: "#5856d6",
+    fgcolor: "#ffffff",
+    steps: [{ actionId: "create-midi-track", options: { index: -1 } }],
   },
 ];
 
