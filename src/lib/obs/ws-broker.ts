@@ -50,7 +50,9 @@ export interface ObsBrokerConfig {
 type Subscriber = (e: ObsEvent) => void;
 
 const RECONNECT_INITIAL_MS = 1_000;
-const RECONNECT_MAX_MS = 30_000;
+// Cap low so OBS recovers within a few seconds of coming back on the LAN
+// (was 30 s — same "feels like it never reconnects" lag as vMix had).
+const RECONNECT_MAX_MS = 5_000;
 const STATS_POLL_MS = 1_500;
 const REQUEST_TIMEOUT_MS = 5_000;
 const SCREENSHOT_TIMEOUT_MS = 5_000;

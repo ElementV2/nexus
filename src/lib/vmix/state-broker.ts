@@ -24,7 +24,12 @@ type Subscriber = (m: StateMessage) => void;
 const FLOOR_MS = 50;
 const STARTUP_DELAY_MS = 0;
 const ERROR_BACKOFF_MS_INITIAL = 1000;
-const ERROR_BACKOFF_MS_MAX = 30_000;
+// Cap the error backoff low: vMix is a LAN/localhost target that should
+// recover within a few seconds of coming back (the operator notices when
+// it stays "error" much longer than Ableton, which re-pings every 2 s). A
+// poll to an offline LAN host every 5 s is negligible. Was 30 s, which made
+// recovery feel like "it never reconnects" after a network blip.
+const ERROR_BACKOFF_MS_MAX = 5_000;
 
 export class VmixStateBroker {
   private subscribers = new Set<Subscriber>();
@@ -135,18 +140,17 @@ export class VmixStateBroker {
     const interval = Math.max(FLOOR_MS, pollingInterval);
 
     let backoff = interval;
+    // One abort timer covering the whole request (connect + body read),
+    // cleared in `finally` so it never leaks — including on a network
+    // error, where the inline clear after `res.text()` was skipped.
+    const controller = new AbortController();
+    const to = setTimeout(() => controller.abort(), STATE_FETCH_TIMEOUT_MS);
     try {
-      const controller = new AbortController();
-      const to = setTimeout(() => controller.abort(), STATE_FETCH_TIMEOUT_MS);
       const res = await fetch(url, {
         signal: controller.signal,
         cache: "no-store",
       });
-      // Keep the abort timer armed across the body read too — a slow/
-      // half-open body stream would otherwise block the poll chain with no
-      // timeout (status stuck "connected", no further ticks).
       const raw = await res.text();
-      clearTimeout(to);
       if (!res.ok) {
         this.publish({
           ok: false,
@@ -179,6 +183,7 @@ export class VmixStateBroker {
       backoff = Math.max(interval, this.currentErrorBackoff);
       this.bumpErrorBackoff();
     } finally {
+      clearTimeout(to);
       this.inFlight = false;
     }
 
