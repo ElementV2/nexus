@@ -4,20 +4,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Eyebrow, MonoChip } from "@/components/sw";
 
 /**
- * Browser of every action and preset registered across all device
- * kinds. Two tabs (Presets / Actions), filters by kind, search.
+ * Unified browser of everything you can drop on a surface. There is ONE
+ * list: presets. An "action" with no curated preset is surfaced as an
+ * auto-generated tile (its label + default options on a neutral face),
+ * so every operation is reachable without a second tab. Per-key
+ * parameters are edited in the inspector after the tile is dropped.
  *
- * Drop payload (both tabs): MIME `application/x-nexus-preset` carries
- * a JSON-encoded `{ globalId, kind, label, text, bgcolor, fgcolor,
- * steps }`. Surface editors (Stream Deck, Loupedeck, ...) only need
- * to listen for that one type.
+ * Drop payload: MIME `application/x-nexus-preset` carries a JSON-encoded
+ * `{ globalId, kind, label, text, bgcolor, fgcolor, steps }`. Surface
+ * editors (Stream Deck, Loupedeck, ...) only listen for that one type.
  *
  * Two layout modes:
- *   • `full` (default) — page-width, generous spacing. Kept for any
- *     future standalone use; today the only caller is the deck editor.
- *   • `sidebar` — narrow column embedded in the deck editor. Tighter
- *     padding, smaller tiles, scroll-y container so the deck mockup
- *     stays visible alongside.
+ *   • `full` (default) — page-width, generous spacing.
+ *   • `sidebar` — narrow column embedded in the deck editor.
  */
 
 interface PresetEntry {
@@ -30,6 +29,9 @@ interface PresetEntry {
   bgcolor?: string;
   fgcolor?: string;
   steps: Array<{ actionId: string; options?: Record<string, unknown> }>;
+  /** True when synthesized from an action that had no curated preset.
+   *  Fired via /api/actions/run instead of /api/presets/run. */
+  synthetic?: boolean;
 }
 
 interface ActionOptionDef {
@@ -64,16 +66,22 @@ type FireState =
 const FIRE_FEEDBACK_MS = 1500;
 const FIRE_ERROR_MS = 3000;
 
-type Tab = "presets" | "actions";
-
 export interface PresetBrowserPanelProps {
   mode?: "full" | "sidebar";
+}
+
+/** Default option values declared by an action, as a frozen options map. */
+function defaultsOf(options: ActionOptionDef[] | undefined): Record<string, unknown> {
+  const o: Record<string, unknown> = {};
+  for (const opt of options ?? []) {
+    if (opt.default !== undefined) o[opt.id] = opt.default;
+  }
+  return o;
 }
 
 export function PresetBrowserPanel({
   mode = "full",
 }: PresetBrowserPanelProps) {
-  const [tab, setTab] = useState<Tab>("presets");
   const [presets, setPresets] = useState<PresetEntry[] | null>(null);
   const [actions, setActions] = useState<ActionEntry[] | null>(null);
   const [filterKind, setFilterKind] = useState<string | null>(null);
@@ -103,28 +111,72 @@ export function PresetBrowserPanel({
     };
   }, []);
 
-  const kinds = useMemo(() => {
-    const s = new Set<string>();
-    presets?.forEach((p) => s.add(p.kind));
-    actions?.forEach((a) => s.add(a.kind));
-    return Array.from(s).sort();
+  // The single tile list: curated presets, plus an auto-tile for every
+  // action no preset already covers (so the one tab is exhaustive but
+  // never duplicates a curated tile — e.g. vMix is 1:1 so adds none).
+  const tiles = useMemo<PresetEntry[] | null>(() => {
+    if (!presets || !actions) return null;
+    const covered = new Set<string>();
+    for (const p of presets) {
+      for (const s of p.steps) covered.add(`${p.kind}:${s.actionId}`);
+    }
+    const synthesized: PresetEntry[] = actions
+      .filter((a) => !covered.has(`${a.kind}:${a.id}`))
+      .map((a) => ({
+        globalId: a.globalId,
+        kind: a.kind,
+        id: a.id,
+        label: a.label,
+        category: a.category,
+        text: a.label.toUpperCase().slice(0, 12),
+        bgcolor: "#2c2c2e",
+        fgcolor: "#ffffff",
+        steps: [{ actionId: a.id, options: defaultsOf(a.options) }],
+        synthetic: true,
+      }));
+    return [...presets, ...synthesized];
   }, [presets, actions]);
 
-  const firePreset = useCallback(async (p: PresetEntry) => {
+  const kinds = useMemo(() => {
+    const s = new Set<string>();
+    tiles?.forEach((t) => s.add(t.kind));
+    return Array.from(s).sort();
+  }, [tiles]);
+
+  const fireTile = useCallback(async (p: PresetEntry) => {
     setFire({ kind: "running", globalId: p.globalId });
     let next: FireState;
     try {
-      const res = await fetch("/api/presets/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ globalId: p.globalId }),
-      });
-      const json = (await res.json()) as {
-        results: Array<{ ok: boolean; error?: string }>;
-      };
-      const failed = json.results.find((r) => !r.ok);
-      next = failed
-        ? { kind: "err", globalId: p.globalId, error: failed.error ?? "unknown" }
+      // Curated presets resolve server-side by globalId; synthesized
+      // action-tiles fire their single action with the frozen options.
+      let failedError: string | null = null;
+      if (p.synthetic) {
+        const step = p.steps[0];
+        const res = await fetch("/api/actions/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            globalId: `${p.kind}:${step.actionId}`,
+            options: step.options ?? {},
+          }),
+        });
+        const json = (await res.json()) as
+          | { ok: true; data: unknown }
+          | { ok: false; error: string };
+        if (!json.ok) failedError = json.error;
+      } else {
+        const res = await fetch("/api/presets/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ globalId: p.globalId }),
+        });
+        const json = (await res.json()) as {
+          results: Array<{ ok: boolean; error?: string }>;
+        };
+        failedError = json.results.find((r) => !r.ok)?.error ?? null;
+      }
+      next = failedError
+        ? { kind: "err", globalId: p.globalId, error: failedError }
         : { kind: "ok", globalId: p.globalId };
     } catch (err) {
       next = {
@@ -145,44 +197,7 @@ export function PresetBrowserPanel({
     }, delay);
   }, []);
 
-  const fireAction = useCallback(
-    async (a: ActionEntry, options: Record<string, unknown>) => {
-      setFire({ kind: "running", globalId: a.globalId });
-      let next: FireState;
-      try {
-        const res = await fetch("/api/actions/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ globalId: a.globalId, options }),
-        });
-        const json = (await res.json()) as
-          | { ok: true; data: unknown }
-          | { ok: false; error: string };
-        next = json.ok
-          ? { kind: "ok", globalId: a.globalId }
-          : { kind: "err", globalId: a.globalId, error: json.error };
-      } catch (err) {
-        next = {
-          kind: "err",
-          globalId: a.globalId,
-          error: err instanceof Error ? err.message : "network",
-        };
-      }
-      setFire(next);
-      const captured = a.globalId;
-      const delay = next.kind === "err" ? FIRE_ERROR_MS : FIRE_FEEDBACK_MS;
-      setTimeout(() => {
-        setFire((cur) =>
-          cur.kind !== "idle" && cur.globalId === captured
-            ? { kind: "idle" }
-            : cur
-        );
-      }, delay);
-    },
-    []
-  );
-
-  if (!presets || !actions) {
+  if (!tiles) {
     return (
       <div className="text-[13px] text-sw-muted py-12 text-center">
         Loading catalog…
@@ -194,7 +209,7 @@ export function PresetBrowserPanel({
 
   return (
     <div className="flex flex-col" style={{ height: "100%", minHeight: 0 }}>
-      {/* Tabs + filters */}
+      {/* Filters (single list — no preset/action tabs). */}
       <div
         className="flex items-center gap-2 sw-hairline-bottom flex-wrap"
         style={{
@@ -202,31 +217,7 @@ export function PresetBrowserPanel({
           background: "var(--panel)",
         }}
       >
-        {(["presets", "actions"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className="font-mono uppercase transition-colors"
-            style={{
-              padding: "3px 10px",
-              fontSize: 10,
-              letterSpacing: "1.2px",
-              border: "1px solid var(--line-hi)",
-              background: tab === t ? "var(--ink)" : "transparent",
-              color: tab === t ? "var(--bg)" : "var(--mid)",
-              cursor: "pointer",
-              fontWeight: 600,
-            }}
-          >
-            {t}
-          </button>
-        ))}
-        {!sidebar && (
-          <>
-            <span style={{ width: 1, height: 18, background: "var(--line-hi)" }} />
-            <Eyebrow tone="muted">Kind</Eyebrow>
-          </>
-        )}
+        {!sidebar && <Eyebrow tone="muted">Kind</Eyebrow>}
         <KindFilterChips
           kinds={kinds}
           current={filterKind}
@@ -237,7 +228,7 @@ export function PresetBrowserPanel({
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder={sidebar ? "Search…" : `Search ${tab}…`}
+          placeholder="Search…"
           className="font-mono"
           style={{
             marginLeft: "auto",
@@ -254,33 +245,16 @@ export function PresetBrowserPanel({
         />
       </div>
 
-      {/* Body — scrollable so the tab strip stays sticky-feeling. */}
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: "auto",
-        }}
-      >
-        {tab === "presets" ? (
-          <PresetsView
-            presets={presets}
-            filterKind={filterKind}
-            search={search}
-            fire={fire}
-            onFire={firePreset}
-            compact={sidebar}
-          />
-        ) : (
-          <ActionsView
-            actions={actions}
-            filterKind={filterKind}
-            search={search}
-            fire={fire}
-            onFire={fireAction}
-            compact={sidebar}
-          />
-        )}
+      {/* Body — scrollable so the filter strip stays sticky-feeling. */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+        <PresetsView
+          presets={tiles}
+          filterKind={filterKind}
+          search={search}
+          fire={fire}
+          onFire={fireTile}
+          compact={sidebar}
+        />
       </div>
     </div>
   );
@@ -336,7 +310,7 @@ function KindFilterChips({
   );
 }
 
-// ─────────────────────────── Presets view ────────────────────────────
+// ─────────────────────────── Tile grid ───────────────────────────────
 
 function PresetsView({
   presets,
@@ -432,7 +406,7 @@ function PresetsView({
       ))}
       {groups.length === 0 && (
         <div className="text-[12px] text-sw-muted py-8 text-center">
-          No presets match the current filter.
+          Nothing matches the current filter.
         </div>
       )}
     </div>
@@ -465,9 +439,12 @@ function PresetTile({
       draggable
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "copy";
+        // Drop the same payload shape for curated + synthesized tiles;
+        // the surface editor only reads globalId/kind/steps/style.
+        const { synthetic: _omit, ...payload } = preset;
         e.dataTransfer.setData(
           "application/x-nexus-preset",
-          JSON.stringify(preset)
+          JSON.stringify(payload)
         );
         e.dataTransfer.setData("text/plain", preset.globalId);
       }}
@@ -523,412 +500,5 @@ function PresetTile({
         {preset.kind}
       </span>
     </button>
-  );
-}
-
-// ─────────────────────────── Actions view ────────────────────────────
-
-function ActionsView({
-  actions,
-  filterKind,
-  search,
-  fire,
-  onFire,
-  compact,
-}: {
-  actions: ActionEntry[];
-  filterKind: string | null;
-  search: string;
-  fire: FireState;
-  onFire: (a: ActionEntry, options: Record<string, unknown>) => void;
-  compact: boolean;
-}) {
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return actions.filter((a) => {
-      if (filterKind && a.kind !== filterKind) return false;
-      if (!q) return true;
-      return (
-        a.label.toLowerCase().includes(q) ||
-        a.category?.toLowerCase().includes(q) ||
-        a.id.toLowerCase().includes(q) ||
-        a.description?.toLowerCase().includes(q)
-      );
-    });
-  }, [actions, filterKind, search]);
-
-  const groups = useMemo(() => {
-    const map = new Map<string, ActionEntry[]>();
-    for (const a of filtered) {
-      const key = `${a.kind}::${a.category ?? "Misc"}`;
-      const arr = map.get(key);
-      if (arr) arr.push(a);
-      else map.set(key, [a]);
-    }
-    return Array.from(map.entries())
-      .map(([key, items]) => {
-        const [kind, category] = key.split("::");
-        return { kind, category, items };
-      })
-      .sort((a, b) =>
-        a.kind === b.kind
-          ? a.category.localeCompare(b.category)
-          : a.kind.localeCompare(b.kind)
-      );
-  }, [filtered]);
-
-  return (
-    <div
-      className="space-y-4"
-      style={{ padding: compact ? "8px 10px" : "16px 24px" }}
-    >
-      {groups.map(({ kind, category, items }) => (
-        <section key={`${kind}::${category}`} className="space-y-2">
-          <div className="flex items-baseline gap-2">
-            <Eyebrow>{kind}</Eyebrow>
-            <span
-              className="font-mono uppercase"
-              style={{
-                fontSize: 11,
-                letterSpacing: "0.16em",
-                color: "var(--ink)",
-                fontWeight: 600,
-              }}
-            >
-              {category}
-            </span>
-            <MonoChip>{items.length}</MonoChip>
-          </div>
-          <div
-            className="grid"
-            style={{
-              gap: compact ? 6 : 8,
-              gridTemplateColumns: compact
-                ? "1fr"
-                : "repeat(auto-fill, minmax(280px, 1fr))",
-            }}
-          >
-            {items.map((a) => (
-              <ActionRow
-                key={a.globalId}
-                action={a}
-                state={fire}
-                onFire={(opts) => onFire(a, opts)}
-                compact={compact}
-              />
-            ))}
-          </div>
-        </section>
-      ))}
-      {groups.length === 0 && (
-        <div className="text-[12px] text-sw-muted py-8 text-center">
-          No actions match the current filter.
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ActionRow({
-  action,
-  state,
-  onFire,
-  compact,
-}: {
-  action: ActionEntry;
-  state: FireState;
-  onFire: (options: Record<string, unknown>) => void;
-  compact: boolean;
-}) {
-  const [opts, setOpts] = useState<Record<string, unknown>>(() => {
-    const o: Record<string, unknown> = {};
-    for (const opt of action.options ?? []) {
-      if (opt.default !== undefined) o[opt.id] = opt.default;
-    }
-    return o;
-  });
-  const [expanded, setExpanded] = useState(false);
-
-  const isFiring =
-    state.kind === "running" && state.globalId === action.globalId;
-  const justOk = state.kind === "ok" && state.globalId === action.globalId;
-  const justErr = state.kind === "err" && state.globalId === action.globalId;
-  const errMsg =
-    state.kind === "err" && state.globalId === action.globalId
-      ? state.error
-      : null;
-
-  const dragPayload = useMemo(
-    () => ({
-      globalId: action.globalId,
-      kind: action.kind,
-      id: action.id,
-      label: action.label,
-      category: action.category,
-      text: action.label.toUpperCase().slice(0, 12),
-      bgcolor: "#2c2c2e",
-      fgcolor: "#ffffff",
-      steps: [{ actionId: action.id, options: opts }],
-    }),
-    [action, opts]
-  );
-
-  const hasOptions = (action.options?.length ?? 0) > 0;
-
-  return (
-    <div
-      style={{
-        padding: compact ? 8 : 10,
-        background: "var(--card)",
-        border: "1px solid var(--line)",
-        outline: justOk
-          ? "2px solid var(--pvw)"
-          : justErr
-            ? "2px solid var(--pgm)"
-            : "none",
-        outlineOffset: 1,
-      }}
-      className="space-y-2"
-    >
-      <div className="flex items-start gap-2">
-        <div className="flex-1 min-w-0">
-          <div
-            className="font-mono"
-            style={{
-              fontSize: compact ? 11 : 12,
-              fontWeight: 700,
-              color: "var(--ink)",
-            }}
-          >
-            {action.label}
-          </div>
-          <div
-            className="font-mono"
-            style={{
-              fontSize: 9,
-              letterSpacing: "0.08em",
-              color: "var(--sub)",
-              marginTop: 2,
-            }}
-          >
-            {action.globalId}
-          </div>
-          {!compact && action.description && (
-            <div
-              style={{
-                fontSize: 10,
-                color: "var(--muted)",
-                marginTop: 4,
-                lineHeight: 1.3,
-              }}
-            >
-              {action.description}
-            </div>
-          )}
-        </div>
-        <div
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.effectAllowed = "copy";
-            e.dataTransfer.setData(
-              "application/x-nexus-preset",
-              JSON.stringify(dragPayload)
-            );
-            e.dataTransfer.setData("text/plain", action.globalId);
-          }}
-          title="Drag onto a surface to bind"
-          style={{
-            padding: "4px 8px",
-            fontSize: 9,
-            letterSpacing: "0.18em",
-            background: "var(--panel-2)",
-            border: "1px solid var(--line-hi)",
-            color: "var(--mid)",
-            cursor: "grab",
-            fontFamily: "var(--font-mono)",
-            textTransform: "uppercase",
-            fontWeight: 600,
-          }}
-        >
-          ⋮⋮ Drag
-        </div>
-      </div>
-
-      {hasOptions && (
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          className="font-mono uppercase"
-          style={{
-            fontSize: 9,
-            letterSpacing: "0.18em",
-            color: "var(--mid)",
-            background: "transparent",
-            border: 0,
-            padding: 0,
-            cursor: "pointer",
-          }}
-        >
-          {expanded ? "▾" : "▸"} {action.options.length} option
-          {action.options.length === 1 ? "" : "s"}
-        </button>
-      )}
-
-      {expanded && hasOptions && (
-        <div className="space-y-1 pt-1">
-          {action.options.map((opt) => (
-            <OptionField
-              key={opt.id}
-              def={opt}
-              value={opts[opt.id]}
-              onChange={(v) => setOpts((cur) => ({ ...cur, [opt.id]: v }))}
-            />
-          ))}
-        </div>
-      )}
-
-      <div className="flex items-center gap-2 pt-1">
-        <button
-          onClick={() => onFire(opts)}
-          disabled={isFiring}
-          className="font-mono uppercase transition-colors"
-          style={{
-            padding: "4px 12px",
-            fontSize: 10,
-            letterSpacing: "1.4px",
-            fontWeight: 600,
-            background: isFiring ? "var(--panel-2)" : "var(--ink)",
-            color: "var(--bg)",
-            border: 0,
-            cursor: isFiring ? "wait" : "pointer",
-            opacity: isFiring ? 0.7 : 1,
-          }}
-        >
-          {isFiring ? "Firing…" : "Fire"}
-        </button>
-        {errMsg && (
-          <span
-            className="font-mono"
-            style={{
-              fontSize: 10,
-              color: "var(--pgm)",
-              flex: 1,
-              minWidth: 0,
-            }}
-            title={errMsg}
-          >
-            ⚠ {errMsg.slice(0, 60)}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function OptionField({
-  def,
-  value,
-  onChange,
-}: {
-  def: ActionOptionDef;
-  value: unknown;
-  onChange: (v: unknown) => void;
-}) {
-  const labelStyle = {
-    fontSize: 9,
-    letterSpacing: "0.12em",
-    color: "var(--sub)",
-    textTransform: "uppercase" as const,
-    fontWeight: 600,
-    width: 110,
-    flexShrink: 0,
-    fontFamily: "var(--font-mono)",
-  };
-  const inputStyle = {
-    flex: 1,
-    minWidth: 0,
-    padding: "3px 6px",
-    fontSize: 11,
-    background: "var(--panel-2)",
-    border: "1px solid var(--line)",
-    color: "var(--ink)",
-    fontFamily: "var(--font-mono)",
-    outline: "none",
-  };
-
-  if (def.type === "number") {
-    return (
-      <div className="flex items-center gap-2">
-        <span style={labelStyle} title={def.tooltip}>
-          {def.label}
-        </span>
-        <input
-          type="number"
-          value={typeof value === "number" ? value : ""}
-          min={def.min}
-          max={def.max}
-          step={def.step}
-          onChange={(e) => onChange(Number(e.target.value))}
-          style={inputStyle}
-        />
-      </div>
-    );
-  }
-  if (def.type === "boolean") {
-    return (
-      <div className="flex items-center gap-2">
-        <span style={labelStyle} title={def.tooltip}>
-          {def.label}
-        </span>
-        <input
-          type="checkbox"
-          checked={Boolean(value)}
-          onChange={(e) => onChange(e.target.checked)}
-          style={{ accentColor: "var(--cyan)" }}
-        />
-      </div>
-    );
-  }
-  if (def.type === "dropdown") {
-    return (
-      <div className="flex items-center gap-2">
-        <span style={labelStyle} title={def.tooltip}>
-          {def.label}
-        </span>
-        <select
-          value={typeof value === "string" ? value : String(value ?? "")}
-          onChange={(e) => onChange(e.target.value)}
-          style={inputStyle}
-        >
-          {(def.choices ?? []).map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.label}
-            </option>
-          ))}
-        </select>
-      </div>
-    );
-  }
-  return (
-    <div className="flex items-center gap-2">
-      <span style={labelStyle} title={def.tooltip}>
-        {def.label}
-      </span>
-      <input
-        type="text"
-        // Legacy bindings stored numeric defaults (e.g. input: 1
-        // before we relaxed to string). Coerce so the field doesn't
-        // display blank for those — operator-friendly migration.
-        value={
-          typeof value === "string"
-            ? value
-            : value === undefined || value === null
-              ? ""
-              : String(value)
-        }
-        placeholder={def.placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        style={inputStyle}
-      />
-    </div>
   );
 }
