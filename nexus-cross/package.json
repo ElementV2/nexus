@@ -1,6 +1,6 @@
 {
   "name": "nexus-cross",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "LAN satellite agent for Nexus — bridges a local Stream Deck to a Nexus server running on another machine.",
   "author": "ElementV2 <death0factory@gmail.com>",
@@ -29,7 +29,10 @@
       "package.json"
     ],
     "extraResources": [
-      { "from": "resources/icon.ico", "to": "icon.ico" }
+      {
+        "from": "resources/icon.ico",
+        "to": "icon.ico"
+      }
     ],
     "asar": true,
     "asarUnpack": [
@@ -40,10 +43,17 @@
       "node_modules/usb/**"
     ],
     "compression": "maximum",
-    "electronLanguages": ["en-US"],
+    "electronLanguages": [
+      "en-US"
+    ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "resources/icon.ico"
     },

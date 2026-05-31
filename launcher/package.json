@@ -1,6 +1,6 @@
 {
   "name": "nexus-launcher",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "description": "Local launcher that runs the Nexus Next.js server on the LAN.",
   "author": "ElementV2 <death0factory@gmail.com>",
@@ -29,20 +29,39 @@
       "package.json"
     ],
     "extraResources": [
-      { "from": "../.next/standalone",   "to": "next-server" },
-      { "from": "../.next/static",       "to": "next-server/.next/static" },
-      { "from": "../public",             "to": "next-server/public" },
-      { "from": "resources/icon.ico",    "to": "icon.ico" }
+      {
+        "from": "../.next/standalone",
+        "to": "next-server"
+      },
+      {
+        "from": "../.next/static",
+        "to": "next-server/.next/static"
+      },
+      {
+        "from": "../public",
+        "to": "next-server/public"
+      },
+      {
+        "from": "resources/icon.ico",
+        "to": "icon.ico"
+      }
     ],
     "asar": true,
     "asarUnpack": [
       "node_modules/ffmpeg-static/ffmpeg*"
     ],
     "compression": "maximum",
-    "electronLanguages": ["en-US"],
+    "electronLanguages": [
+      "en-US"
+    ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "resources/icon.ico"
     },
