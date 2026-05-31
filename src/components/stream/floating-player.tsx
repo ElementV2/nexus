@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { Volume2, VolumeX } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useVmixStore } from "@/stores/vmix-store";
+import { useConnections } from "@/hooks/use-connections";
 
 const LS_POS_KEY = "vmix-stream-position";
 
@@ -24,12 +24,12 @@ function loadPosition(): { x: number; y: number } | null {
 function friendlyError(msg: string): string {
   if (/ffmpeg not found/i.test(msg))
     return "FFmpeg not found. The bundled ffmpeg-static should ship with the launcher.";
-  if (/ffmpeg exited|ffmpeg process/i.test(msg))
-    return "FFmpeg relay failed. Check the SRT port in the header.";
+  if (/ffmpeg exited|ffmpeg process|exited code/i.test(msg))
+    return "FFmpeg relay failed — is the vMix SRT output enabled, on this host/port?";
   if (/failed to fetch|networkerror/i.test(msg))
     return "Cannot reach the stream relay API. Is the server running?";
-  if (/502/.test(msg))
-    return "FFmpeg relay not available. Check the SRT port in the header.";
+  if (/502|bad gateway/i.test(msg))
+    return "Relay couldn't reach vMix's SRT. Enable the SRT output in vMix and check the host/port.";
   return msg;
 }
 
@@ -39,39 +39,45 @@ interface FloatingPlayerProps {
 }
 
 export function FloatingPlayer({ open, onClose }: FloatingPlayerProps) {
-  const host = useVmixStore((s) => s.vmixHost);
-  const srtPort = useVmixStore((s) => s.vmixSrtPort);
-  const vmixPort = useVmixStore((s) => s.vmixPort);
-  const setConnectionInfo = useVmixStore((s) => s.setConnectionInfo);
-  const [editingPort, setEditingPort] = useState(false);
-  const [portDraft, setPortDraft] = useState(String(srtPort));
+  // Pick which configured vMix to stream from — no longer pinned to the
+  // single global default. Choose the instance + SRT port, then launch.
+  const { data } = useConnections();
+  const vmixConns = useMemo(
+    () => (data?.connections ?? []).filter((c) => c.kind === "vmix" && c.enabled),
+    [data]
+  );
+  const defaultVmixId = data?.defaults?.vmix;
 
-  // Keep the draft in sync with the store while we're not editing —
-  // covers external prefs writes (e.g. the user edits the value in
-  // another tab).
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Seed / re-seed the selection: prefer the default vMix, else the first.
   useEffect(() => {
-    if (!editingPort) setPortDraft(String(srtPort));
-  }, [srtPort, editingPort]);
+    setSelectedId((cur) => {
+      if (cur && vmixConns.some((c) => c.id === cur)) return cur;
+      return (
+        vmixConns.find((c) => c.id === defaultVmixId)?.id ??
+        vmixConns[0]?.id ??
+        null
+      );
+    });
+  }, [vmixConns, defaultVmixId]);
 
-  const commitPort = useCallback(async () => {
-    const n = parseInt(portDraft, 10);
-    setEditingPort(false);
-    if (!Number.isInteger(n) || n < 1 || n > 65535) {
-      setPortDraft(String(srtPort));
-      return;
-    }
-    if (n === srtPort) return;
-    try {
-      const res = await fetch("/api/preferences", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vmix_srt_port: n }),
-      });
-      if (res.ok) setConnectionInfo(host, vmixPort, n);
-    } catch {
-      /* keep the previous value — the store stays untouched */
-    }
-  }, [portDraft, srtPort, host, vmixPort, setConnectionInfo]);
+  const selected = vmixConns.find((c) => c.id === selectedId);
+  const selectedCfg = (selected?.config ?? {}) as {
+    host?: string;
+    srtPort?: number;
+  };
+  const host = selectedCfg.host ?? "";
+
+  // Port follows the selected vMix's configured SRT port but stays
+  // editable for a one-off. Re-seeds when the chosen connection changes.
+  const [port, setPort] = useState(5000);
+  const seededFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selected || seededFor.current === selected.id) return;
+    seededFor.current = selected.id;
+    setPort(selectedCfg.srtPort ?? 5000);
+  }, [selected, selectedCfg.srtPort]);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<ReturnType<typeof import("mpegts.js")["default"]["createPlayer"]> | null>(null);
   const destroyedRef = useRef(false);
@@ -121,7 +127,17 @@ export function FloatingPlayer({ open, onClose }: FloatingPlayerProps) {
     }
   }
 
+  /** Changing the target (vMix or port) drops the current stream so the
+   *  idle "Connect" affordance reappears for the new selection. */
+  const retarget = useCallback(() => {
+    if (status === "idle") return;
+    destroyPlayer();
+    setStatus("idle");
+    setErrorMsg(null);
+  }, [status]);
+
   const connect = useCallback(async () => {
+    if (!host) return;
     destroyPlayer();
     destroyedRef.current = false;
     setStatus("connecting");
@@ -137,8 +153,10 @@ export function FloatingPlayer({ open, onClose }: FloatingPlayerProps) {
       }
       mpegts.LoggingControl.enableAll = false;
 
+      // Stream the CHOSEN vMix instance + port (server validates + relays).
+      const url = `/api/stream?host=${encodeURIComponent(host)}&srtPort=${port}`;
       const mp = mpegts.createPlayer(
-        { type: "mpegts", url: "/api/stream", isLive: true },
+        { type: "mpegts", url, isLive: true },
         {
           liveBufferLatencyChasing: true,
           liveBufferLatencyMaxLatency: 1.5,
@@ -180,7 +198,7 @@ export function FloatingPlayer({ open, onClose }: FloatingPlayerProps) {
         setErrorMsg(friendlyError(String(err)));
       }
     }
-  }, []);
+  }, [host, port]);
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.muted = muted;
@@ -228,7 +246,8 @@ export function FloatingPlayer({ open, onClose }: FloatingPlayerProps) {
 
   if (!open) return null;
 
-  const srtInfo = `srt://${host}:${srtPort}`;
+  const hasVmix = vmixConns.length > 0;
+  const srtInfo = host ? `srt://${host}:${port}` : "—";
 
   return (
     <div
@@ -259,57 +278,63 @@ export function FloatingPlayer({ open, onClose }: FloatingPlayerProps) {
           >
             {status === "playing" ? "● Live" : "○ Stream"}
           </span>
+          {/* vMix picker + SRT port — pointerdown stopped so editing the
+              controls doesn't drag the window. */}
           <span
             className="font-mono text-[10px] text-sw-muted flex items-center"
             style={{ letterSpacing: "0.02em", gap: 4 }}
-            // Drag handle owns pointerdown — stop it here so clicking
-            // the port doesn't drag the window.
             onPointerDown={(e) => e.stopPropagation()}
           >
-            <span>srt://{host}:</span>
-            {editingPort ? (
-              <input
-                type="number"
-                value={portDraft}
-                onChange={(e) => setPortDraft(e.target.value)}
-                onBlur={commitPort}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    (e.currentTarget as HTMLInputElement).blur();
-                  } else if (e.key === "Escape") {
-                    setPortDraft(String(srtPort));
-                    setEditingPort(false);
-                  }
-                }}
-                autoFocus
-                className="font-mono"
-                style={{
-                  width: 56,
-                  fontSize: 10,
-                  padding: "1px 4px",
-                  background: "var(--card)",
-                  color: "var(--ink)",
-                  border: "1px solid var(--amber)",
-                  outline: "none",
-                }}
-              />
+            {hasVmix ? (
+              <>
+                <select
+                  value={selectedId ?? ""}
+                  onChange={(e) => {
+                    setSelectedId(e.target.value);
+                    retarget();
+                  }}
+                  className="font-mono"
+                  title="Choose which vMix to stream"
+                  style={{
+                    fontSize: 10,
+                    padding: "1px 4px",
+                    maxWidth: 180,
+                    background: "var(--card)",
+                    color: "var(--ink)",
+                    border: "1px solid var(--line)",
+                    outline: "none",
+                  }}
+                >
+                  {vmixConns.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label} · {(c.config as { host?: string }).host ?? "?"}
+                    </option>
+                  ))}
+                </select>
+                <span>:</span>
+                <input
+                  type="number"
+                  value={String(port)}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value, 10);
+                    setPort(Number.isFinite(n) ? n : 0);
+                    retarget();
+                  }}
+                  title="SRT port"
+                  className="font-mono"
+                  style={{
+                    width: 56,
+                    fontSize: 10,
+                    padding: "1px 4px",
+                    background: "var(--card)",
+                    color: "var(--ink)",
+                    border: "1px solid var(--line)",
+                    outline: "none",
+                  }}
+                />
+              </>
             ) : (
-              <button
-                onClick={() => setEditingPort(true)}
-                className="font-mono transition-colors"
-                style={{
-                  fontSize: 10,
-                  padding: "1px 4px",
-                  background: "transparent",
-                  color: "var(--ink)",
-                  border: "1px solid var(--line)",
-                  cursor: "pointer",
-                  letterSpacing: "0.02em",
-                }}
-                title="Edit SRT port"
-              >
-                {srtPort}
-              </button>
+              <span style={{ color: "var(--muted)" }}>No vMix configured</span>
             )}
           </span>
         </div>
@@ -361,21 +386,33 @@ export function FloatingPlayer({ open, onClose }: FloatingPlayerProps) {
         {/* Idle */}
         {status === "idle" && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-sw-bg">
-            <button
-              onClick={connect}
-              data-active="true"
-              data-role="amber"
-              className="sw-cell"
-              style={{ padding: "10px 22px", fontSize: 12 }}
-            >
-              ▶ Connect to {srtInfo}
-            </button>
-            <p
-              className="font-mono text-[10px] text-sw-muted text-center"
-              style={{ letterSpacing: "0.02em" }}
-            >
-              Click the port in the header to change it.
-            </p>
+            {hasVmix ? (
+              <>
+                <button
+                  onClick={connect}
+                  data-active="true"
+                  data-role="amber"
+                  className="sw-cell"
+                  style={{ padding: "10px 22px", fontSize: 12 }}
+                >
+                  ▶ Connect to {srtInfo}
+                </button>
+                <p
+                  className="font-mono text-[10px] text-sw-muted text-center"
+                  style={{ letterSpacing: "0.02em" }}
+                >
+                  Pick the vMix + SRT port in the header, then connect.
+                </p>
+              </>
+            ) : (
+              <p
+                className="font-mono text-[11px] text-sw-muted text-center px-6"
+                style={{ letterSpacing: "0.02em" }}
+              >
+                Add a vMix connection in Network › Connections to stream its
+                SRT output.
+              </p>
+            )}
           </div>
         )}
 

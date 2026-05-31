@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { satelliteRegistry } from "@/lib/streamdeck/satellite-registry";
 import { ensureBooted } from "@/lib/core/boot";
+import { sseResponse } from "@/lib/sse";
 
 export const dynamic = "force-dynamic";
 
@@ -28,70 +29,26 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const encoder = new TextEncoder();
-  let detach: (() => void) | null = null;
-  let heartbeat: ReturnType<typeof setInterval> | null = null;
-
-  const stream = new ReadableStream<Uint8Array>(
-    {
-      start(controller) {
-        const cleanup = () => {
-          if (heartbeat) {
-            clearInterval(heartbeat);
-            heartbeat = null;
-          }
-          detach?.();
-          detach = null;
-        };
-        const safeEnqueue = (chunk: string): boolean => {
-          try {
-            // Backpressure guard: with the 64-frame high-water mark below,
-            // desiredSize only drops to ≤0 when a satellite's socket is
-            // genuinely stuck (congested LAN) and ~64 frames are already
-            // queued. Drop further frames instead of growing server memory
-            // unboundedly — render frames self-heal on the next coordinator
-            // walk, keepalives are disposable. A healthy-but-not-instant
-            // socket keeps headroom and never trips this.
-            if (controller.desiredSize !== null && controller.desiredSize <= 0) {
-              return false;
-            }
-            controller.enqueue(encoder.encode(chunk));
-            return true;
-          } catch {
-            cleanup();
-            return false;
-          }
-        };
-
-        safeEnqueue(": connected\n\n");
-
-        // Attach the writer — the registry flushes any buffered
-        // messages immediately and follows up with a `hello`.
-        detach = satelliteRegistry.attachWriter(id, (msg) => {
-          safeEnqueue(`data: ${JSON.stringify(msg)}\n\n`);
-        });
-
-        heartbeat = setInterval(() => {
-          satelliteRegistry.touch(id);
-          safeEnqueue(": ping\n\n");
-        }, 25_000);
-      },
-      cancel() {
-        if (heartbeat) clearInterval(heartbeat);
-        heartbeat = null;
-        detach?.();
-        detach = null;
-      },
-    },
-    new CountQueuingStrategy({ highWaterMark: 64 })
-  );
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
+  return sseResponse({
+    // Keep the satellite alive in the registry on every keepalive tick.
+    onHeartbeat: () => satelliteRegistry.touch(id),
+    start(h) {
+      // Attach the writer — the registry flushes any buffered messages
+      // immediately and follows up with a `hello`.
+      const detach = satelliteRegistry.attachWriter(id, (msg) => h.send(msg));
+      return () => {
+        detach();
+        // SSE closed → this satellite can no longer be driven. If it didn't
+        // immediately reconnect, drop it NOW so its decks disappear from
+        // open editors' device lists right away (don't wait ~75 s for the
+        // stale-reaper). `removeIfDisconnected` no-ops if a newer SSE
+        // already re-attached, so a transient blip + reconnect is safe.
+        if (satelliteRegistry.removeIfDisconnected(id)) {
+          void import("@/lib/streamdeck/driver").then(({ streamdeckDriver }) =>
+            streamdeckDriver.notifyDevicesChanged()
+          );
+        }
+      };
     },
   });
 }

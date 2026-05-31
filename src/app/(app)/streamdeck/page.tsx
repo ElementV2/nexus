@@ -145,12 +145,8 @@ export default function StreamdeckPage() {
     return out;
   }, [connectionsData]);
   // Default connection per kind + the flat connection list — the
-  // inspector's per-action target picker and the mockup feedback both
-  // need these so a key shows + controls the chosen instance.
-  const defaultsByKind = useMemo(
-    () => connectionsData?.defaults ?? {},
-    [connectionsData]
-  );
+  // inspector's per-action target picker and the mockup feedback resolve
+  // the connection a key shows + controls — pinned, or first-of-kind.
   const connections = useMemo(
     () => connectionsData?.connections ?? [],
     [connectionsData]
@@ -549,12 +545,24 @@ export default function StreamdeckPage() {
             // cross-kind button (vMix cut + OBS scene) dispatches each
             // action to the right device. The button keeps its
             // original face.
-            const taggedSteps = preset.steps.map((s) => ({
-              ...s,
-              kind: s.actionId.includes(":")
+            const taggedSteps = preset.steps.map((s) => {
+              const k = s.actionId.includes(":")
                 ? s.actionId.slice(0, s.actionId.indexOf(":"))
-                : preset.kind,
-            }));
+                : preset.kind;
+              // Same kind as the button → inherit the button's connection
+              // (no step pin needed). Different kind → pin to the first
+              // enabled connection of that kind so a cross-device action
+              // targets a concrete machine ("point barre").
+              const crossPin =
+                k !== existing.preset.kind
+                  ? connections.find((c) => c.kind === k && c.enabled)?.id
+                  : undefined;
+              return {
+                ...s,
+                kind: k,
+                ...(crossPin ? { connectionId: crossPin } : {}),
+              };
+            });
             next = {
               ...existing,
               preset: {
@@ -563,8 +571,17 @@ export default function StreamdeckPage() {
               },
             };
           } else {
-            // Empty key → fresh binding from the dropped preset.
-            next = { preset } as DeckBinding;
+            // Empty key → fresh binding from the dropped preset, PINNED to
+            // a concrete connection (first enabled of the preset's kind).
+            // A shortcut targets a specific machine "point barre" from the
+            // start — never an implicit fallback — and the operator can
+            // repoint it in the inspector. This is also what makes
+            // export/import show the connection BY NAME instead of a
+            // generic "<kind> actions" bucket.
+            const seedPin = connections.find(
+              (c) => c.kind === preset.kind && c.enabled
+            )?.id;
+            next = { preset, connectionId: seedPin } as DeckBinding;
           }
           beginEdit();
           setDraft({
@@ -581,7 +598,7 @@ export default function StreamdeckPage() {
         /* malformed payload — silently ignore */
       }
     },
-    [queueKeyPush, beginEdit]
+    [queueKeyPush, beginEdit, connections]
   );
 
   const handleClear = useCallback(
@@ -1071,12 +1088,7 @@ export default function StreamdeckPage() {
                   // shows in real time (tally PGM/PVW, stream/rec
                   // active, current OBS scene, ...).
                   const override = binding
-                    ? evaluateFeedback(
-                        binding,
-                        vars,
-                        connectionIdsByKind,
-                        defaultsByKind
-                      )
+                    ? evaluateFeedback(binding, vars, connectionIdsByKind)
                     : null;
                   return (
                     <DeckKey
@@ -1174,7 +1186,6 @@ export default function StreamdeckPage() {
                     selectedKey !== null ? draft.bindings[selectedKey] : undefined
                   }
                   connections={connections}
-                  defaultsByKind={defaultsByKind}
                   onChange={(b) => {
                     if (selectedKey === null) return;
                     handleUpdateBinding(selectedKey, b);
@@ -1211,7 +1222,6 @@ export default function StreamdeckPage() {
         <ImportModal
           payload={importData}
           connections={connections}
-          defaultsByKind={defaultsByKind}
           onCancel={() => setImportData(null)}
           onConfirm={(mapping) => void applyImport(importData, mapping)}
         />

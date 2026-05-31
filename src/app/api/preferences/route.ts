@@ -1,71 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPreferences, setPreferences } from "@/lib/db/preferences";
+import {
+  getPreferences,
+  setPreferences,
+  redactPreferences,
+  restoreConfigSecrets,
+  legacyConfigPatches,
+  applyLegacyPatchesToConnections,
+  REDACTED_SECRET,
+} from "@/lib/db/preferences";
 import { ensureBooted, reconcileFromPreferences } from "@/lib/core/boot";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(getPreferences());
+  // Never ship stored secrets (OBS / grandMA2 password) to the client.
+  return NextResponse.json(redactPreferences(getPreferences()));
 }
 
 /**
- * Per-kind sync mapping. Each entry watches a set of legacy `*_host`/
- * `*_port`/... preference keys and, when any of them change, mirrors
- * the new values onto every registered connection of that kind. Keeps
- * the legacy connections-panel cards (vMix / Ableton / OBS) working
- * against the device-registry without forcing a full card refactor.
+ * Update preferences.
  *
- * Adding a new kind that still has a legacy card = one new entry here.
- * When a card is migrated to write through `/api/connections/:id` the
- * matching entry can be removed.
+ * The legacy flat device fields (`vmix_host`, `obs_*`, `ableton_*`) are a
+ * DERIVED mirror of each kind's default connection — the registry
+ * connection is the single source of truth. So a legacy-field edit in the
+ * body is translated into that connection's config (see
+ * `legacyConfigPatches`), then persisted through the registry. Writing the
+ * legacy field directly would be silently undone by `applyDefaultsToLegacy`
+ * re-mirroring the connection's current value — which is exactly why the
+ * Network page's "Connect to vMix/OBS" used to no-op once a connection
+ * existed. Routing the edit through the connection fixes that and reconciles
+ * the broker so the new host takes effect immediately.
  */
-type PrefsView = ReturnType<typeof getPreferences>;
-type KindSync = {
-  kind: string;
-  changed: (before: PrefsView, after: PrefsView) => boolean;
-  buildConfig: (p: PrefsView) => unknown;
-};
-const KIND_SYNCS: KindSync[] = [
-  {
-    kind: "obs",
-    changed: (a, b) =>
-      a.obs_host !== b.obs_host ||
-      a.obs_port !== b.obs_port ||
-      a.obs_password !== b.obs_password,
-    buildConfig: (p) => ({
-      host: p.obs_host,
-      port: p.obs_port,
-      password: p.obs_password,
-    }),
-  },
-  {
-    kind: "vmix",
-    changed: (a, b) =>
-      a.vmix_host !== b.vmix_host ||
-      a.vmix_port !== b.vmix_port ||
-      a.vmix_srt_port !== b.vmix_srt_port ||
-      a.polling_interval !== b.polling_interval,
-    buildConfig: (p) => ({
-      host: p.vmix_host,
-      port: p.vmix_port,
-      pollingInterval: p.polling_interval,
-      srtPort: p.vmix_srt_port,
-    }),
-  },
-  {
-    kind: "ableton",
-    changed: (a, b) =>
-      a.ableton_host !== b.ableton_host ||
-      a.ableton_send_port !== b.ableton_send_port ||
-      a.ableton_recv_port !== b.ableton_recv_port,
-    buildConfig: (p) => ({
-      host: p.ableton_host,
-      sendPort: p.ableton_send_port,
-      recvPort: p.ableton_recv_port,
-    }),
-  },
-];
-
 export async function PUT(request: NextRequest) {
   ensureBooted();
   let body: Record<string, unknown>;
@@ -74,30 +39,48 @@ export async function PUT(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  const before = getPreferences();
+
+  // Redacted-secret hygiene: a sentinel echoed back from a GET means
+  // "unchanged" — strip it so the stored value is preserved.
+  if (body.obs_password === REDACTED_SECRET) delete body.obs_password;
+  if (Array.isArray(body.connections)) {
+    const existingById = new Map(
+      getPreferences().connections.map((c) => [c.id, c])
+    );
+    body.connections = body.connections.map((c) => {
+      const entry = c as { id?: unknown; config?: unknown };
+      if (typeof entry.id !== "string") return c;
+      return {
+        ...(entry as Record<string, unknown>),
+        config: restoreConfigSecrets(
+          entry.config,
+          existingById.get(entry.id)?.config
+        ),
+      };
+    });
+  }
+
+  // Translate legacy device-field edits → default-connection config edits.
+  const patches = legacyConfigPatches(body);
+
   const updated = setPreferences(body);
 
-  // Mirror legacy named-key host/port edits into the device-registry's
-  // `connections[]`, then reconcile — that calls each per-instance
-  // broker's `updateConfig`, so the OBS/Ableton/vMix sockets pick up the
-  // new host immediately (no singleton `refreshConfig` needed anymore).
-  // Build the updated list IN MEMORY across all kind syncs, then persist
-  // it in ONE `setPreferences` write.
-  let nextConnections = updated.connections;
-  let anyKindChanged = false;
-  for (const sync of KIND_SYNCS) {
-    if (!sync.changed(before, updated)) continue;
-    const newConfig = sync.buildConfig(updated);
-    nextConnections = nextConnections.map((c) =>
-      c.kind === sync.kind ? { ...c, config: newConfig } : c
+  if (Object.keys(patches).length > 0) {
+    const connections = applyLegacyPatchesToConnections(
+      updated.connections,
+      updated.defaultConnections,
+      patches
     );
-    anyKindChanged = true;
-  }
-  if (anyKindChanged) {
-    const synced = setPreferences({ connections: nextConnections });
+    const synced = setPreferences({ connections });
+    // Reconcile so the per-instance broker picks up the new host/port/
+    // password immediately (no stale-config window).
     reconcileFromPreferences();
-    return NextResponse.json(synced);
+    return NextResponse.json(redactPreferences(synced));
   }
 
-  return NextResponse.json(updated);
+  // A direct `connections` write (bulk save with no legacy device-field
+  // edit) still changes the broker set → reconcile so the live brokers
+  // match the just-persisted list instead of waiting for another route.
+  if (Array.isArray(body.connections)) reconcileFromPreferences();
+  return NextResponse.json(redactPreferences(updated));
 }

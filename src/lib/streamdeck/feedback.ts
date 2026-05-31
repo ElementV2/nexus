@@ -31,23 +31,24 @@ export type VarsByConnection = Record<string, Record<string, unknown>>;
 /**
  * Resolve the variables namespace a binding's feedback should read.
  *
- * Resolution mirrors dispatch (`resolveConnectionId`) so the key shows
- * the state of the SAME instance it will control:
+ * Decks are INDEPENDENT of the per-kind "default" connection (which only
+ * drives the legacy single-instance pages). A key reflects the state of
+ * the connection it's PINNED to — never the default — so changing the
+ * default never changes what a deck shows:
  *   1. The step's pin, then the binding's pin (the operator chose
  *      "this key controls vMix #2").
- *   2. The kind's default connection.
- *   3. The first connection of that kind with published variables.
+ *   2. Fallback ONLY for an unpinned legacy binding: the first connection
+ *      of that kind with published variables (deterministic, not the
+ *      default).
  */
 function pickVars(
   kind: string,
   vars: VarsByConnection,
   connectionIdsByKind: Record<string, string[]>,
-  pinned?: string,
-  defaultByKind?: Record<string, string>
+  pinned?: string
 ): Record<string, unknown> | undefined {
   if (pinned && vars[pinned]) return vars[pinned];
-  const def = defaultByKind?.[kind];
-  if (def && vars[def]) return vars[def];
+  if (pinned) return undefined; // pinned but no vars yet → no feedback
   const ids = connectionIdsByKind[kind] ?? [];
   for (const id of ids) {
     if (vars[id]) return vars[id];
@@ -58,8 +59,7 @@ function pickVars(
 export function evaluateFeedback(
   binding: DeckBinding,
   vars: VarsByConnection,
-  connectionIdsByKind: Record<string, string[]>,
-  defaultByKind?: Record<string, string>
+  connectionIdsByKind: Record<string, string[]>
 ): FeedbackOverride | null {
   const kind = binding.preset.kind;
   const step = binding.preset.steps[0];
@@ -67,13 +67,7 @@ export function evaluateFeedback(
   const action = step.actionId;
   const opts = step.options ?? {};
   const pinned = step.connectionId ?? binding.connectionId;
-  const scope = pickVars(
-    kind,
-    vars,
-    connectionIdsByKind,
-    pinned,
-    defaultByKind
-  );
+  const scope = pickVars(kind, vars, connectionIdsByKind, pinned);
   if (!scope) return null;
 
   switch (kind) {

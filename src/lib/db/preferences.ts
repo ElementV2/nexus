@@ -84,6 +84,163 @@ const FILE = "preferences.json";
 const RECENT_CAP = 6;
 
 /**
+ * Sentinel returned in place of stored secrets so the real value never
+ * leaves the server over the (plain-HTTP, LAN) API. The connections
+ * editor round-trips it back verbatim when the operator didn't touch the
+ * field; the write path (`restoreConfigSecrets`) swaps it back for the
+ * persisted value. A genuinely new value the operator types is never
+ * equal to the sentinel, so it passes through and replaces the secret.
+ */
+export const REDACTED_SECRET = "••••••••";
+
+/** Config keys treated as secrets for redaction. Matches the per-kind
+ *  config field names in use (`password` for OBS / grandMA2 telnet). */
+const SECRET_KEY_RE = /password|secret|token/i;
+
+/**
+ * Replace non-empty secret-like string fields of a kind config blob with
+ * the redaction sentinel. Empty secrets stay empty so the editor can
+ * still tell "no password set" apart from "hidden". Returns a shallow
+ * copy — never mutates the input.
+ */
+export function redactConfigSecrets(config: unknown): unknown {
+  if (!config || typeof config !== "object") return config;
+  const out: Record<string, unknown> = {
+    ...(config as Record<string, unknown>),
+  };
+  for (const k of Object.keys(out)) {
+    if (SECRET_KEY_RE.test(k) && typeof out[k] === "string" && out[k]) {
+      out[k] = REDACTED_SECRET;
+    }
+  }
+  return out;
+}
+
+/**
+ * Inverse of `redactConfigSecrets` for write paths: any secret field
+ * still equal to the sentinel is restored from the previously-stored
+ * config, so saving an unrelated field (host/port) never wipes the
+ * password. A field holding any other value is a deliberate change and
+ * passes through untouched.
+ */
+export function restoreConfigSecrets(
+  incoming: unknown,
+  existing: unknown
+): unknown {
+  if (!incoming || typeof incoming !== "object") return incoming;
+  const out: Record<string, unknown> = {
+    ...(incoming as Record<string, unknown>),
+  };
+  const ex = (
+    existing && typeof existing === "object" ? existing : {}
+  ) as Record<string, unknown>;
+  for (const k of Object.keys(out)) {
+    if (SECRET_KEY_RE.test(k) && out[k] === REDACTED_SECRET) {
+      out[k] = typeof ex[k] === "string" ? ex[k] : "";
+    }
+  }
+  return out;
+}
+
+/**
+ * Redact every secret a `getPreferences()` response would otherwise
+ * leak: the legacy `obs_password` field and each connection's
+ * per-instance config. Call ONLY on response boundaries — never before
+ * persisting. Returns a copy.
+ */
+export function redactPreferences(prefs: AppPreferences): AppPreferences {
+  return {
+    ...prefs,
+    obs_password: prefs.obs_password ? REDACTED_SECRET : "",
+    connections: prefs.connections.map((c) => ({
+      ...c,
+      config: redactConfigSecrets(c.config),
+    })),
+  };
+}
+
+/**
+ * Legacy flat preference key → per-kind connection-config key. The legacy
+ * `vmix_host`/`obs_*`/`ableton_*` fields are a DERIVED mirror of each
+ * kind's default connection (see `applyDefaultsToLegacy`); the connection
+ * is the single source of truth. Editing a legacy field therefore has to
+ * be translated into a connection-config edit (see `legacyConfigPatches`)
+ * — writing the legacy field directly is a no-op because the next
+ * `applyDefaultsToLegacy` re-mirrors the connection's current value over
+ * it. This map is the one place that correspondence lives.
+ */
+const LEGACY_FIELD_MAP: Record<string, Record<string, string>> = {
+  vmix: {
+    vmix_host: "host",
+    vmix_port: "port",
+    vmix_srt_port: "srtPort",
+    polling_interval: "pollingInterval",
+  },
+  obs: {
+    obs_host: "host",
+    obs_port: "port",
+    obs_password: "password",
+  },
+  ableton: {
+    ableton_host: "host",
+    ableton_send_port: "sendPort",
+    ableton_recv_port: "recvPort",
+  },
+};
+
+/**
+ * Extract, from a preferences PUT body, the per-kind config patches that
+ * legacy device-field edits imply. Only keys actually present in the body
+ * are included, so a `{ vmix_host }` edit yields `{ vmix: { host } }` and
+ * touches nothing else. Pure.
+ */
+export function legacyConfigPatches(
+  body: Record<string, unknown>
+): Record<string, Record<string, unknown>> {
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [kind, map] of Object.entries(LEGACY_FIELD_MAP)) {
+    let patch: Record<string, unknown> | null = null;
+    for (const [legacyKey, cfgKey] of Object.entries(map)) {
+      if (body[legacyKey] !== undefined) {
+        (patch ??= {})[cfgKey] = body[legacyKey];
+      }
+    }
+    if (patch) out[kind] = patch;
+  }
+  return out;
+}
+
+/**
+ * Apply per-kind config patches onto each kind's DEFAULT connection,
+ * returning a new connections array. Kinds with no default connection are
+ * skipped (nothing to target — the edit falls back to the legacy field,
+ * preserving pre-registry behaviour). Pure.
+ */
+export function applyLegacyPatchesToConnections(
+  connections: ConnectionConfig[],
+  defaults: Record<string, string>,
+  patches: Record<string, Record<string, unknown>>
+): ConnectionConfig[] {
+  let next = connections;
+  for (const [kind, patch] of Object.entries(patches)) {
+    const targetId = defaults[kind];
+    if (!targetId) continue;
+    next = next.map((c) =>
+      c.id === targetId
+        ? {
+            ...c,
+            config: {
+              ...((c.config as Record<string, unknown> | null) ?? {}),
+              ...patch,
+            },
+          }
+        : c
+    );
+  }
+  return next;
+}
+
+/**
  * mtime-gated cache of the fully-computed prefs. `getPreferences()` is
  * called dozens of times per request (every broker poll tick, command
  * dispatch, action run, feedback recompute) and each call otherwise
@@ -115,11 +272,11 @@ export const DEFAULT_PREFERENCES: AppPreferences = {
   connectionsSeeded: false,
 };
 
-export function getPreferences(): AppPreferences {
-  // Fast path: file unchanged since we last computed → clone the cache.
+function computePreferences(): AppPreferences {
+  // Fast path: file unchanged since we last computed → return the cache.
   const mtime = fileMtimeMs(FILE);
   if (prefsCache && prefsCache.mtime === mtime) {
-    return structuredClone(prefsCache.value);
+    return prefsCache.value;
   }
   const merged = {
     ...DEFAULT_PREFERENCES,
@@ -151,7 +308,27 @@ export function getPreferences(): AppPreferences {
     merged.connections
   );
   prefsCache = { mtime, value: merged };
-  return structuredClone(merged);
+  return merged;
+}
+
+/**
+ * Public read: a deep clone so callers can freely mutate the result
+ * without corrupting the cache.
+ */
+export function getPreferences(): AppPreferences {
+  return structuredClone(computePreferences());
+}
+
+/**
+ * Hot-path read: the cached object WITHOUT cloning. MUST be treated as
+ * strictly read-only — used by the feedback coordinator and the action
+ * runner, which read on every variable tick / key press and would
+ * otherwise each pay a full `structuredClone` of all prefs per call.
+ * At scale (many satellite decks) that clone was the dominant per-tick
+ * cost; reading the frozen cache directly removes it.
+ */
+export function peekPreferences(): Readonly<AppPreferences> {
+  return computePreferences();
 }
 
 /**

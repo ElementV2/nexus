@@ -3,6 +3,9 @@ import {
   addConnection,
   getPreferences,
   updateConnection,
+  redactConfigSecrets,
+  restoreConfigSecrets,
+  redactPreferences,
 } from "@/lib/db/preferences";
 import { connectionManager } from "@/lib/core/connection-manager";
 import { ensureBooted, reconcileFromPreferences } from "@/lib/core/boot";
@@ -25,6 +28,9 @@ export async function GET() {
     const live = connectionManager.get(c.id);
     return {
       ...c,
+      // Redact per-instance secrets (OBS / grandMA2 password) before they
+      // cross to the browser; the editor round-trips the sentinel on save.
+      config: redactConfigSecrets(c.config),
       status: live?.broker.getStatus() ?? "offline",
     };
   });
@@ -73,7 +79,9 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
-  const rawConfig = body.config ?? kind.defaultConfig();
+  // Creation has no prior secret to preserve — collapse any sentinel the
+  // client echoed back to empty so it's never stored literally.
+  const rawConfig = restoreConfigSecrets(body.config ?? kind.defaultConfig(), {});
   const parsed = validateConfig(kind.kind, rawConfig);
   if (!parsed.ok) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
@@ -106,10 +114,15 @@ export async function PUT(request: NextRequest) {
   if (!body.patch || typeof body.patch !== "object") {
     return NextResponse.json({ error: "patch required" }, { status: 400 });
   }
-  const updated = updateConnection(
-    body.id,
-    body.patch as Parameters<typeof updateConnection>[1]
-  );
+  const patch = body.patch as Parameters<typeof updateConnection>[1];
+  // Restore any redacted secret in the patched config from the stored
+  // value so a host/port-only edit doesn't blank the password.
+  if (patch.config !== undefined) {
+    const existing = getPreferences().connections.find((c) => c.id === body.id);
+    patch.config = restoreConfigSecrets(patch.config, existing?.config);
+  }
+  const updated = updateConnection(body.id, patch);
   reconcileFromPreferences();
-  return NextResponse.json({ ok: true, prefs: updated });
+  // Redact secrets in the echoed prefs (same rule as the GET paths).
+  return NextResponse.json({ ok: true, prefs: redactPreferences(updated) });
 }

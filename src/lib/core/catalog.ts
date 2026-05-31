@@ -1,6 +1,6 @@
 import { getKind, listKinds } from "./registry";
 import { connectionManager } from "./connection-manager";
-import { getPreferences } from "@/lib/db/preferences";
+import { peekPreferences } from "@/lib/db/preferences";
 import type {
   ActionDefinition,
   FeedbackDefinition,
@@ -120,13 +120,14 @@ export interface ActionRunResult {
 export async function runAction(
   globalActionId: string,
   options: Record<string, unknown>,
-  connectionId?: string
+  connectionId?: string,
+  allowDefault = true
 ): Promise<ActionRunResult> {
   const entry = getAction(globalActionId);
   if (!entry) {
     return { ok: false, error: `Unknown action "${globalActionId}"` };
   }
-  const target = resolveConnectionId(entry.kind, connectionId);
+  const target = resolveConnectionId(entry.kind, connectionId, allowDefault);
   if (!target) {
     return {
       ok: false,
@@ -189,7 +190,8 @@ export async function runSteps(
     kind?: string;
   }>,
   kind: string,
-  connectionId?: string
+  connectionId?: string,
+  allowDefault = true
 ): Promise<{ results: ActionRunResult[] }> {
   const results: ActionRunResult[] = [];
   for (const step of steps) {
@@ -206,7 +208,7 @@ export async function runSteps(
     // runAction resolves the kind default. We let runAction do the
     // final resolution so the kind match is validated there.
     const pin = step.connectionId ?? connectionId;
-    const r = await runAction(stepGlobalId, step.options ?? {}, pin);
+    const r = await runAction(stepGlobalId, step.options ?? {}, pin, allowDefault);
     results.push(r);
     if (!r.ok) break;
   }
@@ -222,7 +224,8 @@ export async function runSteps(
  */
 export async function runPreset(
   globalPresetId: string,
-  connectionId?: string
+  connectionId?: string,
+  allowDefault = true
 ): Promise<{ results: ActionRunResult[] }> {
   const [kind, id] = splitGlobalId(globalPresetId);
   if (!kind || !id) {
@@ -233,12 +236,13 @@ export async function runPreset(
   if (!preset) {
     return { results: [{ ok: false, error: `Unknown preset "${globalPresetId}"` }] };
   }
-  return runSteps(preset.steps, kind, connectionId);
+  return runSteps(preset.steps, kind, connectionId, allowDefault);
 }
 
 function resolveConnectionId(
   kind: string,
-  preferred?: string
+  preferred?: string,
+  allowDefault = true
 ): string | null {
   // 1. An explicit, valid pin always wins (per-action / per-button
   //    target chosen in the inspector).
@@ -246,15 +250,20 @@ function resolveConnectionId(
     const c = connectionManager.get(preferred);
     if (c && c.kind === kind) return preferred;
   }
-  // 2. The operator-chosen default for this kind (set in the
-  //    connections panel). This is what un-pinned surface actions and
-  //    the legacy pages converge on.
-  const def = getPreferences().defaultConnections?.[kind];
-  if (def) {
-    const c = connectionManager.get(def);
-    if (c && c.kind === kind) return def;
+  // 2. The operator-chosen default for this kind — ONLY for non-deck
+  //    callers (ad-hoc browser action/preset runs + the legacy pages).
+  //    Decks are deliberately independent of the default (`allowDefault`
+  //    false): a deck button targets the connection it's PINNED to, so
+  //    changing the default never re-targets a deck.
+  if (allowDefault) {
+    const def = peekPreferences().defaultConnections?.[kind];
+    if (def) {
+      const c = connectionManager.get(def);
+      if (c && c.kind === kind) return def;
+    }
   }
-  // 3. Fall back to the first live connection of the kind.
+  // 3. Fall back to the first live connection of the kind (deterministic,
+  //    default-independent).
   const matches = connectionManager.listByKind(kind);
   return matches[0]?.id ?? null;
 }

@@ -84,27 +84,58 @@ export class Updater extends EventEmitter {
       request.setHeader("Accept", "application/vnd.github+json");
       request.setHeader("User-Agent", `${USER_AGENT}/${app.getVersion()}`);
       let body = "";
+      let settled = false;
+      const MAX_BODY = 2 * 1024 * 1024; // 2 MB — a release JSON is a few KB
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try {
+          request.abort();
+        } catch {}
+        reject(new Error("GitHub API request timed out"));
+      }, 15_000);
+      const fail = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+      };
       request.on("response", (res) => {
         res.on("data", (chunk: Buffer) => {
+          if (settled) return;
           body += chunk.toString("utf-8");
+          if (body.length > MAX_BODY) {
+            try {
+              request.abort();
+            } catch {}
+            fail(new Error("GitHub API response too large"));
+          }
         });
         res.on("end", () => {
+          if (settled) return;
           if (res.statusCode === 404) {
-            reject(new Error("No releases published yet"));
+            fail(new Error("No releases published yet"));
             return;
           }
           if (res.statusCode && res.statusCode >= 400) {
-            reject(new Error(`GitHub API responded ${res.statusCode}`));
+            fail(new Error(`GitHub API responded ${res.statusCode}`));
             return;
           }
           try {
-            resolve(JSON.parse(body) as ReleasePayload);
+            const payload = JSON.parse(body) as ReleasePayload;
+            if (!settled) {
+              settled = true;
+              clearTimeout(timer);
+              resolve(payload);
+            }
           } catch (e) {
-            reject(e instanceof Error ? e : new Error(String(e)));
+            fail(e instanceof Error ? e : new Error(String(e)));
           }
         });
       });
-      request.on("error", reject);
+      request.on("error", (e) =>
+        fail(e instanceof Error ? e : new Error(String(e)))
+      );
       request.end();
     });
   }

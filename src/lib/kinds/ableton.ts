@@ -166,7 +166,12 @@ class AbletonAdapter implements BrokerImpl {
   }
 
   getStatus(): ConnectionStatus {
-    return this.broker.getStatus() === "connected" ? "connected" : "offline";
+    const s = this.broker.getStatus();
+    return s === "connected"
+      ? "connected"
+      : s === "connecting"
+        ? "connecting"
+        : "offline";
   }
 
   dispose(): void {

@@ -153,6 +153,10 @@ export class ServerManager extends EventEmitter {
     error: null,
   };
   private stopping = false;
+  /** The optimistic "declare running after 2s" timer — tracked so stop()/
+   *  exit can cancel it (otherwise it could flip a just-stopped server's
+   *  phase back to "running"). */
+  private runningTimer: ReturnType<typeof setTimeout> | null = null;
 
   setPort(port: number) {
     this.status.port = port;
@@ -276,16 +280,34 @@ export class ServerManager extends EventEmitter {
       for (const line of text.split(/\r?\n/)) this.log("warn", line);
     });
 
-    this.proc.on("error", (err) => {
+    // Capture THIS spawn so the exit handler reads a per-process "was this
+    // an intentional stop?" flag instead of the shared `this.stopping`
+    // (which a racing restart could flip, misattributing a clean stop as a
+    // crash).
+    const proc = this.proc as ChildProcess & { __stopping?: boolean };
+
+    proc.on("error", (err) => {
       this.log("err", `Server process failed to start: ${err.message}`);
+      if (this.runningTimer) {
+        clearTimeout(this.runningTimer);
+        this.runningTimer = null;
+      }
       this.updateStatus({ phase: "error", error: err.message });
-      this.proc = null;
+      if (this.proc === proc) this.proc = null;
     });
 
-    this.proc.on("exit", (code, signal) => {
+    proc.on("exit", (code, signal) => {
       this.log("warn", `Server exited (code=${code}, signal=${signal ?? "-"})`);
-      const wasStopping = this.stopping;
-      this.proc = null;
+      if (this.runningTimer) {
+        clearTimeout(this.runningTimer);
+        this.runningTimer = null;
+      }
+      const wasStopping = proc.__stopping === true;
+      // Only clear the live handle if it's still THIS process (a newer
+      // start may have already replaced it).
+      if (this.proc === proc) this.proc = null;
+      // Don't clobber a newer process's status with this old one's exit.
+      if (this.proc !== null) return;
       if (!wasStopping) {
         this.updateStatus({
           phase: "error",
@@ -296,9 +318,11 @@ export class ServerManager extends EventEmitter {
       }
     });
 
-    // Optimistic: declare running after a short delay if no errors fired
-    setTimeout(() => {
-      if (this.proc && this.status.phase === "starting") {
+    // Optimistic: declare running after a short delay if no errors fired.
+    // Tracked so stop()/exit can cancel it.
+    this.runningTimer = setTimeout(() => {
+      this.runningTimer = null;
+      if (this.proc === proc && this.status.phase === "starting") {
         this.updateStatus({ phase: "running" });
       }
     }, 2000);
@@ -306,17 +330,40 @@ export class ServerManager extends EventEmitter {
 
   async stop(): Promise<void> {
     if (!this.proc) return;
+    if (this.runningTimer) {
+      clearTimeout(this.runningTimer);
+      this.runningTimer = null;
+    }
     this.stopping = true;
-    const p = this.proc;
+    const p = this.proc as ChildProcess & { __stopping?: boolean };
+    p.__stopping = true;
     await new Promise<void>((resolve) => {
-      p.once("exit", () => resolve());
-      p.kill();
-      // Failsafe in case the process refuses to die
+      let done = false;
+      const finish = () => {
+        if (!done) {
+          done = true;
+          resolve();
+        }
+      };
+      p.once("exit", finish);
+      if (platform() === "win32" && p.pid) {
+        // `next dev` forks a worker that actually binds the port; a plain
+        // kill() signals only the immediate child and orphans the worker
+        // (port stays held). Kill the whole process tree on Windows.
+        try {
+          execSync(`taskkill /pid ${p.pid} /T /F`, { stdio: "ignore" });
+        } catch {
+          /* already gone / not found */
+        }
+      } else {
+        p.kill();
+      }
+      // Failsafe in case the process refuses to die.
       setTimeout(() => {
         try {
           p.kill("SIGKILL");
         } catch {}
-        resolve();
+        finish();
       }, 3000);
     });
     this.proc = null;

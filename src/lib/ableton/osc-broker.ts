@@ -78,6 +78,11 @@ export class AbletonBroker {
   private bindBackoffMs = 1_000;
   private nextBindAttemptTs = 0;
   private snapshotInFlight = false;
+  /** Bumped on every disconnect (stale timeout / config change) and at the
+   *  start of each snapshot fetch. A fetch checks it before publishing so a
+   *  snapshot that completes AFTER the broker was declared disconnected is
+   *  abandoned instead of resurrecting stale state + double-subscribing. */
+  private snapshotGen = 0;
   private listening = new Set<number>();
   /** Per-track index of the clip whose `playing_position` we're listening
    *  to. Lets us cleanly unsub when the playing slot changes. */
@@ -185,6 +190,7 @@ export class AbletonBroker {
       // Unsubscribe cleanly from the OLD host before tearing down the
       // socket so we don't leave it spraying listener replies at us.
       this.sendUnsubscribeAll();
+      this.snapshotGen++; // invalidate any in-flight snapshot fetch
       this.closeSocket();
       this.openSocket();
       this.connected = false;
@@ -200,8 +206,12 @@ export class AbletonBroker {
    * `connected` flag so the device-registry adapter can report health
    * without subscribing to events.
    */
-  getStatus(): "connected" | "disconnected" {
-    return this.connected ? "connected" : "disconnected";
+  getStatus(): "connected" | "connecting" | "disconnected" {
+    if (this.connected) return "connected";
+    // Started (pinging) but no reply yet → connecting, so the UI shows
+    // progress instead of "offline" during the handshake / reconnect.
+    if (this.pingTimer) return "connecting";
+    return "disconnected";
   }
 
   /**
@@ -419,6 +429,7 @@ export class AbletonBroker {
     // comes back at the same address it won't have ghost listeners.
     if (this.connected && Date.now() - this.lastReplyTs > STALE_MS) {
       this.sendUnsubscribeAll();
+      this.snapshotGen++; // invalidate any in-flight snapshot fetch
       this.connected = false;
       this.snapshot = null;
       this.listening.clear();
@@ -610,6 +621,7 @@ export class AbletonBroker {
   private async fetchSnapshot() {
     if (this.snapshotInFlight) return;
     this.snapshotInFlight = true;
+    const gen = ++this.snapshotGen;
     // Clear known-listener bookkeeping at the top of every (re)fetch.
     // Without this, if Ableton restarted between two snapshot attempts
     // (its listeners are gone) but our `listening` set still has the
@@ -729,6 +741,11 @@ export class AbletonBroker {
       // Sort by index in case Promise.all returned out of order (it
       // shouldn't, but defensive).
       scenes.sort((a, b) => a.index - b.index);
+
+      // A stale-timeout (tickPing) or config change during the long fetch
+      // bumped the generation → this snapshot is for an abandoned session;
+      // drop it instead of resurrecting "connected" + re-subscribing.
+      if (gen !== this.snapshotGen) return;
 
       this.snapshot = {
         numTracks,

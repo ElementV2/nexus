@@ -38,8 +38,10 @@ export interface AgentStatus {
 
 /** How often the background watcher re-probes for a local Nexus server. */
 const PROBE_INTERVAL_MS = 3_000;
-/** Per-address probe budget — loopback answers fast or refuses fast. */
-const PROBE_TIMEOUT_MS = 1_500;
+/** Per-address probe budget — loopback answers/refuses in <50ms; a short
+ *  budget keeps a dead/virtual adapter from adding latency before the
+ *  uplink starts (the probe runs before the SSE connect at start()). */
+const PROBE_TIMEOUT_MS = 800;
 /** The launcher's default port; always probed even if no URL is set. */
 const DEFAULT_NEXUS_PORT = 9088;
 
@@ -51,6 +53,11 @@ export class Agent extends EventEmitter {
   // True while a local Nexus server is detected. Latches the transport
   // callbacks off so a torn-down uplink/HID is never touched mid-block.
   private blockedByLocal = false;
+  /** Bumped by every stop()/block(). A start() captures it after its
+   *  initial stop() and re-checks after each await; if it changed, a newer
+   *  start/stop/block superseded this run and it bails — preventing two
+   *  concurrent starts from both opening the deck or leaking an uplink. */
+  private startGen = 0;
   private watchTimer: ReturnType<typeof setInterval> | null = null;
   private status: AgentStatus = {
     running: false,
@@ -135,7 +142,7 @@ export class Agent extends EventEmitter {
       }
       if (detected === this.blockedByLocal) return; // no change
       if (detected) {
-        this.block();
+        await this.block();
       } else {
         // The local server went away — resume normal operation.
         this.blockedByLocal = false;
@@ -150,13 +157,17 @@ export class Agent extends EventEmitter {
   /** Tear the bridge down and release the deck so the local Nexus app
    *  keeps sole ownership. We do NOT reconnect — the watcher will resume
    *  us automatically once the local server stops. */
-  private block(): void {
+  private async block(): Promise<void> {
+    this.startGen++; // supersede any in-flight start()
     this.blockedByLocal = true;
     this.uplink?.stop();
     this.uplink = null;
     const hid = this.hid;
     this.hid = null;
-    void hid?.dispose();
+    // AWAIT the release — the whole point of block is to free the deck so
+    // the local Nexus server can claim it; returning before the handle is
+    // actually closed leaves a window where both contend for the device.
+    await hid?.dispose();
     this.publish({
       running: false,
       connected: false,
@@ -178,6 +189,9 @@ export class Agent extends EventEmitter {
    *  created once a server URL exists. */
   async start(settings: CrossSettings): Promise<void> {
     await this.stop();
+    // Claim this run AFTER the teardown's bump; if a newer start/stop/block
+    // happens during any await below, `gen` diverges and we bail.
+    const gen = this.startGen;
     this.lastSettings = settings;
     const cfg = toSatelliteConfig(settings);
     this.label = cfg.label;
@@ -186,9 +200,15 @@ export class Agent extends EventEmitter {
     // runs on THIS machine. Block instead — don't even open HID, so we
     // never fight the local Nexus app for the device.
     if (await this.probeLocalServer()) {
-      this.block();
+      await this.block();
       return;
     }
+    if (gen !== this.startGen) return; // superseded during the probe
+
+    // Past the block decision → this run owns the deck and is NOT blocked.
+    // Clear the latch so the transport callbacks below aren't short-circuited
+    // (a manual restart after a block would otherwise stay silently dead).
+    this.blockedByLocal = false;
 
     // Always bring up HID — it has nothing to do with the server.
     const hid = new HidManager();
@@ -205,6 +225,10 @@ export class Agent extends EventEmitter {
       });
       hid.onDeviceChange(() => this.refreshDevices());
       await hid.refresh();
+      if (gen !== this.startGen) {
+        void hid.dispose();
+        return;
+      }
       hid.watchHotplug();
       this.refreshDevices();
       return;
@@ -265,6 +289,13 @@ export class Agent extends EventEmitter {
     });
 
     await hid.refresh();
+    if (gen !== this.startGen) {
+      // A newer start/stop/block superseded us during enumeration — tear
+      // down THIS run's hid (the newer run owns this.hid/uplink) and bail
+      // so we don't announce on a stale uplink or double-open the deck.
+      void hid.dispose();
+      return;
+    }
     hid.watchHotplug();
     this.refreshDevices();
     // Best-effort — never block start() (and therefore the IPC caller /
@@ -274,6 +305,7 @@ export class Agent extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    this.startGen++; // supersede any in-flight start()
     this.uplink?.stop();
     this.uplink = null;
     if (this.hid) {

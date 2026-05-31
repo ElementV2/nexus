@@ -571,16 +571,6 @@ export function selectActiveOverlay(s: OverlayEditorStore): OverlayConfig | null
   return s.overlays.find((o) => o.id === s.activeOverlayId) || null;
 }
 
-/** Select elements matching selectedElementIds from the active overlay */
-export function selectSelectedElements(s: OverlayEditorStore): OverlayElement[] {
-  const overlay = selectActiveOverlay(s);
-  if (!overlay) return EMPTY_ELEMENTS;
-  if (s.selectedElementIds.length === 0) return EMPTY_ELEMENTS;
-  return overlay.elements.filter((e) => s.selectedElementIds.includes(e.id));
-}
-
-const EMPTY_ELEMENTS: OverlayElement[] = [];
-
 /** Imperative helper: get the active overlay from current state (for event handlers, not render) */
 export function getActiveOverlay(): OverlayConfig | null {
   const s = useOverlayEditorStore.getState();

@@ -234,9 +234,10 @@ class VmixAdapter implements BrokerImpl {
   }
 
   getStatus(): ConnectionStatus {
-    const msg = this.broker.getSnapshot();
-    if (!msg) return "offline";
-    return msg.ok ? "connected" : "error";
+    // Delegate to the broker so the list surfaces "connecting" during the
+    // first round-trip / right after a host switch, instead of jumping
+    // offline → error/connected with no progress shown.
+    return this.broker.getStatus();
   }
 
   dispose(): void {

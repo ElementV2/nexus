@@ -72,7 +72,9 @@ export async function POST(req: NextRequest) {
   }
   const cid =
     typeof body.connectionId === "string" ? body.connectionId : undefined;
-  const result = await runSteps(steps, body.kind, cid);
+  // allowDefault=false — the Test button must behave EXACTLY like a real
+  // deck press: pinned connection only, never the per-kind default.
+  const result = await runSteps(steps, body.kind, cid, false);
   const anyFailed = result.results.some((r) => !r.ok);
   return NextResponse.json(result, { status: anyFailed ? 502 : 200 });
 }

@@ -1,6 +1,6 @@
 {
   "name": "nexus-cross",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "LAN satellite agent for Nexus — bridges a local Stream Deck to a Nexus server running on another machine.",
   "author": "ElementV2 <death0factory@gmail.com>",

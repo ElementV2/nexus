@@ -67,6 +67,13 @@ export function useSSE(
         // open tab + the variables stream reconnect in lockstep waves
         // after a server blip and hammer the just-restarted server.
         if (es?.readyState === EventSource.CLOSED) {
+          // Null out the closed handle BEFORE scheduling the retry —
+          // otherwise the retry's `open()` sees a truthy `es` (the dead,
+          // CLOSED instance), early-returns on its `if (es) return` guard,
+          // and the stream never reconnects until a tab hide/show resets
+          // it. Clearing it here lets `open()` build a fresh EventSource.
+          es.close();
+          es = null;
           if (retry) clearTimeout(retry);
           const delay = Math.min(15_000, 1_000 * 2 ** attempt) + Math.random() * 1_000;
           attempt++;

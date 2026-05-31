@@ -30,12 +30,18 @@ const RENDER_DEBOUNCE_MS = 60;
 const OPEN_TIMEOUT_MS = 4_000;
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
-    ),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms}ms`)),
+      ms
+    );
+  });
+  // Clear the timer once the race settles either way, so a fast successful
+  // open doesn't leave a 4 s timer armed (and rejecting into the void).
+  return Promise.race([p, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 type ControlDef = {

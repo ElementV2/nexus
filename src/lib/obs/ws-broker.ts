@@ -416,7 +416,10 @@ export class ObsBroker {
   }
 
   private async onIdentified(_id: IdentifiedPayload) {
-    this.reconnectMs = RECONNECT_INITIAL_MS;
+    // NOTE: reconnect backoff is reset only after a FULLY successful
+    // snapshot (see fetchSnapshot) — not here. Resetting on identify meant
+    // that an OBS that authenticates but then fails every snapshot looped
+    // reconnect→identify→fail at the initial 1 s delay forever (no backoff).
     try {
       await this.fetchSnapshot();
       // Stats poll — OBS doesn't push them; the dashboard wants ~1 Hz.
@@ -574,6 +577,9 @@ export class ObsBroker {
       currentSceneCollection: collectionList.currentSceneCollectionName || null,
     };
 
+    // Full snapshot succeeded → NOW reset the reconnect backoff (a flaky
+    // OBS that fails mid-snapshot keeps the grown backoff and won't storm).
+    this.reconnectMs = RECONNECT_INITIAL_MS;
     this.publishStatus("connected");
     this.publish({ type: "snapshot", snapshot: this.snapshot });
   }
@@ -856,8 +862,8 @@ export class ObsBroker {
       }
       case "InputVolumeChanged": {
         const inputName = d.inputName as string;
-        const volume = Number(d.inputVolumeMul);
-        const volumeDb = Number(d.inputVolumeDb);
+        const volume = safeNum(d.inputVolumeMul, 1);
+        const volumeDb = safeNum(d.inputVolumeDb, 0);
         const audio = snap.audioByInput[inputName];
         if (audio)
           snap.audioByInput[inputName] = {
@@ -870,7 +876,7 @@ export class ObsBroker {
       }
       case "InputAudioBalanceChanged": {
         const inputName = d.inputName as string;
-        const balance = Number(d.inputAudioBalance);
+        const balance = safeNum(d.inputAudioBalance, 0.5);
         const audio = snap.audioByInput[inputName];
         if (audio) snap.audioByInput[inputName] = { ...audio, balance };
         this.publish({ type: "input-balance", inputName, balance });
@@ -878,7 +884,7 @@ export class ObsBroker {
       }
       case "InputAudioSyncOffsetChanged": {
         const inputName = d.inputName as string;
-        const syncOffsetMs = Number(d.inputAudioSyncOffset);
+        const syncOffsetMs = safeNum(d.inputAudioSyncOffset, 0);
         const audio = snap.audioByInput[inputName];
         if (audio)
           snap.audioByInput[inputName] = { ...audio, syncOffsetMs };
@@ -918,7 +924,7 @@ export class ObsBroker {
         break;
       }
       case "CurrentSceneTransitionDurationChanged": {
-        const duration = Number(d.transitionDuration);
+        const duration = safeNum(d.transitionDuration, snap.currentTransitionDuration);
         snap.currentTransitionDuration = duration;
         this.publish({ type: "transition-duration", duration });
         break;
@@ -1763,6 +1769,14 @@ export class ObsBroker {
  * bitmask. OBS itself uses bitmasks internally but the API exposes the
  * map shape — we normalize here so the UI never has to think about it.
  */
+/** Coerce an OBS event field to a finite number, falling back when the
+ *  field is missing/garbage so a malformed event never writes `NaN` into
+ *  the snapshot (which then renders as `NaN` on faders). */
+function safeNum(v: unknown, fallback: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 function bitmaskFromTracks(tracks: Record<string, boolean>): number {
   let m = 0;
   for (let i = 1; i <= 6; i++) {

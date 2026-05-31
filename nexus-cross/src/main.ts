@@ -147,6 +147,11 @@ function wireIpc(): void {
   // block transition).
   ipcMain.handle("cross:disconnect", () => agent?.stop());
   ipcMain.on("cross:open-external", async (_e, url: string) => {
+    // Only hand http(s) URLs to the OS — never file:/custom schemes.
+    if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+      console.warn("[cross] refused open-external for non-http(s) url:", url);
+      return;
+    }
     try {
       await shell.openExternal(url);
     } catch (err) {

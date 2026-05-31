@@ -237,6 +237,12 @@ function wireIpc(srv: ServerManager) {
     if (urls.length > 0) shell.openExternal(urls[0]);
   });
   ipcMain.on("launcher:open-external", async (_e, url: string) => {
+    // Only ever hand http(s) URLs to the OS — never file:/custom schemes
+    // (classic Electron footgun if the renderer is ever tricked).
+    if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+      console.warn("[launcher] refused open-external for non-http(s) url:", url);
+      return;
+    }
     try {
       await shell.openExternal(url);
     } catch (err) {

@@ -9,8 +9,20 @@ export async function GET(request: NextRequest) {
   // downloaded .bat can never reach.
   const hostHeader = request.headers.get("host");
   const forwardedProto = request.headers.get("x-forwarded-proto");
-  const proto = forwardedProto ?? request.nextUrl.protocol.replace(":", "");
-  const host = hostHeader ?? request.nextUrl.host;
+  // Whitelist proto + host before they're interpolated into the generated
+  // PowerShell. A poisoned Host header could otherwise break out of the
+  // double-quoted PS strings the origin lands in (`Invoke-RestMethod -Uri
+  // "<origin>/..."`) and inject commands into the .bat the operator runs.
+  const proto =
+    forwardedProto === "https"
+      ? "https"
+      : forwardedProto === "http"
+        ? "http"
+        : request.nextUrl.protocol.replace(":", "");
+  // host[:port] — letters/digits/dot/hyphen for the host, optional :port.
+  const HOST_RE = /^[A-Za-z0-9.-]+(:\d{1,5})?$/;
+  const host =
+    hostHeader && HOST_RE.test(hostHeader) ? hostHeader : request.nextUrl.host;
   const origin = `${proto}://${host}`;
   const ps1 = buildPs1(origin);
 

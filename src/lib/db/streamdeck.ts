@@ -148,10 +148,10 @@ export function normalizeLayout(raw: DeckLayout): DeckLayout {
 // the cache self-invalidates and external launcher edits are still picked up.
 let storeCache: { mtime: number | null; value: StreamdeckStore } | null = null;
 
-export function getStreamdeckStore(): StreamdeckStore {
+function computeStreamdeckStore(): StreamdeckStore {
   const mtime = fileMtimeMs(FILE);
   if (storeCache && storeCache.mtime === mtime) {
-    return structuredClone(storeCache.value);
+    return storeCache.value;
   }
   const raw = readJson<Partial<StreamdeckStore>>(FILE, {});
   const value: StreamdeckStore =
@@ -159,7 +159,22 @@ export function getStreamdeckStore(): StreamdeckStore {
       ? DEFAULT_STORE
       : { layouts: (raw.layouts as DeckLayout[]).map(normalizeLayout) };
   storeCache = { mtime, value };
-  return structuredClone(value);
+  return value;
+}
+
+/** Public read: deep clone so callers can mutate freely. */
+export function getStreamdeckStore(): StreamdeckStore {
+  return structuredClone(computeStreamdeckStore());
+}
+
+/**
+ * Hot-path read: the cached store WITHOUT cloning. MUST be read-only.
+ * The feedback coordinator walks this on every variable tick; cloning
+ * every layout (each with up to 32 full bindings) per tick was the
+ * dominant cost at satellite scale. Read the cache directly instead.
+ */
+export function peekStreamdeckStore(): Readonly<StreamdeckStore> {
+  return computeStreamdeckStore();
 }
 
 export function setStreamdeckStore(next: StreamdeckStore): StreamdeckStore {

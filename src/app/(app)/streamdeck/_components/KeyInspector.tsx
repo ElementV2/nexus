@@ -20,7 +20,6 @@ export function KeyInspector({
   keyIndex,
   binding,
   connections,
-  defaultsByKind,
   onChange,
   onTest,
   onClear,
@@ -34,7 +33,6 @@ export function KeyInspector({
   keyIndex: number | null;
   binding: DeckBinding | undefined;
   connections: ConnectionLite[];
-  defaultsByKind: Record<string, string>;
   onChange: (next: DeckBinding) => void;
   onTest: () => void;
   onClear: () => void;
@@ -414,16 +412,33 @@ export function KeyInspector({
                   kind has more than one instance, so the operator picks
                   which machine THIS action hits. One instance = no
                   choice, so it's hidden. */}
-              {stepInstances.length > 1 && (
-                <ConnectionSelect
-                  kind={sKind}
-                  connections={connections}
-                  value={step.connectionId}
-                  fallbackId={defaultsByKind[sKind]}
-                  fallbackTag="default"
-                  onChange={(v) => patchStep(idx, { connectionId: v })}
-                />
-              )}
+              {stepInstances.length > 1 &&
+                (() => {
+                  // What an UNPINNED step resolves to at runtime: the
+                  // binding-level pin if it's a valid enabled instance of
+                  // this kind, else the FIRST enabled instance. NEVER the
+                  // per-kind default — decks are independent of it, so the
+                  // editor must show the real target, not the default.
+                  const firstEnabledId = stepInstances.find(
+                    (c) => c.enabled
+                  )?.id;
+                  const bindingPinValid =
+                    !!binding.connectionId &&
+                    stepInstances.some(
+                      (c) => c.id === binding.connectionId && c.enabled
+                    );
+                  return (
+                    <ConnectionSelect
+                      kind={sKind}
+                      connections={connections}
+                      value={step.connectionId}
+                      fallbackId={
+                        bindingPinValid ? binding.connectionId : firstEnabledId
+                      }
+                      onChange={(v) => patchStep(idx, { connectionId: v })}
+                    />
+                  );
+                })()}
               {def && def.options.length > 0 ? (
                 <div className="space-y-1">
                   {def.options

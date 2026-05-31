@@ -151,6 +151,12 @@ export function toSatelliteConfig(s: CrossSettings): SatelliteConfig {
     id: s.id,
     label: s.label,
     reconnectMinMs: 1_000,
-    reconnectMaxMs: 30_000,
+    // Cap the reconnect backoff low: this is a LAN satellite that should
+    // latch onto the server the instant it's reachable (boot, restart,
+    // network wake). A 30 s cap meant a server that came up at ~8 s wasn't
+    // retried until ~18-20 s — the "stuck on connecting" the operator saw.
+    // A ~3 s max reconnects within 3 s of the server returning; a SYN every
+    // 3 s to a down server is negligible on a LAN.
+    reconnectMaxMs: 3_000,
   };
 }

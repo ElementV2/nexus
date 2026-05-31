@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { spawn, type ChildProcess } from "child_process";
 import ffmpegStaticImport from "ffmpeg-static";
 import { getPreferences } from "@/lib/db/preferences";
@@ -112,6 +112,10 @@ function ensureRelay(host: string, port: string): Relay {
       err.code === "ENOENT"
         ? "FFmpeg not found."
         : `FFmpeg error: ${err.message}`;
+    // Surface in the launcher's server-activity logs so a relay failure
+    // (missing ffmpeg, vMix SRT output disabled, wrong host/port) is
+    // diagnosable instead of just a 502 in the browser.
+    console.warn(`[stream] ffmpeg srt://${key} failed: ${r.error}`);
     for (const fn of r.onEnd) fn();
     r.listeners.clear();
     r.onEnd.clear();
@@ -122,6 +126,11 @@ function ensureRelay(host: string, port: string): Relay {
     r.ended = true;
     if (!r.error && code !== 0) {
       r.error = `FFmpeg exited with code ${code}`;
+    }
+    if (code !== 0) {
+      console.warn(
+        `[stream] ffmpeg srt://${key} exited code=${code}: ${r.error ?? "(no stderr)"}`
+      );
     }
     for (const fn of r.onEnd) fn();
     r.listeners.clear();
@@ -138,12 +147,30 @@ function ensureRelay(host: string, port: string): Relay {
 // and returns a never-ending MPEG-TS stream (video/mp2t).
 // ---------------------------------------------------------------------------
 
-export async function GET() {
-  const { vmix_host: host, vmix_srt_port: srtPort } = getPreferences();
+export async function GET(request: NextRequest) {
+  const prefs = getPreferences();
+  const sp = request.nextUrl.searchParams;
+
+  // Let the caller stream a SPECIFIC vMix (the floating player's picker)
+  // without touching the global default. Fall back to the default vMix
+  // prefs when no query is given. Host is validated to a bare host/IP so
+  // it can't smuggle extra SRT URL params.
+  const HOST_RE = /^[A-Za-z0-9.\-]+$/;
+  const qHost = sp.get("host");
+  const host = qHost && HOST_RE.test(qHost) ? qHost : prefs.vmix_host;
+
+  const qPort = Number(sp.get("srtPort"));
+  const srtPort =
+    Number.isInteger(qPort) && qPort >= 1 && qPort <= 65535
+      ? qPort
+      : prefs.vmix_srt_port;
   const port = String(srtPort);
 
+  if (!host) {
+    return NextResponse.json({ error: "No vMix host configured" }, { status: 400 });
+  }
   if (isNaN(srtPort) || srtPort < 1 || srtPort > 65535) {
-    return NextResponse.json({ error: "Invalid SRT port in preferences" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid SRT port" }, { status: 400 });
   }
 
   const r = ensureRelay(host, port);
@@ -168,6 +195,12 @@ export async function GET() {
     start(controller) {
       const onData = (chunk: Uint8Array) => {
         try {
+          // Drop frames for a saturated/stuck viewer instead of buffering
+          // the live MPEG-TS feed unbounded in this client's stream queue.
+          // The shared relay keeps running for healthy viewers.
+          if (controller.desiredSize !== null && controller.desiredSize <= 0) {
+            return;
+          }
           controller.enqueue(chunk);
         } catch {
           removeFns?.();

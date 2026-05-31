@@ -12,7 +12,7 @@ export interface PerInstanceBroker<C> {
   getSnapshot(): unknown | null;
   send(command: unknown): Promise<unknown>;
   updateConfig(config: C): void;
-  getStatus(): "connected" | "connecting" | "offline";
+  getStatus(): "connected" | "connecting" | "offline" | "error";
   dispose(): void;
 }
 
@@ -42,11 +42,16 @@ export function makeBrokerAdapter<C>(
     },
     getStatus: (): ConnectionStatus => {
       const s = broker.getStatus();
+      // Pass every state through 1:1 (including "error") so a broker that
+      // can report a hard fault surfaces it on the generic connections
+      // list instead of being flattened to "offline".
       return s === "connected"
         ? "connected"
         : s === "connecting"
           ? "connecting"
-          : "offline";
+          : s === "error"
+            ? "error"
+            : "offline";
     },
     dispose: () => broker.dispose(),
   };

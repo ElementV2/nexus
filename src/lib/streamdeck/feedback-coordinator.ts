@@ -1,7 +1,6 @@
 import { variableBus } from "@/lib/core/variable-bus";
 import { connectionManager } from "@/lib/core/connection-manager";
-import { getStreamdeckStore } from "@/lib/db/streamdeck";
-import { getPreferences } from "@/lib/db/preferences";
+import { peekStreamdeckStore } from "@/lib/db/streamdeck";
 import { hmrSingleton } from "@/lib/utils/hmr-singleton";
 import { streamdeckDriver } from "./driver";
 import { evaluateFeedback, type VarsByConnection } from "./feedback";
@@ -63,10 +62,12 @@ class CoordinatorImpl {
     if (status.state !== "ready") return;
     const devices = await streamdeckDriver.listDevices();
     if (devices.length === 0) return;
-    const layouts = getStreamdeckStore().layouts;
+    // Read-only peek — the coordinator never mutates this, and at
+    // satellite scale a per-tick structuredClone of every layout was the
+    // dominant cost. See peek* docs in the db module.
+    const layouts = peekStreamdeckStore().layouts;
     const vars = buildVarsByConnection();
     const kinds = buildKindIndex();
-    const defaults = getPreferences().defaultConnections ?? {};
 
     for (const layout of layouts) {
       if (layout.deviceSerials.length === 0) continue;
@@ -79,7 +80,7 @@ class CoordinatorImpl {
       for (const [keyStr, binding] of Object.entries(layout.bindings)) {
         const keyIndex = Number(keyStr);
         if (!Number.isFinite(keyIndex)) continue;
-        const override = evaluateFeedback(binding, vars, kinds, defaults);
+        const override = evaluateFeedback(binding, vars, kinds);
         for (const path of paths) {
           streamdeckDriver.renderKey(path, keyIndex, binding, override ?? undefined);
         }

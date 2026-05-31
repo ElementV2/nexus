@@ -19,17 +19,15 @@ export function ConnectionSelect({
   connections,
   value,
   fallbackId,
-  fallbackTag,
   onChange,
 }: {
   kind: string;
   connections: ConnectionLite[];
   value: string | undefined;
-  /** The connection used when `value` is undefined (kind default for a
-   *  button; the button's target for a step). */
+  /** The connection used when `value` is undefined — the instance the
+   *  step resolves to at runtime (binding pin, else first of kind). Used
+   *  only to pre-select the right row; not labelled. */
   fallbackId: string | undefined;
-  /** Word shown on the fallback row: "default" or "button". */
-  fallbackTag: string;
   onChange: (v: string | undefined) => void;
 }) {
   const instances = connections.filter((c) => c.kind === kind);
@@ -73,7 +71,6 @@ export function ConnectionSelect({
         {instances.map((c) => (
           <option key={c.id} value={c.id}>
             {c.label}
-            {c.id === fallbackId ? ` · ${fallbackTag}` : ""}
             {c.enabled ? "" : " (off)"}
           </option>
         ))}

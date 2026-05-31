@@ -3,6 +3,9 @@ import {
   getPreferences,
   removeConnection,
   updateConnection,
+  redactConfigSecrets,
+  restoreConfigSecrets,
+  redactPreferences,
 } from "@/lib/db/preferences";
 import { connectionManager } from "@/lib/core/connection-manager";
 import { ensureBooted, reconcileFromPreferences } from "@/lib/core/boot";
@@ -31,6 +34,8 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   const live = connectionManager.get(id);
   return NextResponse.json({
     ...cfg,
+    // Redact secrets (OBS / grandMA2 password) before sending to client.
+    config: redactConfigSecrets(cfg.config),
     status: live?.broker.getStatus() ?? "offline",
     snapshot: live?.broker.getSnapshot() ?? null,
   });
@@ -68,7 +73,11 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
         { status: 500 }
       );
     }
-    const parsed = validateConfig(existing.kind, body.config);
+    // Swap any redacted secret the editor echoed back for the stored
+    // value before validating, so a host/port-only save keeps the
+    // password the operator never re-typed.
+    const merged = restoreConfigSecrets(body.config, existing.config);
+    const parsed = validateConfig(existing.kind, merged);
     if (!parsed.ok) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
@@ -76,7 +85,9 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   }
   const updated = updateConnection(id, patch);
   reconcileFromPreferences();
-  return NextResponse.json({ ok: true, prefs: updated });
+  // Redact secrets — the PUT response must not echo the stored password
+  // back in cleartext (same rule as the GET paths).
+  return NextResponse.json({ ok: true, prefs: redactPreferences(updated) });
 }
 
 export async function DELETE(_req: NextRequest, ctx: Ctx) {

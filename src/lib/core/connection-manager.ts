@@ -59,6 +59,19 @@ class ConnectionManagerImpl {
           }
           continue;
         }
+        // Kind changed for the same id → full teardown (same as removal),
+        // not just broker.dispose(): the OLD bridge subscription must be
+        // unattached and the connection's variables cleared, otherwise the
+        // bridge leaks and stale variables linger on the bus driving
+        // feedback for a connection that no longer exists.
+        const teardown = this.bridgeTeardowns.get(cfg.id);
+        try {
+          teardown?.();
+        } catch {
+          /* bridge teardown should not block reconcile */
+        }
+        this.bridgeTeardowns.delete(cfg.id);
+        variableBus.clearConnection(cfg.id);
         existing.broker.dispose();
         this.connections.delete(cfg.id);
         this.lastConfig.delete(cfg.id);

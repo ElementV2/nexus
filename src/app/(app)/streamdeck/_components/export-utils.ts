@@ -46,7 +46,13 @@ export function collectConnRefs(
       if (b.connectionId) pinned.add(b.connectionId);
       for (const s of b.preset.steps) {
         const k = stepKind(s, b.preset.kind);
-        if (s.connectionId) pinned.add(s.connectionId);
+        // A step with no pin of its own inherits the BUTTON's connection
+        // when it's the same kind. Only a step with no effective
+        // connection at all falls into the kind bucket — so a fully-pinned
+        // page lists real connection names, not "<kind> actions".
+        const eff =
+          s.connectionId ?? (k === b.preset.kind ? b.connectionId : undefined);
+        if (eff) pinned.add(eff);
         else kindsWithDefault.add(k);
       }
     }

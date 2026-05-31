@@ -284,6 +284,19 @@ export class OscUdpBroker {
       sock.on("message", (msg) => this.onMessage(msg));
       sock.on("error", (err) => {
         console.warn(`[${this.spec.tag}] socket error:`, err.message);
+        // Drop the dead socket so it actually gets rebuilt. `ensureSocket`
+        // (and the next heartbeat's `sendOsc`) both early-out while
+        // `this.socket` is still set — so a socket left in place after an
+        // error never recovered. Nulling it lets the retry/heartbeat rebind.
+        try {
+          sock.close();
+        } catch {
+          /* already closing */
+        }
+        if (this.socket === sock) {
+          this.socket = null;
+          this.setConnected(false, err.message);
+        }
         this.scheduleSocketRetry();
       });
       sock.bind(0);

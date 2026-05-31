@@ -508,6 +508,12 @@ export function OutputsCustomPanel() {
 
 export function StatsFooter({ stats }: { stats: ObsStats | null }) {
   if (!stats) return null;
+  // OBS can return null/undefined for individual stat fields (e.g. cpuUsage
+  // on the very first GetStats, before it has a sampling window) even though
+  // the type says `number`. Coerce per-field so a single missing value never
+  // crashes the whole page on `.toFixed()`.
+  const n = (v: unknown): number =>
+    typeof v === "number" && Number.isFinite(v) ? v : 0;
   return (
     <div
       style={{
@@ -521,24 +527,24 @@ export function StatsFooter({ stats }: { stats: ObsStats | null }) {
       }}
     >
       <Activity size={14} color="var(--mid)" />
-      <Stat label="CPU" value={`${stats.cpuUsage.toFixed(1)} %`} />
-      <Stat label="FPS" value={stats.activeFps.toFixed(1)} />
+      <Stat label="CPU" value={`${n(stats.cpuUsage).toFixed(1)} %`} />
+      <Stat label="FPS" value={n(stats.activeFps).toFixed(1)} />
       <Stat
         label="Render"
-        value={`${stats.averageFrameRenderTime.toFixed(2)} ms`}
+        value={`${n(stats.averageFrameRenderTime).toFixed(2)} ms`}
       />
       <Stat
         label="Skipped (render)"
-        value={`${stats.renderSkippedFrames}/${stats.renderTotalFrames}`}
+        value={`${n(stats.renderSkippedFrames)}/${n(stats.renderTotalFrames)}`}
       />
       <Stat
         label="Skipped (output)"
-        value={`${stats.outputSkippedFrames}/${stats.outputTotalFrames}`}
+        value={`${n(stats.outputSkippedFrames)}/${n(stats.outputTotalFrames)}`}
       />
-      <Stat label="Mem" value={`${stats.memoryUsage.toFixed(0)} MB`} />
+      <Stat label="Mem" value={`${n(stats.memoryUsage).toFixed(0)} MB`} />
       <Stat
         label="Disk"
-        value={`${stats.availableDiskSpace.toFixed(0)} GB`}
+        value={`${n(stats.availableDiskSpace).toFixed(0)} GB`}
       />
     </div>
   );

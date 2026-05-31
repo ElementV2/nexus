@@ -33,13 +33,52 @@ export class VmixStateBroker {
   private inFlight = false;
   private stopped = true;
   private currentErrorBackoff = ERROR_BACKOFF_MS_INITIAL;
+  /** Raw XML of the last SUCCESSFUL poll. When the next poll returns the
+   *  exact same bytes we skip both the (full-document) XML parse AND the
+   *  publish fan-out — at idle that's the dominant per-tick cost, and the
+   *  saving scales with the number of connected SSE clients. Cleared on
+   *  stop so a fresh session always re-parses. */
+  private lastRaw: string | null = null;
+  /** Set when a host/port change lands while a poll is in flight — the
+   *  running tick re-polls the NEW host immediately on completion instead
+   *  of waiting out `backoff`. */
+  private repollPending = false;
 
   constructor(private config: VmixBrokerConfig) {}
 
-  /** Apply a new config — the next poll tick reads it (host/port/cadence
-   *  are read fresh each tick, so no restart needed). */
+  /** Apply a new config. Cadence changes are picked up by the next tick.
+   *  A host/port change drops the stale state so the status reflects
+   *  "connecting" (not the old host's "error"/"connected"), resets the
+   *  error backoff, and re-polls the new target IMMEDIATELY — otherwise a
+   *  switch (e.g. Network "Connect") waited out the previous host's
+   *  error-backoff timer (up to 30 s) before even trying the new one. */
   updateConfig(config: VmixBrokerConfig): void {
+    const changed =
+      config.host !== this.config.host || config.port !== this.config.port;
     this.config = config;
+    if (!changed) return;
+    this.currentErrorBackoff = ERROR_BACKOFF_MS_INITIAL;
+    this.lastMessage = null;
+    this.lastRaw = null;
+    if (!this.stopped && !this.inFlight) {
+      if (this.pollHandle) clearTimeout(this.pollHandle);
+      this.pollHandle = setTimeout(() => this.tick(), 0);
+    } else if (!this.stopped && this.inFlight) {
+      // A poll to the OLD host is mid-flight; flag the running tick to
+      // re-poll the NEW host the instant it finishes (its comment promised
+      // an immediate switch — without this it waited out `backoff`).
+      this.repollPending = true;
+    }
+  }
+
+  /** Coarse health for the connections list. "connecting" = started but no
+   *  poll has landed yet (fresh start, or just after a host change) — so
+   *  the UI shows progress instead of a stale "error"/"offline" during the
+   *  first round-trip to the new host. */
+  getStatus(): "offline" | "connecting" | "connected" | "error" {
+    if (this.stopped) return "offline";
+    if (!this.lastMessage) return "connecting";
+    return this.lastMessage.ok ? "connected" : "error";
   }
 
   subscribe(cb: Subscriber): () => void {
@@ -79,6 +118,8 @@ export class VmixStateBroker {
     // Drop the cached snapshot — a fresh subscriber should not see stale
     // data from a previous session.
     this.lastMessage = null;
+    // Force a full re-parse on the next session's first poll.
+    this.lastRaw = null;
   }
 
   private async tick() {
@@ -101,8 +142,11 @@ export class VmixStateBroker {
         signal: controller.signal,
         cache: "no-store",
       });
-      clearTimeout(to);
+      // Keep the abort timer armed across the body read too — a slow/
+      // half-open body stream would otherwise block the poll chain with no
+      // timeout (status stuck "connected", no further ticks).
       const raw = await res.text();
+      clearTimeout(to);
       if (!res.ok) {
         this.publish({
           ok: false,
@@ -111,7 +155,15 @@ export class VmixStateBroker {
         });
         backoff = Math.max(interval, this.currentErrorBackoff);
         this.bumpErrorBackoff();
+      } else if (raw === this.lastRaw && this.lastMessage?.ok) {
+        // Byte-identical to the previous successful poll → nothing changed.
+        // Skip the parse + publish; new subscribers still hydrate from the
+        // cached `lastMessage`. Refresh its `ts` so a liveness watchdog
+        // keyed on it doesn't flag an idle-but-connected vMix as stale.
+        this.lastMessage.ts = Date.now();
+        this.currentErrorBackoff = ERROR_BACKOFF_MS_INITIAL;
       } else {
+        this.lastRaw = raw;
         const state = parseVmixXml(raw);
         this.publish({ ok: true, state, raw, ts: Date.now() });
         // Healthy response — reset backoff so the next failure starts
@@ -131,6 +183,13 @@ export class VmixStateBroker {
     }
 
     if (this.stopped) return;
+    if (this.repollPending) {
+      // A host/port change landed during this poll — re-poll the new
+      // target now rather than after `backoff`.
+      this.repollPending = false;
+      this.pollHandle = setTimeout(() => this.tick(), 0);
+      return;
+    }
     this.pollHandle = setTimeout(() => this.tick(), backoff);
   }
 
@@ -143,6 +202,10 @@ export class VmixStateBroker {
   }
 
   private publish(m: StateMessage) {
+    // A fetch that was already in flight when stopPolling() ran would
+    // otherwise resurrect `lastMessage` (just cleared on stop), handing a
+    // stale frame to the next fresh subscriber. Drop late publishes.
+    if (this.stopped) return;
     this.lastMessage = m;
     for (const sub of this.subscribers) {
       try {

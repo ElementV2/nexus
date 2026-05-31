@@ -191,6 +191,20 @@ class SatelliteRegistryImpl {
     this.satellites.delete(id);
   }
 
+  /**
+   * Drop a satellite ONLY if it currently has no live SSE writer — i.e. it
+   * disconnected and no newer connection re-attached in the meantime.
+   * Returns true if it was removed. Lets the SSE route evict a gone
+   * satellite IMMEDIATELY (its decks vanish from open editors) instead of
+   * waiting out the stale-reaper, without nuking one that just reconnected.
+   */
+  removeIfDisconnected(id: string): boolean {
+    const entry = this.satellites.get(id);
+    if (!entry || entry.writer !== null) return false;
+    this.remove(id);
+    return true;
+  }
+
   list(): SatelliteSnapshot[] {
     return Array.from(this.satellites.values()).map((s) => ({
       id: s.id,
@@ -278,6 +292,14 @@ class SatelliteRegistryImpl {
         lastSeenTs: Date.now(),
       };
       this.satellites.set(id, stub);
+      // Greet immediately so a satellite whose SSE opened before its first
+      // announce still gets the ack (which prompts it to (re)announce),
+      // matching the post-announce attach path below.
+      try {
+        writer({ type: "hello" });
+      } catch {
+        /* ignore — writer will be retried on next attach */
+      }
       return () => {
         const cur = this.satellites.get(id);
         if (cur && cur.writer === writer) cur.writer = null;

@@ -42,10 +42,15 @@ class PressDispatcherImpl {
       // Pass the binding's connection pin so the press fires against
       // the operator-chosen instance (e.g. vMix #2). Each step may
       // still override with its own connectionId inside runSteps.
+      // allowDefault=false: a deck press fires ONLY against the connection
+      // it's pinned to (step pin → binding pin → first of kind). It must
+      // never follow the per-kind "default" — that's display-only, and a
+      // deck must not silently re-target when the operator changes it.
       void runSteps(
         binding.preset.steps,
         binding.preset.kind,
-        binding.connectionId
+        binding.connectionId,
+        false
       ).catch(() => {
         /* runSteps already shapes its own error per step; nothing
            to do at the dispatcher level — driver / SSE error

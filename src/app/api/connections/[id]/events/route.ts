@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { connectionManager } from "@/lib/core/connection-manager";
 import { ensureBooted } from "@/lib/core/boot";
+import { sseResponse } from "@/lib/sse";
 
 export const dynamic = "force-dynamic";
 
@@ -31,77 +32,16 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
     });
   }
 
-  const encoder = new TextEncoder();
-  let unsubscribe: (() => void) | null = null;
-  let heartbeat: ReturnType<typeof setInterval> | null = null;
-
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      const safeEnqueue = (chunk: string): boolean => {
-        try {
-          controller.enqueue(encoder.encode(chunk));
-          return true;
-        } catch {
-          // Controller closed (client disconnected mid-write). Clean up
-          // so the broker doesn't keep a ghost subscriber driving a
-          // dead controller for 25 s until the heartbeat notices.
-          cleanup();
-          return false;
-        }
-      };
-
-      const cleanup = () => {
-        if (heartbeat) {
-          clearInterval(heartbeat);
-          heartbeat = null;
-        }
-        unsubscribe?.();
-        unsubscribe = null;
-      };
-
-      safeEnqueue(": connected\n\n");
-
+  return sseResponse({
+    start(h) {
       // Hydrate the new subscriber with what we already know — current
-      // status + last cached snapshot. The broker will follow up with
-      // its own events from `subscribe()` shortly.
-      safeEnqueue(
-        `data: ${JSON.stringify({
-          type: "__status",
-          status: connection.broker.getStatus(),
-        })}\n\n`
-      );
+      // status + last cached snapshot — before live events arrive.
+      h.send({ type: "__status", status: connection.broker.getStatus() });
       const snapshot = connection.broker.getSnapshot();
       if (snapshot !== null && snapshot !== undefined) {
-        safeEnqueue(
-          `data: ${JSON.stringify({
-            type: "__snapshot",
-            payload: snapshot,
-          })}\n\n`
-        );
+        h.send({ type: "__snapshot", payload: snapshot });
       }
-
-      unsubscribe = connection.broker.subscribe((event) => {
-        safeEnqueue(`data: ${JSON.stringify(event)}\n\n`);
-      });
-
-      heartbeat = setInterval(() => {
-        safeEnqueue(": ping\n\n");
-      }, 25_000);
-    },
-    cancel() {
-      if (heartbeat) clearInterval(heartbeat);
-      heartbeat = null;
-      unsubscribe?.();
-      unsubscribe = null;
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
+      return connection.broker.subscribe((event) => h.send(event));
     },
   });
 }

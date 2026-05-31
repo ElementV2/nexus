@@ -8,6 +8,33 @@ function escapeHtml(str: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/**
+ * Escape a fully-assembled inline-style string for safe interpolation
+ * into a double-quoted `style="..."` attribute. Element style values
+ * (color, font-family, background-image url, …) come from user config
+ * and were previously interpolated raw — a value containing `"` or `>`
+ * could break out of the attribute / tag and inject markup. Escaping the
+ * whole style string closes that: the browser HTML-decodes the attribute
+ * before parsing CSS, so legitimate values (e.g. quoted font names) still
+ * work while breakout characters are neutralised.
+ */
+/**
+ * Sanitize a URL for use inside a CSS `url('…')`. HTML-escaping the whole
+ * style string stops attribute/tag breakout but NOT CSS metacharacters
+ * (`)` `;` `'`) which could inject extra declarations. Strip those + only
+ * allow http(s)/data:image URLs (emitted inside single quotes). Returns ""
+ * if unsafe so the caller omits the background entirely.
+ */
+function safeCssUrl(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  const v = raw.replace(/['")\\\r\n]/g, "").trim();
+  return /^(https?:\/\/|data:image\/)/i.test(v) ? v : "";
+}
+
+function escapeStyleAttr(style: string): string {
+  return escapeHtml(style);
+}
+
 function generateHoleCSS(el: HoleElement): string {
   const styles: string[] = [
     `position: absolute`,
@@ -68,7 +95,7 @@ function generateTextHTML(el: TextElement): string {
     styles.push(`-webkit-text-stroke: ${el.strokeWidth}px ${el.strokeColor}`);
   }
 
-  return `<div style="${styles.join("; ")}">${escapeHtml(el.content)}</div>`;
+  return `<div style="${escapeStyleAttr(styles.join("; "))}">${escapeHtml(el.content)}</div>`;
 }
 
 function generateImageHTML(el: ImageElement): string {
@@ -88,7 +115,7 @@ function generateImageHTML(el: ImageElement): string {
   }
   if (el.rotation) styles.push(`transform: rotate(${el.rotation}deg)`);
 
-  return `<img src="${escapeHtml(el.src)}" style="${styles.join("; ")}" />`;
+  return `<img src="${escapeHtml(el.src)}" style="${escapeStyleAttr(styles.join("; "))}" />`;
 }
 
 export function generateOverlayHTML(config: OverlayConfig): string {
@@ -133,23 +160,25 @@ export function generateOverlayHTML(config: OverlayConfig): string {
     `height: 1080px`,
     `background-color: ${config.backgroundColor}`,
   ];
-  if (config.backgroundImageUrl) {
-    bgStyles.push(`background-image: url(${config.backgroundImageUrl})`);
+  const bgUrl = safeCssUrl(config.backgroundImageUrl);
+  if (bgUrl) {
+    bgStyles.push(`background-image: url('${bgUrl}')`);
     bgStyles.push(`background-size: cover`);
   }
 
   // Texture overlay
   let textureDiv = "";
-  if (config.textureUrl) {
+  const texUrl = safeCssUrl(config.textureUrl);
+  if (texUrl) {
     const texStyles = [
       `position: absolute; top: 0; left: 0; width: 1920px; height: 1080px`,
-      `background-image: url(${config.textureUrl})`,
+      `background-image: url('${texUrl}')`,
       `background-size: cover`,
       `mix-blend-mode: ${config.blendMode}`,
       `opacity: ${config.textureOpacity}`,
       `pointer-events: none`,
     ];
-    textureDiv = `\n    <div style="${texStyles.join("; ")}"></div>`;
+    textureDiv = `\n    <div style="${escapeStyleAttr(texStyles.join("; "))}"></div>`;
   }
 
   // Non-hole element HTML (text, images)
@@ -172,7 +201,7 @@ export function generateOverlayHTML(config: OverlayConfig): string {
     .filter((h) => h.borderWidth > 0)
     .map(
       (h) =>
-        `  <div style="${generateHoleCSS(h)}"></div>`
+        `  <div style="${escapeStyleAttr(generateHoleCSS(h))}"></div>`
     )
     .join("\n");
 
@@ -192,7 +221,7 @@ export function generateOverlayHTML(config: OverlayConfig): string {
 </head>
 <body>
   <div style="position: absolute; top: 0; left: 0; width: 1920px; height: 1080px;${clipStyle}">
-    <div style="${bgStyles.join("; ")}"></div>${textureDiv}
+    <div style="${escapeStyleAttr(bgStyles.join("; "))}"></div>${textureDiv}
 ${elementsHtml}
   </div>
 ${holeBorders}

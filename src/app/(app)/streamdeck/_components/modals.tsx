@@ -19,13 +19,11 @@ import type {
 export function ImportModal({
   payload,
   connections,
-  defaultsByKind,
   onCancel,
   onConfirm,
 }: {
   payload: DeckExportFile;
   connections: ConnectionLite[];
-  defaultsByKind: Record<string, string>;
   onCancel: () => void;
   onConfirm: (mapping: Record<string, string>) => void;
 }) {
@@ -50,27 +48,19 @@ export function ImportModal({
     () => new Map(connections.map((c) => [c.id, c])),
     [connections]
   );
-  // Initial mapping: same id exists → keep it; else first local
-  // connection of the same kind (default first) → that; else "".
+  // Initial mapping: keep a connection that exists here verbatim;
+  // otherwise (a bucket of unpinned actions, or a pin we don't have)
+  // preselect the FIRST local connection of that kind so the imported
+  // deck lands fully pinned to a real machine. No per-kind "default" —
+  // decks are independent of it.
   const [mapping, setMapping] = useState<Record<string, string>>(() => {
     const m: Record<string, string> = {};
     for (const r of refs) {
-      if (isDefaultBucket(r.id)) {
-        // Default bucket: start as "keep default" ("") — picking a
-        // connection here re-pins every unpinned action of that kind.
-        m[r.id] = "";
-      } else if (localById.has(r.id)) {
-        // Same connection exists on this machine → keep it.
+      if (!isDefaultBucket(r.id) && localById.has(r.id)) {
         m[r.id] = r.id;
       } else {
-        // Pinned to an instance we don't have → preselect this kind's
-        // default connection (else first of kind, else keep default).
-        const def = defaultsByKind[r.kind];
         const sameKind = connections.filter((c) => c.kind === r.kind);
-        m[r.id] =
-          (def && sameKind.find((c) => c.id === def)?.id) ??
-          sameKind[0]?.id ??
-          "";
+        m[r.id] = sameKind[0]?.id ?? "";
       }
     }
     return m;
@@ -83,8 +73,8 @@ export function ImportModal({
     >
       <div style={{ fontSize: 12, color: "var(--mid)", marginBottom: 12 }}>
         {refs.length === 0
-          ? "These pages don't pin any specific connection — they'll use each device kind's default. Ready to import."
-          : "Match each connection the pages reference to one on this machine. Unmatched ones fall back to the kind default."}
+          ? "These pages don't reference any device — ready to import."
+          : "Pick which connection on THIS machine runs each set of actions from the imported page."}
       </div>
       {refs.length > 0 && (
         <div className="space-y-2" style={{ marginBottom: 12 }}>
@@ -113,8 +103,8 @@ export function ImportModal({
                     style={{ fontSize: 9, color: "var(--sub)" }}
                   >
                     {bucket
-                      ? "running on the default connection"
-                      : `${r.kind}${localById.has(r.id) ? " · exists here" : " · not on this PC"}`}
+                      ? "run these on →"
+                      : `${r.kind}${localById.has(r.id) ? " · on this PC" : " · from another PC"}`}
                   </div>
                 </div>
                 <span style={{ color: "var(--sub)" }}>→</span>
@@ -135,9 +125,7 @@ export function ImportModal({
                     outline: "none",
                   }}
                 >
-                  <option value="">
-                    {bucket ? `Keep default (${r.kind})` : `Kind default (${r.kind})`}
-                  </option>
+                  <option value="">Leave unpinned</option>
                   {sameKind.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.label}

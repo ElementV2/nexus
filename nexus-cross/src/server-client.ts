@@ -25,7 +25,14 @@ export type UplinkState = { connected: boolean; error?: string };
 // connect indefinitely and blocks whatever awaits it. The SSE connect
 // gets its own (longer) guard; its body stream is never timed out.
 const REQUEST_TIMEOUT_MS = 5_000;
-const SSE_CONNECT_TIMEOUT_MS = 8_000;
+// A LAN SSE that hasn't answered with headers in this window is hung —
+// abort and let the (now fast) backoff retry rather than waiting 8 s.
+const SSE_CONNECT_TIMEOUT_MS = 5_000;
+// Read-idle watchdog: the server emits a `: ping` keepalive every 25 s, so
+// going this long with ZERO bytes means a half-open socket (Wi-Fi/VPN drop
+// with no FIN/RST) — abort to force a reconnect instead of hanging forever
+// on `for await` with the deck silently frozen.
+const SSE_IDLE_TIMEOUT_MS = 60_000;
 
 export class ServerClient {
   private cfg: SatelliteConfig;
@@ -129,7 +136,7 @@ export class ServerClient {
         console.log(`[uplink] SSE connected → ${url}`);
         this.sseRetryMs = this.cfg.reconnectMinMs;
         this.emitState({ connected: true });
-        await this.parseSse(res.body, onMessage);
+        await this.parseSse(res.body, onMessage, abort);
         // Stream ended cleanly (server closed) — treat as disconnected.
         this.emitState({ connected: false });
       } catch (err) {
@@ -155,13 +162,24 @@ export class ServerClient {
 
   private async parseSse(
     body: NodeJS.ReadableStream,
-    onMessage: (m: SatelliteInMessage) => void
+    onMessage: (m: SatelliteInMessage) => void,
+    abort: AbortController
   ): Promise<void> {
     let buf = "";
-    for await (const chunk of body as AsyncIterable<Buffer>) {
-      // Normalise CRLF → LF so framing works behind proxies that
-      // rewrite line endings; our server emits LF but be tolerant.
-      buf += chunk.toString("utf8").replace(/\r\n/g, "\n");
+    // Read-idle watchdog: reset on every inbound chunk (incl. keepalive
+    // comments). If it ever fires, abort the stream so the loop reconnects.
+    let idle: ReturnType<typeof setTimeout> | null = null;
+    const armIdle = () => {
+      if (idle) clearTimeout(idle);
+      idle = setTimeout(() => abort.abort(), SSE_IDLE_TIMEOUT_MS);
+    };
+    armIdle();
+    try {
+      for await (const chunk of body as AsyncIterable<Buffer>) {
+        armIdle();
+        // Normalise CRLF → LF so framing works behind proxies that
+        // rewrite line endings; our server emits LF but be tolerant.
+        buf += chunk.toString("utf8").replace(/\r\n/g, "\n");
       // SSE event = block terminated by \n\n. Lines inside start with
       // `data:` — accumulate, then JSON.parse the payload.
       let idx: number;
@@ -188,6 +206,9 @@ export class ServerClient {
           );
         }
       }
+    }
+    } finally {
+      if (idle) clearTimeout(idle);
     }
   }
 
