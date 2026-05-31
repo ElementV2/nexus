@@ -91,14 +91,14 @@ export const x32Actions: ActionDefinition[] = [
     id: "ch-mute-toggle",
     label: "Channel mute toggle",
     category: "Channels",
-    description: "Sends `/ch/N/mix/on` with the inverted current value.",
+    description: "Flips the channel's current mute state.",
     options: [chanOpt],
-    // We can't read the current value without subscribing — but
-    // sending `~` as a value triggers X32's toggle behaviour per the
-    // OSC reference.
+    // X32 has no native toggle value; the broker flips the last-seen
+    // /xremote state for this address (and the console echoes our write,
+    // keeping the cache fresh for the next press + the mute feedback).
     toCommand: (o) => ({
       address: `/ch/${pad2((o.channel as number) ?? 1)}/mix/on`,
-      args: ["~"],
+      toggle: true,
     }),
   },
   {
@@ -204,6 +204,16 @@ export const x32Actions: ActionDefinition[] = [
     }),
   },
   {
+    id: "bus-mute-toggle",
+    label: "Bus mute toggle",
+    category: "Buses",
+    options: [busOpt],
+    toCommand: (o) => ({
+      address: `/bus/${pad2((o.bus as number) ?? 1)}/mix/on`,
+      toggle: true,
+    }),
+  },
+  {
     id: "bus-fader",
     label: "Bus fader",
     category: "Buses",
@@ -290,6 +300,12 @@ export const x32Actions: ActionDefinition[] = [
     }),
   },
   {
+    id: "main-mute-toggle",
+    label: "Main LR mute toggle",
+    category: "Main",
+    toCommand: () => ({ address: "/main/st/mix/on", toggle: true }),
+  },
+  {
     id: "mono-fader",
     label: "Main mono fader",
     category: "Main",
@@ -331,6 +347,12 @@ export const x32Actions: ActionDefinition[] = [
         address: `/dca/${n}/on`,
         args: [o.muted ? 0 : 1],
       }),
+    } as ActionDefinition,
+    {
+      id: `dca-${n}-mute-toggle`,
+      label: `DCA ${n} mute toggle`,
+      category: "DCAs",
+      toCommand: () => ({ address: `/dca/${n}/on`, toggle: true }),
     } as ActionDefinition,
     {
       id: `dca-${n}-name`,

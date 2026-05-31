@@ -192,3 +192,54 @@ describe("vMix overlay feedback by input key", () => {
     ).toBe(RED);
   });
 });
+
+// ─────────────────────────── X32 mute feedback ────────────────────────
+
+/** One-step X32 binding on connection "x1". */
+function x32Key(
+  actionId: string,
+  options: Record<string, unknown> = {}
+): DeckBinding {
+  return {
+    connectionId: "x1",
+    preset: {
+      globalId: `x32:${actionId}`,
+      kind: "x32",
+      id: actionId,
+      label: actionId,
+      steps: [{ actionId, options }],
+    },
+  };
+}
+
+const x32fb = (b: DeckBinding, vars: Record<string, unknown>) =>
+  evaluateFeedback(b, { x1: vars }, { x32: ["x1"] });
+
+describe("X32 mute feedback — RED when the target is muted", () => {
+  it("channel mute lights red when ch_on is false (muted), null when audible", () => {
+    expect(x32fb(x32Key("ch-mute", { channel: 5 }), { ch_5_on: false })?.bgcolor).toBe(RED);
+    expect(x32fb(x32Key("ch-mute", { channel: 5 }), { ch_5_on: true })).toBeNull();
+  });
+
+  it("the mute TOGGLE reflects the same live state", () => {
+    expect(
+      x32fb(x32Key("ch-mute-toggle", { channel: 1 }), { ch_1_on: false })?.bgcolor
+    ).toBe(RED);
+  });
+
+  it("main + DCA + bus mutes resolve their own state var", () => {
+    expect(x32fb(x32Key("main-mute-toggle"), { main_on: false })?.bgcolor).toBe(RED);
+    expect(x32fb(x32Key("dca-3-mute"), { dca_3_on: false })?.bgcolor).toBe(RED);
+    expect(x32fb(x32Key("bus-mute", { bus: 2 }), { bus_2_on: true })).toBeNull();
+  });
+
+  it("a mute group lights red only when the group is ACTIVE (muting)", () => {
+    expect(x32fb(x32Key("mute-group-set", { group: 4 }), { mutegroup_4: true })?.bgcolor).toBe(RED);
+    expect(x32fb(x32Key("mute-group-set", { group: 4 }), { mutegroup_4: false })).toBeNull();
+  });
+
+  it("dims every X32 key when the console is disconnected", () => {
+    const r = x32fb(x32Key("ch-mute", { channel: 1 }), { connected: false });
+    expect(r?.badge?.color).toBe(RED);
+  });
+});

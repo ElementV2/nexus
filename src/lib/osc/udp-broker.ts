@@ -21,6 +21,11 @@ import { encodeMessage, decodePacket, type OscArg } from "@/lib/ableton/osc-code
 export interface OscUdpConfig {
   host: string;
   port: number;
+  /** Optional OSC address prefix. grandMA consoles can be configured
+   *  with an OSC prefix (e.g. "gma3") — when set, the console only
+   *  matches addresses sent as `/<prefix><address>` (so `/cmd` becomes
+   *  `/gma3/cmd`). Leave empty/unset for no prefix. X32 ignores it. */
+  prefix?: string;
 }
 
 export interface OscMessage {
@@ -74,6 +79,10 @@ export class OscUdpBroker {
   private connected = false;
   private info: Record<string, unknown> = {};
   private lastStatusEvent: OscBrokerEvent | null = null;
+  /** Last value seen per inbound OSC address (first arg). Powers
+   *  state-based toggles and lets feedback read current console state
+   *  without each consumer tracking it. */
+  private lastValues = new Map<string, OscArg>();
 
   constructor(
     public config: OscUdpConfig,
@@ -147,6 +156,15 @@ export class OscUdpBroker {
         new Error(`${this.spec.tag} command needs \`address\` (OSC path)`)
       );
     }
+    // State-based toggle: flip the last-seen 0/1 value for this address.
+    // X32 has no native toggle, and /xremote echoes our own writes so the
+    // cache self-heals; default to "turn off" (0) when state is unknown.
+    if ((body as { toggle?: boolean }).toggle) {
+      const cur = this.lastValues.get(body.address);
+      const next = typeof cur === "number" && cur >= 0.5 ? 0 : 1;
+      const wasUnknown = typeof cur !== "number";
+      return this.sendOsc(body.address, [wasUnknown ? 0 : next]);
+    }
     return this.sendOsc(body.address, body.args ?? []);
   }
 
@@ -176,10 +194,18 @@ export class OscUdpBroker {
 
   // ─────────────────────────── transport ────────────────────────────────
 
+  /** Prepend the configured OSC prefix (if any) to an address. The
+   *  prefix is stored bare or slash-wrapped; normalise both to
+   *  `/<prefix><address>`. */
+  private withPrefix(address: string): string {
+    const p = (this.config.prefix ?? "").replace(/^\/+|\/+$/g, "");
+    return p ? `/${p}${address}` : address;
+  }
+
   private async sendOsc(address: string, args: OscArg[]): Promise<{ ok: true }> {
     if (!this.socket) this.ensureSocket();
     if (!this.socket) throw new Error(`${this.spec.tag} socket not available`);
-    const buf = encodeMessage({ address, args });
+    const buf = encodeMessage({ address: this.withPrefix(address), args });
     return new Promise((resolve, reject) => {
       this.socket!.send(buf, this.config.port, this.config.host, (err) => {
         if (err) reject(err);
@@ -248,6 +274,7 @@ export class OscUdpBroker {
     this.setConnected(false);
     this.info = {};
     this.lastReplyTs = 0;
+    this.lastValues.clear();
   }
 
   private ensureSocket(): void {
@@ -286,6 +313,7 @@ export class OscUdpBroker {
     const msgs = decodePacket(new Uint8Array(buf));
     for (const m of msgs) {
       const decoded: OscMessage = { address: m.address, args: m.args };
+      if (m.args.length > 0) this.lastValues.set(m.address, m.args[0]);
       if (this.spec.parseInfo) {
         const patch = this.spec.parseInfo(decoded);
         if (patch) this.info = { ...this.info, ...patch };

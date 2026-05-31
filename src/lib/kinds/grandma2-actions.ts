@@ -1,18 +1,16 @@
 import type { ActionDefinition, ActionOption } from "@/lib/core/types";
 
 /**
- * grandMA 2 OSC action catalog.
+ * grandMA 2 command-line action catalog (sent over Telnet, port 30000).
  *
- * The wire protocol is the same as MA3 (`/cmd <string>` + direct
- * executor paths), but the **command-line syntax differs**:
+ * Every action emits a console command-line string wrapped as
+ * `{ address: "/cmd", args: [string] }` — the telnet broker unwraps it
+ * and writes the line. MA2 command-line syntax (vs MA3):
  *   • MA2 uses `Go Sequence N` (MA3 introduced `Go+ Sequence N`).
- *   • MA2's Goto syntax: `Goto Cue N` — no "Please" needed.
+ *   • MA2's Goto syntax: `Goto Cue N Sequence M`.
  *   • Page change: `Page +` / `Page -` — same on both.
  *   • Macros: `Macro N Go` (MA2) vs `Macro N` (MA3).
- *
- * Executor faders use `/Pages/Page${p}/Fader${e}` on MA2 vs
- * `/Page${p}/Fader${e}` on MA3. The broker's raw OSC send is
- * unchanged — we just emit the right path here.
+ *   • Executors: `<verb> Executor <page>.<exec>` (no direct OSC fader).
  */
 
 const pageOpt: ActionOption = {
@@ -44,15 +42,6 @@ const cueOpt: ActionOption = {
   label: "Cue #",
   default: 1,
   min: 1,
-};
-const faderOpt: ActionOption = {
-  id: "value",
-  type: "number",
-  label: "Value (0..1)",
-  default: 1,
-  min: 0,
-  max: 1,
-  step: 0.01,
 };
 const cmdString = (s: string): { address: string; args: [string] } => ({
   address: "/cmd",
@@ -172,56 +161,34 @@ export const grandma2Actions: ActionDefinition[] = [
     toCommand: () => cmdString("Page -"),
   },
 
-  // ════════════════════════ Executors (direct OSC) ════════════════════
+  // ════════════════════════ Executors (command line) ══════════════════
+  // MA2 control is over Telnet command line, so executors are driven by
+  // `<verb> Executor <page>.<exec>` rather than direct OSC fader paths.
   {
-    id: "executor-fader",
-    label: "Executor fader value",
+    id: "executor-go",
+    label: "Executor · Go",
     category: "Executors",
-    description:
-      "Sets the fader of the given page/executor directly. MA2 path: /Pages/Page<N>/Fader<M>",
-    options: [pageOpt, execOpt, faderOpt],
-    toCommand: (o) => ({
-      address: `/Pages/Page${(o.page as number) ?? 1}/Fader${
-        (o.exec as number) ?? 1
-      }`,
-      args: [Number(o.value ?? 1)],
-    }),
+    options: [pageOpt, execOpt],
+    toCommand: (o) =>
+      cmdString(`Go Executor ${(o.page as number) ?? 1}.${(o.exec as number) ?? 1}`),
   },
   {
-    id: "executor-key",
-    label: "Executor key (button)",
+    id: "executor-pause",
+    label: "Executor · Pause",
     category: "Executors",
-    options: [
-      pageOpt,
-      execOpt,
-      {
-        id: "key",
-        type: "dropdown",
-        label: "Key",
-        default: "Key1",
-        choices: [
-          { id: "Key1", label: "Key 1" },
-          { id: "Key2", label: "Key 2" },
-          { id: "Key3", label: "Key 3" },
-        ],
-      },
-      {
-        id: "state",
-        type: "dropdown",
-        label: "Press / Release",
-        default: "1",
-        choices: [
-          { id: "1", label: "Press (down)" },
-          { id: "0", label: "Release (up)" },
-        ],
-      },
-    ],
-    toCommand: (o) => ({
-      address: `/Pages/Page${(o.page as number) ?? 1}/${o.key ?? "Key1"}${
-        (o.exec as number) ?? 1
-      }`,
-      args: [Number(o.state ?? 1)],
-    }),
+    options: [pageOpt, execOpt],
+    toCommand: (o) =>
+      cmdString(
+        `Pause Executor ${(o.page as number) ?? 1}.${(o.exec as number) ?? 1}`
+      ),
+  },
+  {
+    id: "executor-off",
+    label: "Executor · Off",
+    category: "Executors",
+    options: [pageOpt, execOpt],
+    toCommand: (o) =>
+      cmdString(`Off Executor ${(o.page as number) ?? 1}.${(o.exec as number) ?? 1}`),
   },
 
   // ════════════════════════ Macros ════════════════════════════════════

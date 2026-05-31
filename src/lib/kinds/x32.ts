@@ -49,20 +49,46 @@ const x32Variables: VariableDefinition[] = [
   { id: "name", label: "Console name", hint: "string" },
 ];
 
-// Bridge published values from the broker's "status" events.
+// Bridge published values from the broker's events: "status" for the
+// connection info, and "osc" for live mute states (so the deck can show
+// mute feedback). The broker seeds + refreshes mute states via /xremote
+// + state queries (see x32/osc-broker).
 registerBridge("x32", (connectionId, broker) => {
   return broker.subscribe((event) => {
-    if (event.type !== "status") return;
-    const ev = event as KindEvent & {
-      connected?: boolean;
-      info?: { version?: string; model?: string; name?: string };
-    };
-    variableBus.setBatch(connectionId, {
-      connected: Boolean(ev.connected),
-      version: ev.info?.version ?? null,
-      model: ev.info?.model ?? null,
-      name: ev.info?.name ?? null,
-    });
+    if (event.type === "status") {
+      const ev = event as KindEvent & {
+        connected?: boolean;
+        info?: { version?: string; model?: string; name?: string };
+      };
+      variableBus.setBatch(connectionId, {
+        connected: Boolean(ev.connected),
+        version: ev.info?.version ?? null,
+        model: ev.info?.model ?? null,
+        name: ev.info?.name ?? null,
+      });
+      return;
+    }
+    if (event.type !== "osc") return;
+    const ev = event as KindEvent & { address?: unknown; args?: unknown[] };
+    const addr = ev.address;
+    const raw = ev.args?.[0];
+    if (typeof addr !== "string" || typeof raw !== "number") return;
+    // X32 "on" semantics: 1 = audible, 0 = muted. Publish as `<thing>_on`
+    // so a feedback can colour the key red when it's 0 (muted).
+    const on = raw >= 0.5;
+    let m: RegExpExecArray | null;
+    if ((m = /^\/ch\/(\d+)\/mix\/on$/.exec(addr))) {
+      variableBus.set(connectionId, `ch_${Number(m[1])}_on`, on);
+    } else if ((m = /^\/bus\/(\d+)\/mix\/on$/.exec(addr))) {
+      variableBus.set(connectionId, `bus_${Number(m[1])}_on`, on);
+    } else if ((m = /^\/dca\/(\d+)\/on$/.exec(addr))) {
+      variableBus.set(connectionId, `dca_${Number(m[1])}_on`, on);
+    } else if (addr === "/main/st/mix/on") {
+      variableBus.set(connectionId, "main_on", on);
+    } else if ((m = /^\/config\/mute\/(\d+)$/.exec(addr))) {
+      // Mute group: 1 = group active (muting). Keep raw semantics.
+      variableBus.set(connectionId, `mutegroup_${Number(m[1])}`, on);
+    }
   });
 });
 
@@ -93,12 +119,14 @@ const x32Presets: PresetDefinition[] = [
   // Main + USB
   {
     id: "main-mute",
-    label: "Main LR mute",
+    label: "Main LR mute (toggle)",
     category: "Main",
     text: "MAIN\nMUTE",
-    bgcolor: "#ff3b30",
+    // Neutral base so the live mute feedback (red when muted) reads
+    // clearly — base red/green are reserved for feedback.
+    bgcolor: "#2c2c2e",
     fgcolor: "#ffffff",
-    steps: [{ actionId: "main-mute", options: { muted: true } }],
+    steps: [{ actionId: "main-mute-toggle" }],
   },
   {
     id: "usb-rec",

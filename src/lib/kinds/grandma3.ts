@@ -21,6 +21,9 @@ import type {
 interface MAConfig {
   host: string;
   port: number;
+  /** Optional OSC prefix configured on the console (e.g. "gma3"). Empty
+   *  = no prefix. Prepended to every outgoing OSC address by the broker. */
+  prefix: string;
 }
 
 function parseMAConfig(
@@ -36,7 +39,8 @@ function parseMAConfig(
   if (!Number.isFinite(port) || port <= 0 || port > 65535) {
     return { ok: false, error: "port must be 1-65535" };
   }
-  return { ok: true, config: { host, port } };
+  const prefix = typeof r.prefix === "string" ? r.prefix.trim() : "";
+  return { ok: true, config: { host, port, prefix } };
 }
 
 const grandma3Variables: VariableDefinition[] = [
@@ -330,7 +334,7 @@ const grandma3Kind: DeviceKind = {
   icon: Lightbulb,
   tagline: "OSC over UDP (CommandLine + faders)",
   parseConfig: parseMAConfig,
-  defaultConfig: (): MAConfig => ({ host: "192.168.1.50", port: 9000 }),
+  defaultConfig: (): MAConfig => ({ host: "192.168.1.50", port: 9000, prefix: "" }),
   pages: [{ href: "/grandma3", label: "MA3", icon: Lightbulb }],
   actions: grandma3Actions,
   variables: grandma3Variables,

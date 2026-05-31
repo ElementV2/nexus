@@ -2,11 +2,10 @@ import { Lightbulb } from "lucide-react";
 import { registerDeviceKind } from "@/lib/core/registry";
 import { registerBridge } from "@/lib/core/variable-bridges";
 import { variableBus } from "@/lib/core/variable-bus";
-import { makeBrokerAdapter } from "@/lib/core/broker-adapter";
-// Re-use the MA3 broker — the wire protocol is identical, only the
-// command-line *syntax* differs (and that's emitted by the action
-// catalog, not the broker).
-import { GrandMA3Broker } from "@/lib/grandma3/osc-broker";
+// MA2's native command line is a Telnet service on port 30000 (its OSC
+// surface can't run commands without a third-party plugin). Use the
+// dedicated telnet broker — NOT the MA3 OSC broker.
+import { GrandMA2TelnetBroker } from "@/lib/grandma2/telnet-broker";
 import { grandma2Actions } from "./grandma2-actions";
 import type {
   BrokerImpl,
@@ -28,6 +27,11 @@ import type {
 interface MA2Config {
   host: string;
   port: number;
+  /** Telnet login user — MA2 requires a login before it accepts
+   *  commands. Set the console user you created for remote control. */
+  user: string;
+  /** Telnet login password paired with `user`. */
+  password: string;
 }
 
 function parseMA2Config(
@@ -43,7 +47,9 @@ function parseMA2Config(
   if (!Number.isFinite(port) || port <= 0 || port > 65535) {
     return { ok: false, error: "port must be 1-65535" };
   }
-  return { ok: true, config: { host, port } };
+  const user = typeof r.user === "string" ? r.user.trim() : "";
+  const password = typeof r.password === "string" ? r.password : "";
+  return { ok: true, config: { host, port, user, password } };
 }
 
 
@@ -221,9 +227,14 @@ const grandma2Kind: DeviceKind = {
   kind: "grandma2",
   displayName: "grandMA 2",
   icon: Lightbulb,
-  tagline: "OSC over UDP (CommandLine + faders, MA2 syntax)",
+  tagline: "Telnet command line (port 30000)",
   parseConfig: parseMA2Config,
-  defaultConfig: (): MA2Config => ({ host: "192.168.1.50", port: 8000 }),
+  defaultConfig: (): MA2Config => ({
+    host: "192.168.1.50",
+    port: 30000,
+    user: "",
+    password: "",
+  }),
   pages: [{ href: "/grandma2", label: "MA2", icon: Lightbulb }],
   actions: grandma2Actions,
   variables: grandma2Variables,
@@ -233,11 +244,7 @@ const grandma2Kind: DeviceKind = {
     if (!parsed.ok) {
       throw new Error(`grandMA 2 config invalid: ${parsed.error}`);
     }
-    return makeBrokerAdapter(
-      new GrandMA3Broker(parsed.config),
-      parseMA2Config,
-      "grandma2"
-    );
+    return new GrandMA2TelnetBroker(parsed.config);
   },
 };
 

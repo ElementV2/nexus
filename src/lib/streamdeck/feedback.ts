@@ -84,7 +84,9 @@ export function evaluateFeedback(
     case "ableton":
       return abletonFeedback(action, opts, scope);
     case "x32":
+      return x32Feedback(action, opts, scope);
     case "grandma3":
+    case "grandma2":
       return genericConnectivityFeedback(scope);
     default:
       return null;
@@ -358,6 +360,52 @@ function abletonFeedback(
       return { badge: { color: "#af52de" } };
     }
     return null;
+  }
+  return null;
+}
+
+// ─────────────────────────── X32 / M32 rules ──────────────────────────
+
+/**
+ * X32 mute feedback: light the key RED when its target is MUTED. X32's
+ * "on" semantics are inverted (1 = audible, 0 = muted), so the bridge
+ * publishes `<thing>_on` booleans and we fire red on `false`. Mute groups
+ * are the opposite — `true` means the group is actively muting. The
+ * broker seeds these via /xremote + state queries, so feedback is live.
+ */
+function x32Feedback(
+  action: string,
+  opts: Record<string, unknown>,
+  vars: Record<string, unknown>
+): FeedbackOverride | null {
+  if (vars.connected === false) {
+    return { fgcolor: "rgba(255,255,255,0.35)", badge: { color: "#ff3b30" } };
+  }
+  const RED: FeedbackOverride = { bgcolor: "#ff3b30", fgcolor: "#ffffff" };
+  const num = (v: unknown): number | undefined =>
+    typeof v === "number" ? v : typeof v === "string" ? Number(v) : undefined;
+  const mutedRed = (on: unknown): FeedbackOverride | null =>
+    on === false ? RED : null;
+
+  if (action === "ch-mute" || action === "ch-mute-toggle") {
+    const n = num(opts.channel);
+    return n === undefined ? null : mutedRed(vars[`ch_${n}_on`]);
+  }
+  if (action === "bus-mute" || action === "bus-mute-toggle") {
+    const n = num(opts.bus);
+    return n === undefined ? null : mutedRed(vars[`bus_${n}_on`]);
+  }
+  if (action === "main-mute" || action === "main-mute-toggle") {
+    return mutedRed(vars.main_on);
+  }
+  const dca = /^dca-(\d+)-mute(?:-toggle)?$/.exec(action);
+  if (dca) {
+    return mutedRed(vars[`dca_${Number(dca[1])}_on`]);
+  }
+  if (action === "mute-group-set") {
+    const n = num(opts.group);
+    // Group active (true) = it's muting → light it red.
+    return n !== undefined && vars[`mutegroup_${n}`] === true ? RED : null;
   }
   return null;
 }

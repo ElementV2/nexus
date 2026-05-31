@@ -18,11 +18,39 @@ import {
  */
 export type X32Config = OscUdpConfig;
 
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+// Querying a parameter with no args makes the X32 reply with its current
+// value. `/xremote` only streams *changes*, so without these the mute
+// feedback + state-toggle start blank until something moves on the
+// console. Bundled with the /xremote renewal (every 8 s) they also keep
+// state eventually-consistent if a change packet is ever dropped.
+const STATE_QUERIES: OscMessage[] = [
+  { address: "/xremote", args: [] },
+  ...Array.from({ length: 32 }, (_, i) => ({
+    address: `/ch/${pad2(i + 1)}/mix/on`,
+    args: [] as never[],
+  })),
+  ...Array.from({ length: 16 }, (_, i) => ({
+    address: `/bus/${pad2(i + 1)}/mix/on`,
+    args: [] as never[],
+  })),
+  ...Array.from({ length: 8 }, (_, i) => ({
+    address: `/dca/${i + 1}/on`,
+    args: [] as never[],
+  })),
+  { address: "/main/st/mix/on", args: [] },
+  ...Array.from({ length: 6 }, (_, i) => ({
+    address: `/config/mute/${i + 1}`,
+    args: [] as never[],
+  })),
+];
+
 const X32_SPEC: OscUdpSpec = {
   tag: "x32",
   ping: { messages: [{ address: "/info", args: [] }], intervalMs: 5_000 },
   subscribe: {
-    messages: [{ address: "/xremote", args: [] }],
+    messages: STATE_QUERIES,
     intervalMs: 8_000,
   },
   staleMs: 11_000,
