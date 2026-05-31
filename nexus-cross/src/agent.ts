@@ -232,6 +232,12 @@ export class Agent extends EventEmitter {
     uplink.onState((s) => {
       if (this.blockedByLocal) return;
       this.publish({ connected: s.connected, lastError: s.error });
+      // Re-announce on EVERY (re)connection. A satellite launched before
+      // the server (auto-connect) fails its boot-time announce while the
+      // server is down; without this it would only re-register if/when the
+      // server's `hello` arrives. Announcing the moment the link comes up
+      // makes the decks appear without a manual Save & connect.
+      if (s.connected) void uplink.announce(hid.list());
     });
 
     uplink.subscribe((msg) => {

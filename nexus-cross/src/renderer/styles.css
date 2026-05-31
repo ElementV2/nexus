@@ -255,6 +255,12 @@ body.is-blocked    .display { color: var(--pgm); }
 .row--clickable { cursor: pointer; transition: background 0.08s ease, filter 0.08s ease; }
 .row .eyebrow { margin-bottom: 4px; }
 .row-title { font-size: 12px; font-weight: 500; color: var(--ink); }
+.row-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 4px;
+}
 .arrow { font-weight: 400; }
 .arrow--big { font-size: 16px; line-height: 1; color: var(--muted); }
 .row--update {
@@ -333,6 +339,14 @@ body.has-conflict .cell--grow { display: none; }
   cursor: not-allowed;
 }
 .cta:disabled:hover { background: var(--card); }
+
+/* Connected → the CTA becomes a neutral "Disconnect" (amber is the
+   connect action; the green hero already signals the live link). */
+.cta--disconnect {
+  background: var(--card);
+  color: var(--mid);
+}
+.cta--disconnect:hover { background: var(--card-hi); color: var(--pgm); }
 
 /* Locked (a local Nexus server is up): dim the dead controls and point
    the operator at Quit — the only sensible action here. */

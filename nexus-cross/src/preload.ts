@@ -11,6 +11,7 @@ const api = {
     ipcRenderer.invoke("cross:get-status"),
   setSettings: (partial: Partial<CrossSettings>): Promise<CrossSettings> =>
     ipcRenderer.invoke("cross:set-settings", partial),
+  disconnect: (): Promise<void> => ipcRenderer.invoke("cross:disconnect"),
   openExternal: (url: string) => ipcRenderer.send("cross:open-external", url),
   hide: () => ipcRenderer.send("cross:hide"),
   quit: () => ipcRenderer.send("cross:quit"),

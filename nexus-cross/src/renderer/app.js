@@ -20,8 +20,12 @@ const conflictTextEl = $("conflict-text");
 const versionEl = $("version");
 const bannerEl = $("update-banner");
 const updateTextEl = $("update-text");
+const updateSubEl = $("update-sub");
+const ctaLabelEl = saveEl.querySelector(".cta-label");
+const ctaArrowEl = saveEl.querySelector(".cta-arrow");
 
-let updateUrl = null;
+let updateInfo = null;
+let currentStatus = null;
 
 // The settings store a full base URL (http://host:port); the UI shows a
 // bare IP + port so the operator never deals with the scheme.
@@ -55,12 +59,28 @@ const STATES = {
   blocked: { word: "Blocked.", cls: "is-blocked" },
 };
 
-// When a Nexus server runs on this PC the agent blocks itself; lock every
-// control so the operator can't reconnect into the conflict — the only
-// way out is to close Cross (or stop the local server).
-function applyLock(locked) {
-  for (const el of [ipEl, portEl, labelEl, saveEl]) el.disabled = locked;
-  document.body.classList.toggle("is-locked", locked);
+// One Connect/Disconnect button that reflects the link state. Server IP /
+// Port / Name are editable ONLY when fully disconnected — you must
+// Disconnect to change them, so a live bridge is never reconfigured under
+// itself. When a local Nexus server blocks us, the button is dead and the
+// only way out is Quit.
+function renderAction(status) {
+  const blocked = !!(status && status.localServer);
+  const running = !!(status && status.running);
+  for (const el of [ipEl, portEl, labelEl]) el.disabled = blocked || running;
+  saveEl.disabled = blocked;
+  saveEl.classList.toggle("cta--disconnect", running && !blocked);
+  if (blocked) {
+    ctaLabelEl.textContent = "Blocked";
+    ctaArrowEl.textContent = "✕";
+  } else if (running) {
+    ctaLabelEl.textContent = "Disconnect";
+    ctaArrowEl.textContent = "✕";
+  } else {
+    ctaLabelEl.textContent = "Connect";
+    ctaArrowEl.textContent = "↗";
+  }
+  document.body.classList.toggle("is-locked", blocked);
 }
 
 function renderState(status) {
@@ -76,7 +96,6 @@ function renderState(status) {
     "is-blocked"
   );
   document.body.classList.add(s.cls);
-  applyLock(!!(status && status.localServer));
   // Surface a live link error only while disconnected — but not the
   // local-server block, which the conflict banner explains in full.
   if (status && status.lastError && !status.connected && !status.localServer) {
@@ -145,18 +164,24 @@ function renderConflict(status) {
 }
 
 function render(status) {
+  currentStatus = status;
   renderState(status);
   renderConflict(status);
   renderDevices(status);
+  renderAction(status);
 }
 
 function showUpdate(info) {
+  updateInfo = info;
+  // Hide unless the updater confirms a strictly-newer Nexus Cross asset
+  // is published. The error case (offline / API down) stays hidden too —
+  // same policy as the main app, no "couldn't check" nagging.
   if (!info || !info.available) {
     bannerEl.hidden = true;
     return;
   }
-  updateUrl = info.installerUrl || info.releaseUrl;
-  updateTextEl.textContent = `Version ${info.latestVersion} available`;
+  updateTextEl.textContent = `v${info.latestVersion} available`;
+  updateSubEl.textContent = `current: v${info.currentVersion}`;
   bannerEl.hidden = false;
 }
 
@@ -175,6 +200,16 @@ async function init() {
 }
 
 saveEl.addEventListener("click", async () => {
+  const s = currentStatus;
+  if (s && s.localServer) return; // blocked — Quit is the only way out
+  if (s && s.running) {
+    // Connected (or connecting) → disconnect so the fields unlock.
+    hintEl.textContent = "Disconnecting…";
+    await api.disconnect();
+    hintEl.textContent = "";
+    return;
+  }
+  // Disconnected → save the edited settings and connect.
   hintEl.textContent = "Connecting…";
   const saved = await api.setSettings({
     serverUrl: composeServer(ipEl.value, portEl.value),
@@ -188,7 +223,6 @@ saveEl.addEventListener("click", async () => {
     portEl.value = port;
   }
   renderLink();
-  hintEl.textContent = "Saved.";
 });
 
 for (const el of [ipEl, portEl, labelEl]) {
@@ -199,7 +233,13 @@ for (const el of [ipEl, portEl, labelEl]) {
 }
 
 bannerEl.addEventListener("click", () => {
-  if (updateUrl) api.openExternal(updateUrl);
+  // Prefer the direct installer link, then the release page, then a
+  // hardcoded releases/latest — so the click always opens something
+  // useful even if assets lag the release. Mirrors the main app.
+  const url =
+    (updateInfo && (updateInfo.installerUrl || updateInfo.releaseUrl)) ||
+    "https://github.com/ElementV2/nexus/releases/latest";
+  api.openExternal(url);
 });
 
 $("hide").addEventListener("click", () => api.hide());

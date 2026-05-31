@@ -141,6 +141,11 @@ function wireIpc(): void {
       return next;
     }
   );
+  // Manual disconnect: drop the bridge so the operator can edit the
+  // server IP / port / name, then reconnect. Stays disconnected until the
+  // next Connect (the local-server watcher won't auto-resume without a
+  // block transition).
+  ipcMain.handle("cross:disconnect", () => agent?.stop());
   ipcMain.on("cross:open-external", async (_e, url: string) => {
     try {
       await shell.openExternal(url);
