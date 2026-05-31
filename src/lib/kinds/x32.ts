@@ -118,7 +118,9 @@ const x32Presets: PresetDefinition[] = [
 
   // Main + USB
   {
-    id: "main-mute",
+    // Distinct id from the `main-mute` action so the action stays
+    // reachable as its own auto-tile (this preset wraps the toggle).
+    id: "main-mute-toggle",
     label: "Main LR mute (toggle)",
     category: "Main",
     text: "MAIN\nMUTE",

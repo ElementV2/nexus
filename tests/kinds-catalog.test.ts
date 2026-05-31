@@ -55,6 +55,26 @@ describe("device kind catalog integrity", () => {
     }
   });
 
+  it("unified browser tiles have unique globalIds per kind (presets + synthesized)", () => {
+    // Mirrors the preset browser: tiles = curated presets + an auto-tile
+    // for every action not covered by a preset step AND whose globalId no
+    // preset already owns. A collision here is a React-key dup + an
+    // omitted/duplicated tile (regression guard for `x32:main-mute`).
+    for (const k of kinds) {
+      const presetGlobalIds = new Set((k.presets ?? []).map((p) => `${k.kind}:${p.id}`));
+      const covered = new Set<string>();
+      for (const p of k.presets ?? []) {
+        for (const s of p.steps) covered.add(`${k.kind}:${s.actionId}`);
+      }
+      const tileIds = [...presetGlobalIds];
+      for (const a of k.actions ?? []) {
+        const gid = `${k.kind}:${a.id}`;
+        if (!covered.has(gid) && !presetGlobalIds.has(gid)) tileIds.push(gid);
+      }
+      expect(new Set(tileIds).size, `${k.kind} tile ids`).toBe(tileIds.length);
+    }
+  });
+
   it("every action's toCommand runs on its declared defaults without throwing", () => {
     for (const k of kinds) {
       for (const a of k.actions ?? []) {

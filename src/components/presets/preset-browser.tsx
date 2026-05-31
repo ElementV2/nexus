@@ -117,11 +117,18 @@ export function PresetBrowserPanel({
   const tiles = useMemo<PresetEntry[] | null>(() => {
     if (!presets || !actions) return null;
     const covered = new Set<string>();
+    const presetGlobalIds = new Set<string>();
     for (const p of presets) {
+      presetGlobalIds.add(p.globalId);
       for (const s of p.steps) covered.add(`${p.kind}:${s.actionId}`);
     }
     const synthesized: PresetEntry[] = actions
-      .filter((a) => !covered.has(`${a.kind}:${a.id}`))
+      // Skip actions already covered by a preset step, AND any whose
+      // globalId a preset already owns (a preset id == action id) — so
+      // every tile's globalId stays unique (React key + drop payload).
+      .filter(
+        (a) => !covered.has(`${a.kind}:${a.id}`) && !presetGlobalIds.has(a.globalId)
+      )
       .map((a) => ({
         globalId: a.globalId,
         kind: a.kind,
