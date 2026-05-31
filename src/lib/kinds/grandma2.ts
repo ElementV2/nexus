@@ -235,7 +235,7 @@ const grandma2Kind: DeviceKind = {
     user: "",
     password: "",
   }),
-  pages: [{ href: "/grandma2", label: "MA2", icon: Lightbulb }],
+  // No dedicated page — controlled from the Stream Deck editor.
   actions: grandma2Actions,
   variables: grandma2Variables,
   presets: grandma2Presets,

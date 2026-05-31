@@ -280,7 +280,9 @@ const x32Kind: DeviceKind = {
   tagline: "OSC over UDP (port 10023)",
   parseConfig: parseX32Config,
   defaultConfig: (): X32Config => ({ host: "192.168.1.100", port: 10023 }),
-  pages: [{ href: "/x32", label: "X32", icon: Sliders }],
+  // No dedicated page — X32 is controlled from the Stream Deck editor
+  // (actions / presets / feedback). Connections are managed in the
+  // connections panel.
   actions: x32Actions,
   variables: x32Variables,
   presets: x32Presets,

@@ -335,7 +335,7 @@ const grandma3Kind: DeviceKind = {
   tagline: "OSC over UDP (CommandLine + faders)",
   parseConfig: parseMAConfig,
   defaultConfig: (): MAConfig => ({ host: "192.168.1.50", port: 9000, prefix: "" }),
-  pages: [{ href: "/grandma3", label: "MA3", icon: Lightbulb }],
+  // No dedicated page — controlled from the Stream Deck editor.
   actions: grandma3Actions,
   variables: grandma3Variables,
   presets: grandma3Presets,
