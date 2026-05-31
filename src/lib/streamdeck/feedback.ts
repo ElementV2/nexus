@@ -123,6 +123,55 @@ const VMIX_RECORD = new Set([
   "sc-stoprecording",
 ]);
 
+/** vMix input keys are GUIDs (e.g. "8db8...-...-..."). */
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Does a binding's `input` option match a slot reported by vMix as number
+ * `n` with stable key `key`? Bindings pin by KEY (GUID, rename+reorder
+ * safe); legacy bindings pin by number.
+ */
+function vmixInputMatches(opt: unknown, n: unknown, key: unknown): boolean {
+  const s = String(opt ?? "").trim();
+  if (!s) return false;
+  const k = typeof key === "string" ? key : "";
+  if (k && s === k) return true; // pinned by key (GUID)
+  if (n && s === String(n)) return true; // legacy: pinned by number
+  return false;
+}
+
+/** Mute state of the input a mute-button targets (by key or number). */
+function vmixMutedFor(
+  opt: unknown,
+  vars: Record<string, unknown>
+): boolean | undefined {
+  const s = String(opt ?? "").trim();
+  if (!s) return undefined;
+  if (/^\d+$/.test(s)) return vars[`input_${s}_muted`] as boolean | undefined;
+  // GUID-pinned → find the input number whose published key matches.
+  for (const [k, v] of Object.entries(vars)) {
+    const m = /^input_(\d+)_key$/.exec(k);
+    if (m && v === s) return vars[`input_${m[1]}_muted`] as boolean | undefined;
+  }
+  return undefined;
+}
+
+/**
+ * A key-pinned binding whose input has vanished from vMix → "disconnected"
+ * style, so a renamed/deleted input is obvious instead of silently dead.
+ * Only triggers when we actually have a live input list (`input_keys`).
+ */
+function vmixDisconnected(
+  opt: unknown,
+  vars: Record<string, unknown>
+): boolean {
+  const s = String(opt ?? "").trim();
+  if (!GUID_RE.test(s)) return false; // legacy number / no input → not "disconnected"
+  const keys = typeof vars.input_keys === "string" ? vars.input_keys : "";
+  if (!keys) return false; // vMix offline / no inputs known → don't flag
+  return !keys.split(",").includes(s);
+}
+
 /** The audio bus an action targets, lowercase ("m","a".."g"), or null. */
 function vmixBusOf(
   action: string,
@@ -145,16 +194,26 @@ function vmixFeedback(
 ): FeedbackOverride | null {
   const num = (v: unknown): number | undefined =>
     typeof v === "number" ? v : typeof v === "string" ? Number(v) : undefined;
-  const inputOpt = num(opts.input);
+  const hasInput = String(opts.input ?? "").trim() !== "";
   const RED: FeedbackOverride = { bgcolor: "#ff3b30", fgcolor: "#ffffff" };
   const GREEN: FeedbackOverride = { bgcolor: "#34c759", fgcolor: "#000000" };
 
+  // Disconnected — the bound input (pinned by key) no longer exists on vMix
+  // (deleted, or vMix not reporting it). Dim + amber so a stale binding is
+  // obvious. Applies to any input-targeting action.
+  if (hasInput && vmixDisconnected(opts.input, vars)) {
+    return { bgcolor: "#1c1c1e", fgcolor: "#8a6d3b" };
+  }
+
   // Tally — fire-red when this input is on PROGRAM, green when on PREVIEW.
   // PROGRAM always wins (live priority), on both cut/transition and preview
-  // buttons.
+  // buttons. Matches the binding's input by key (GUID) OR legacy number.
   if (VMIX_PROGRAM_TAKE.has(action) || action === "sc-previewinput") {
-    if (inputOpt !== undefined && num(vars.tally_active) === inputOpt) return RED;
-    if (inputOpt !== undefined && num(vars.tally_preview) === inputOpt) return GREEN;
+    if (!hasInput) return null;
+    if (vmixInputMatches(opts.input, vars.tally_active, vars.tally_active_key))
+      return RED;
+    if (vmixInputMatches(opts.input, vars.tally_preview, vars.tally_preview_key))
+      return GREEN;
     return null;
   }
 
@@ -168,15 +227,17 @@ function vmixFeedback(
   ) {
     const ch = num(opts.ch);
     if (ch === undefined) return null;
-    const live = num(vars[`overlay_${ch}`]); // program input, 0 = none
-    const pvw = num(vars[`overlay_${ch}_pvw`]); // preview input, 0 = none
-    if (inputOpt !== undefined) {
-      if (live && live === inputOpt) return RED;
-      if (pvw && pvw === inputOpt) return GREEN;
+    const liveNum = num(vars[`overlay_${ch}`]); // program input #, 0 = none
+    const pvwNum = num(vars[`overlay_${ch}_pvw`]); // preview input #, 0 = none
+    if (hasInput) {
+      if (liveNum && vmixInputMatches(opts.input, liveNum, vars[`overlay_${ch}_key`]))
+        return RED;
+      if (pvwNum && vmixInputMatches(opts.input, pvwNum, vars[`overlay_${ch}_pvw_key`]))
+        return GREEN;
       return null;
     }
-    if (live) return RED;
-    if (pvw) return GREEN;
+    if (liveNum) return RED;
+    if (pvwNum) return GREEN;
     return null;
   }
 
@@ -189,10 +250,11 @@ function vmixFeedback(
     return null;
   }
 
-  // Per-input audio mute — red MUTE when that input is muted (mic-mute tally).
+  // Per-input audio mute — red when that input is muted (mic-mute tally).
+  // Resolves the input by name or number.
   if (action === "sc-audio" || action === "sc-audioon" || action === "sc-audiooff") {
-    if (inputOpt === undefined) return null;
-    return vars[`input_${inputOpt}_muted`] === true
+    if (!hasInput) return null;
+    return vmixMutedFor(opts.input, vars) === true
       ? { bgcolor: "#ff3b30", fgcolor: "#ffffff" }
       : null;
   }

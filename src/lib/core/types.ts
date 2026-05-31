@@ -129,7 +129,7 @@ export interface ConnectionConfig {
  * Kept intentionally small — power features (computed defaults,
  * dependent dropdowns) can grow later once a real editor exists.
  */
-export type ActionOption =
+export type ActionOption = (
   | {
       id: string;
       type: "number";
@@ -162,7 +162,13 @@ export type ActionOption =
       default?: string;
       choices: Array<{ id: string; label: string }>;
       tooltip?: string;
-    };
+    }
+) & {
+  /** Show this field only when another option currently equals a value
+   *  (e.g. SetOutput's `Input` field is relevant only when `Value` =
+   *  "Input"). Editors hide it otherwise. */
+  showWhen?: { option: string; equals: string };
+};
 
 /**
  * A named operation a kind exposes to the rest of the app. Maps to

@@ -43,12 +43,23 @@ export function useActionCatalog(): ActionCatalogEntry[] | null {
  * fetch when no vMix binding is selected.
  */
 export interface VmixInputSuggestion {
+  /** Stored value = the input's STABLE vMix key (GUID): survives renames
+   *  AND renumbering. Falls back to the number if a key is missing. */
   value: string;
+  /** What the operator sees, e.g. "List · #3". */
   label: string;
+  /** Current number + short name, so the picker can resolve a legacy
+   *  number/name binding back to this input for display. */
+  number: number;
+  name: string;
 }
 interface VmixInputDTO {
+  key?: string;
   number: number;
   title: string;
+  /** vMix's short name — e.g. "List" instead of the full
+   *  "List - test drum remix.wav" (which also changes with the file). */
+  shortTitle?: string;
 }
 interface ConnectionSnapshotResponse {
   snapshot?: { inputs?: VmixInputDTO[] };
@@ -98,12 +109,16 @@ export function useVmixInputSuggestions(
         const snap = (await resSnap.json()) as ConnectionSnapshotResponse;
         const inputs = snap.snapshot?.inputs ?? [];
         if (cancelled) return;
-        // ONE suggestion per input. The selected VALUE is always the input
-        // NUMBER (stable; a List's title is a long filename that breaks the
-        // binding if inserted verbatim) — the title is shown as a label only.
+        // ONE suggestion per input. The stored VALUE is the input's stable
+        // vMix KEY (GUID) so a binding survives renames AND renumbering; if
+        // the input later disappears the button shows "disconnected". The
+        // label shows the short name + current number. Falls back to the
+        // number when an input has no key.
         const out: VmixInputSuggestion[] = inputs.map((inp) => {
-          const n = String(inp.number);
-          return { value: n, label: inp.title ? `${n} · ${inp.title}` : n };
+          const n = inp.number;
+          const name = (inp.shortTitle ?? "").trim() || (inp.title ?? "").trim();
+          const value = (inp.key ?? "").trim() || String(n);
+          return { value, label: name ? `${name} · #${n}` : `#${n}`, number: n, name };
         });
         setSuggestions(out);
       } catch {

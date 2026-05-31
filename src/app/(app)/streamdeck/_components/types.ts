@@ -85,6 +85,9 @@ export interface ActionOptionDef {
   step?: number;
   placeholder?: string;
   choices?: Array<{ id: string; label: string }>;
+  /** Show only when another option currently equals this value (e.g.
+   *  SetOutput's Input field appears only when Value = "Input"). */
+  showWhen?: { option: string; equals: string };
 }
 
 export interface ActionCatalogEntry {

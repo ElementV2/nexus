@@ -45,6 +45,7 @@ export function attachBridge(
 // ─────────────────────────── vMix bridge ──────────────────────────────
 
 interface VmixInputLite {
+  key?: string;
   number?: number;
   muted?: boolean;
   hasAudio?: boolean;
@@ -72,23 +73,41 @@ function bridgeVmix(connectionId: string, broker: BrokerImpl): () => void {
     const msg = event as unknown as VmixStateMessage & KindEvent;
     if (!msg.ok || !msg.state) return;
     const s = msg.state;
+    // Bindings are pinned by the input's stable KEY (GUID), but vMix reports
+    // tally/overlay state by NUMBER. Publish the KEY (for matching) AND the
+    // number (legacy bindings + display) for every feedback slot, plus
+    // `input_keys` (all current keys) so a button whose key has vanished can
+    // render "disconnected".
+    const inputs = Array.isArray(s.inputs) ? s.inputs : [];
+    const keyByNum = new Map<number, string>();
+    for (const inp of inputs) {
+      if (typeof inp.number === "number") keyByNum.set(inp.number, inp.key ?? "");
+    }
+    const keyOf = (n: number | undefined | null): string =>
+      n ? keyByNum.get(n) ?? "" : "";
+
     const batch: Record<string, VariableValue> = {
       tally_active: s.activeInput ?? null,
+      tally_active_key: keyOf(s.activeInput),
       tally_preview: s.previewInput ?? null,
-      input_count: Array.isArray(s.inputs) ? s.inputs.length : null,
+      tally_preview_key: keyOf(s.previewInput),
+      input_count: inputs.length,
+      input_keys: inputs.map((i) => i.key ?? "").filter(Boolean).join(","),
       streaming: s.streaming ?? null,
       recording: s.recording ?? null,
       fade_to_black: s.fadeToBlack ?? null,
     };
-    // Overlay channels 1-4 → the Input number on each, split by where it
-    // sits: `overlay_<ch>` = live/program input, `overlay_<ch>_pvw` =
-    // preview input (0 = none). Drives red-live / green-preview tally on
-    // OverlayInput + PreviewOverlayInput buttons.
+    // Overlay channels 1-8 → input on each, split by where it sits:
+    // `overlay_<ch>` (live/program) vs `overlay_<ch>_pvw` (preview), 0 =
+    // none, each with a `_key` companion. Drives red-live / green-preview
+    // tally on OverlayInput + PreviewOverlayInput buttons.
     for (let ch = 1; ch <= 8; ch++) {
       const live = s.overlays?.find((x) => x.number === ch && !x.preview);
       const pvw = s.overlays?.find((x) => x.number === ch && x.preview);
       batch[`overlay_${ch}`] = live ? live.inputNumber : 0;
+      batch[`overlay_${ch}_key`] = keyOf(live?.inputNumber);
       batch[`overlay_${ch}_pvw`] = pvw ? pvw.inputNumber : 0;
+      batch[`overlay_${ch}_pvw_key`] = keyOf(pvw?.inputNumber);
     }
     // Audio bus on/off (on = NOT muted). Master is bus "M".
     batch.bus_m_on = s.audio ? !s.audio.muted : null;
@@ -96,12 +115,12 @@ function bridgeVmix(connectionId: string, broker: BrokerImpl): () => void {
       const bus = s.audioBuses?.find((b) => b.name === L);
       batch[`bus_${L.toLowerCase()}_on`] = bus ? !bus.muted : null;
     }
-    // Per-input mute (mic-mute tally) for inputs that carry audio.
-    if (Array.isArray(s.inputs)) {
-      for (const inp of s.inputs) {
-        if (inp.hasAudio && typeof inp.number === "number") {
-          batch[`input_${inp.number}_muted`] = Boolean(inp.muted);
-        }
+    // Per-input mute (mic-mute tally) for inputs that carry audio — keyed by
+    // number, with a `_key` companion so a key-pinned mute button resolves.
+    for (const inp of inputs) {
+      if (inp.hasAudio && typeof inp.number === "number") {
+        batch[`input_${inp.number}_muted`] = Boolean(inp.muted);
+        batch[`input_${inp.number}_key`] = inp.key ?? "";
       }
     }
     variableBus.setBatch(connectionId, batch);

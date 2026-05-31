@@ -135,10 +135,15 @@ export function InspectorOptionField({
   def: ActionOptionDef;
   value: unknown;
   onChange: (v: unknown) => void;
-  /** Optional dropdown-like quick-pick values rendered as a
-   *  `<datalist>`. The widget remains a free-text input — the user
-   *  can pick a suggestion or type anything else. */
-  suggestions?: Array<{ value: string; label: string }>;
+  /** vMix input picker entries: `value` is the stable input key (GUID)
+   *  that gets stored; `label` is shown; `number`/`name` let the picker
+   *  resolve a legacy number/name binding for display. */
+  suggestions?: Array<{
+    value: string;
+    label: string;
+    number?: number;
+    name?: string;
+  }>;
 }) {
   const labelStyle: React.CSSProperties = {
     fontSize: 9,
@@ -209,45 +214,65 @@ export function InspectorOptionField({
       </div>
     );
   }
-  // String / free-text. When `suggestions` are provided we attach a
-  // datalist so the operator gets a quick-pick of known values (e.g.
-  // vMix input numbers + titles) while still being able to type any
-  // string they want. The list id is derived from the option id;
-  // multiple instances on the same page would collide if we used a
-  // static id.
-  const listId = suggestions && suggestions.length > 0
-    ? `inspector-${def.id}-suggestions`
-    : undefined;
+  const current =
+    typeof value === "string"
+      ? value
+      : value === undefined || value === null
+        ? ""
+        : String(value);
+
+  // vMix input picker: pick from the live input list. The stored value is
+  // the input's stable KEY (GUID), but we display the friendly name. A bound
+  // input that's no longer present (deleted, vMix offline) shows as
+  // "disconnected" — and the binding itself keeps working by key once vMix
+  // returns. Legacy number/name bindings resolve to their current input for
+  // display.
+  if (suggestions) {
+    const match = suggestions.find(
+      (s) =>
+        s.value === current ||
+        (s.number !== undefined && String(s.number) === current) ||
+        (s.name && s.name === current)
+    );
+    const stale = current !== "" && !match;
+    return (
+      <div className="flex items-center gap-2">
+        <span style={labelStyle}>{def.label}</span>
+        <select
+          value={match ? match.value : current}
+          onChange={(e) => onChange(e.target.value)}
+          title={
+            stale ? "Bound input not found on vMix (disconnected)" : undefined
+          }
+          style={{
+            ...inputStyle,
+            width: "100%",
+            color: stale ? "#ff453a" : "var(--ink)",
+          }}
+        >
+          <option value="">— none —</option>
+          {stale && <option value={current}>⚠ disconnected</option>}
+          {suggestions.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  // Plain free-text string option.
   return (
     <div className="flex items-center gap-2">
       <span style={labelStyle}>{def.label}</span>
-      <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-        <input
-          type="text"
-          // Legacy bindings stored numeric defaults — coerce to
-          // string so the field renders correctly post-migration.
-          value={
-            typeof value === "string"
-              ? value
-              : value === undefined || value === null
-                ? ""
-                : String(value)
-          }
-          placeholder={def.placeholder}
-          onChange={(e) => onChange(e.target.value)}
-          style={{ ...inputStyle, width: "100%" }}
-          list={listId}
-        />
-        {listId && (
-          <datalist id={listId}>
-            {suggestions!.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </datalist>
-        )}
-      </div>
+      <input
+        type="text"
+        value={current}
+        placeholder={def.placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ ...inputStyle, width: "100%" }}
+      />
     </div>
   );
 }

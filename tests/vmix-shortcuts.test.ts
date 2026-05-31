@@ -99,6 +99,41 @@ describe("family placeholders become one parameterized action", () => {
     expect(mixOpt).toMatchObject({ default: 0, min: 0 });
   });
 
+  it("splits a composite Value into sub-fields and recomposes it", () => {
+    // SetMultiViewOverlay's Value is "Index,Input" — should be two fields.
+    const a = byId.get("sc-setmultiviewoverlay")!;
+    const ids = (a.options ?? []).map((o) => o.id);
+    expect(ids).toContain("value0"); // Index
+    expect(ids).toContain("value1"); // Input (source)
+    expect(ids).not.toContain("value"); // not a single free field
+    expect(cmd("sc-setmultiviewoverlay", { input: "1", value0: "1", value1: "2" })).toEqual({
+      Function: "SetMultiViewOverlay",
+      Input: "1",
+      Value: "1,2",
+    });
+  });
+
+  it("turns a fixed-choice Value list into a dropdown", () => {
+    // SetOutput2's "Value = Output, Preview, MultiView, …" is a defined
+    // choice list → one Value dropdown, not a composite, not free text.
+    const a = byId.get("sc-setoutput2")!;
+    const valueOpt = a.options?.find((o) => o.id === "value");
+    expect(valueOpt?.type).toBe("dropdown");
+    expect(
+      valueOpt?.type === "dropdown" ? valueOpt.choices.map((c) => c.id) : []
+    ).toEqual(["Output", "Preview", "MultiView", "Replay", "Mix", "Input"]);
+    expect((a.options ?? []).some((o) => o.id === "value0")).toBe(false);
+    // Input/Mix fields are gated on the chosen routing target.
+    expect(a.options?.find((o) => o.id === "input")?.showWhen).toEqual({
+      option: "value",
+      equals: "Input",
+    });
+    expect(a.options?.find((o) => o.id === "mix")?.showWhen).toEqual({
+      option: "value",
+      equals: "Mix",
+    });
+  });
+
   it("maps the documented params to vMix query keys; omits empties", () => {
     expect(cmd("sc-audio", { input: "3" })).toEqual({
       Function: "Audio",

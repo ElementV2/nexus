@@ -58,6 +58,69 @@ const PARAM_KEY: Record<VmixParamId, string> = {
   selectedName: "SelectedName",
 };
 
+/**
+ * Some functions take a COMPOSITE Value, documented as "Value = a,b,c"
+ * (e.g. SetMultiViewOverlay → "Index,Input", SetLayerRectangle →
+ * "X,Y,Width,Height", SetVolumeBusMixer → "Bus,Volume", VideoCallConnect →
+ * "Name,Password"). Split it into one sub-field per token. Enum-style lists
+ * use ", " (comma-SPACE, e.g. SetOutput "Output, Preview, …") and stay a
+ * single free Value field. Returns null when Value isn't composite.
+ */
+function compositeValueTokens(description: string): string[] | null {
+  const m = /value\s*=\s*(.+)$/i.exec(description);
+  if (!m) return null;
+  const spec = m[1].trim();
+  if (spec.includes(", ")) return null; // list of allowed single values
+  if (!spec.includes(",")) return null; // single value
+  return spec.split(",").map((t) => t.trim()).filter(Boolean);
+}
+
+/**
+ * When Value is a FIXED choice list, documented as "Value = a, b, c"
+ * (comma-SPACE, e.g. SetOutput → "Output, Preview, MultiView, …"), return
+ * those choices so the field becomes a dropdown. Null otherwise.
+ */
+function enumValueChoices(description: string): string[] | null {
+  const m = /value\s*=\s*(.+)$/i.exec(description);
+  if (!m) return null;
+  const spec = m[1].trim();
+  if (!spec.includes(", ")) return null;
+  const choices = spec.split(",").map((t) => t.trim()).filter(Boolean);
+  // Only a clean list of short single-word tokens — never a sentence.
+  return choices.length >= 2 && choices.every((c) => /^[A-Za-z0-9]{1,20}$/.test(c))
+    ? choices
+    : null;
+}
+
+/** Option fragments for the `value` param: composite sub-fields, a fixed
+ *  choice dropdown, or a single free-text Value field. */
+function valueOptions(s: VmixShortcut): ActionOption[] {
+  const tokens = compositeValueTokens(s.description);
+  if (tokens) {
+    return tokens.map(
+      (tok, i): ActionOption => ({
+        id: `value${i}`,
+        type: "string",
+        label: `Value · ${tok}`,
+        tooltip: `Part ${i + 1} of Value — ${s.description}`,
+      })
+    );
+  }
+  const choices = enumValueChoices(s.description);
+  if (choices) {
+    return [
+      {
+        id: "value",
+        type: "dropdown",
+        label: "Value",
+        default: choices[0],
+        choices: choices.map((c) => ({ id: c, label: c })),
+      },
+    ];
+  }
+  return [paramOption("value", s.description)];
+}
+
 /** The editor option fragment for each documented param. */
 function paramOption(p: VmixParamId, description: string): ActionOption {
   switch (p) {
@@ -159,6 +222,9 @@ function actionId(fn: string): string {
 
 function buildToCommand(s: VmixShortcut): ActionDefinition["toCommand"] {
   const fams = s.family ?? [];
+  const valueParts = s.params.includes("value")
+    ? compositeValueTokens(s.description)
+    : null;
   return (options: Record<string, unknown>) => {
     let fnName = s.fn;
     for (const f of fams) {
@@ -168,6 +234,17 @@ function buildToCommand(s: VmixShortcut): ActionDefinition["toCommand"] {
     }
     const body: Record<string, unknown> = { Function: fnName };
     for (const p of s.params) {
+      if (p === "value" && valueParts) {
+        // Compose the sub-fields back into "a,b,c"; trim trailing blanks.
+        const parts = valueParts.map((_, i) => {
+          const v = options[`value${i}`];
+          return v === undefined || v === null ? "" : String(v);
+        });
+        while (parts.length && parts[parts.length - 1] === "") parts.pop();
+        const joined = parts.join(",");
+        if (joined !== "") body.Value = joined;
+        continue;
+      }
       const v = options[p];
       if (v !== undefined && v !== "") body[PARAM_KEY[p]] = v;
     }
@@ -261,9 +338,25 @@ function build(): {
     }
     seen.add(id);
 
+    // When Value is a fixed choice list that ROUTES to a target (SetOutput:
+    // Output/Preview/MultiView/Replay/Mix/Input), the Input/Mix fields only
+    // matter for the matching choice — gate them so they show only then.
+    const enumChoices = compositeValueTokens(s.description)
+      ? null
+      : enumValueChoices(s.description);
     const options: ActionOption[] = [
       ...familyOptions(s),
-      ...s.params.map((p) => paramOption(p, s.description)),
+      // `value` may expand into several composite sub-fields (e.g.
+      // SetMultiViewOverlay → Index + Input) or a choice dropdown.
+      ...s.params.flatMap((p): ActionOption[] => {
+        if (p === "value") return valueOptions(s);
+        const o = paramOption(p, s.description);
+        if (p === "input" && enumChoices?.includes("Input"))
+          return [{ ...o, showWhen: { option: "value", equals: "Input" } }];
+        if (p === "mix" && enumChoices?.includes("Mix"))
+          return [{ ...o, showWhen: { option: "value", equals: "Mix" } }];
+        return [o];
+      }),
     ];
     const label = humanize(s.fn);
     const toCommand = buildToCommand(s);

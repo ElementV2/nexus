@@ -426,7 +426,15 @@ export function KeyInspector({
               )}
               {def && def.options.length > 0 ? (
                 <div className="space-y-1">
-                  {def.options.map((opt) => (
+                  {def.options
+                    .filter((opt) => {
+                      // Dependent fields (e.g. SetOutput's Input only when
+                      // Value = "Input") — hide unless the gate matches.
+                      if (!opt.showWhen) return true;
+                      const cur = (step.options ?? {})[opt.showWhen.option];
+                      return String(cur ?? "") === opt.showWhen.equals;
+                    })
+                    .map((opt) => (
                     <InspectorOptionField
                       key={opt.id}
                       def={opt}
