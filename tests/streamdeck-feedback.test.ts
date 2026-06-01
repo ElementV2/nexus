@@ -28,6 +28,40 @@ const KINDS = { vmix: ["c1"] };
 const fb = (b: DeckBinding, vars: Record<string, unknown>) =>
   evaluateFeedback(b, { c1: vars }, KINDS);
 
+describe("multi-step feedback (audit B4)", () => {
+  it("shows tally for the relevant action even when it isn't step[0]", () => {
+    const binding: DeckBinding = {
+      connectionId: "c1",
+      preset: {
+        globalId: "vmix:combo",
+        kind: "vmix",
+        id: "combo",
+        label: "combo",
+        // step[0] has no tally; the cut (tally-relevant) is step[1].
+        steps: [
+          { actionId: "sc-fadetoblack", options: {} },
+          { actionId: "sc-cut", options: { input: "2" } },
+        ],
+      },
+    };
+    expect(fb(binding, { tally_active: 2 })?.bgcolor).toBe(RED);
+  });
+
+  it("returns null when no step's action yields a feedback override", () => {
+    const binding: DeckBinding = {
+      connectionId: "c1",
+      preset: {
+        globalId: "vmix:combo2",
+        kind: "vmix",
+        id: "combo2",
+        label: "combo2",
+        steps: [{ actionId: "sc-cut", options: { input: "9" } }],
+      },
+    };
+    expect(fb(binding, { tally_active: 2, tally_preview: 1 })).toBeNull();
+  });
+});
+
 describe("vMix tally feedback — PROGRAM wins over PREVIEW (live priority)", () => {
   it("a cut/transition button is RED when its input is live, even if also on PVW", () => {
     expect(

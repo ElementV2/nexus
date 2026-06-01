@@ -72,12 +72,14 @@ function resolveTargetId(
 }
 
 /**
- * Evaluate a binding's feedback: resolve the connection it reflects, apply
- * the offline marker if that connection is down, otherwise hand off to the
- * kind's registered rule. Returns the style override, or null.
+ * Evaluate a binding's feedback: apply the offline marker if the button's
+ * connection is down, otherwise hand off to the kind's registered rule.
+ * Returns the style override, or null.
  *
- * Only the FIRST step drives feedback — a multi-step button reflects the
- * state of its primary action.
+ * Feedback reflects the FIRST step whose action actually produces an override
+ * — so a multi-step button (e.g. "cut to input 2 + mute mic") still shows the
+ * tally even when the tally-relevant action isn't step[0] (audit B4). Each
+ * step is evaluated against its OWN pinned connection's variables.
  */
 export function evaluateFeedback(
   binding: DeckBinding,
@@ -86,10 +88,10 @@ export function evaluateFeedback(
   connectedByConnection?: ConnectedByConnection
 ): FeedbackOverride | null {
   const kind = binding.preset.kind;
-  const step = binding.preset.steps[0];
-  if (!step) return null;
-  const opts = step.options ?? {};
-  const pinned = step.connectionId ?? binding.connectionId;
+  const steps = binding.preset.steps;
+  if (steps.length === 0) return null;
+  // The button's primary pin drives the offline marker.
+  const pinned = steps[0].connectionId ?? binding.connectionId;
 
   // Offline marker takes priority over any kind rule. Two cases, and only
   // when connection status is actually available (real callers pass it; the
@@ -104,8 +106,20 @@ export function evaluateFeedback(
     if (connectedByConnection[pinned] === false) return OFFLINE_OVERRIDE;
   }
 
-  const targetId = resolveTargetId(kind, vars, connectionIdsByKind, pinned);
-  const scope = targetId ? vars[targetId] : undefined;
-  if (!scope) return null;
-  return feedbackFor(kind)?.(step.actionId, opts, scope) ?? null;
+  const rule = feedbackFor(kind);
+  if (!rule) return null;
+  // Scan steps; the first action that yields an override wins.
+  for (const step of steps) {
+    const targetId = resolveTargetId(
+      kind,
+      vars,
+      connectionIdsByKind,
+      step.connectionId ?? binding.connectionId
+    );
+    const scope = targetId ? vars[targetId] : undefined;
+    if (!scope) continue;
+    const override = rule(step.actionId, step.options ?? {}, scope);
+    if (override) return override;
+  }
+  return null;
 }
