@@ -3,16 +3,18 @@ import { connectionManager } from "./connection-manager";
 import { peekPreferences } from "@/lib/db/preferences";
 import type {
   ActionDefinition,
-  FeedbackDefinition,
   PresetDefinition,
   VariableDefinition,
 } from "./types";
 
 /**
  * Flat enumeration helpers over the kind registry's actions /
- * presets / variables / feedbacks. These are the surface every
- * editor (preset browser, surface configurator, automation triggers)
- * consumes.
+ * presets / variables. These are the surface every editor (preset
+ * browser, surface configurator, automation triggers) consumes.
+ *
+ * Stream Deck feedback is NOT declared here — it lives as imperative
+ * per-kind rules in `kinds/<kind>-feedback.ts` (registered via
+ * `registerFeedback`), evaluated by `streamdeck/feedback.ts`.
  *
  * Action and preset ids are namespaced as `<kind>:<id>` here so the
  * caller can use a single string key everywhere without juggling
@@ -36,12 +38,6 @@ export interface CatalogVariableEntry {
   globalId: string;
   kind: string;
   def: VariableDefinition;
-}
-
-export interface CatalogFeedbackEntry {
-  globalId: string;
-  kind: string;
-  def: FeedbackDefinition;
 }
 
 export function listActions(): CatalogActionEntry[] {
@@ -100,16 +96,6 @@ export function listVariables(): CatalogVariableEntry[] {
   for (const k of listKinds()) {
     for (const v of k.variables ?? []) {
       out.push({ globalId: `${k.kind}:${v.id}`, kind: k.kind, def: v });
-    }
-  }
-  return out;
-}
-
-export function listFeedbacks(): CatalogFeedbackEntry[] {
-  const out: CatalogFeedbackEntry[] = [];
-  for (const k of listKinds()) {
-    for (const f of k.feedbacks ?? []) {
-      out.push({ globalId: `${k.kind}:${f.id}`, kind: k.kind, def: f });
     }
   }
   return out;
@@ -312,20 +298,23 @@ function resolveConnectionId(
     const c = connectionManager.get(preferred);
     if (c && c.kind === kind) return preferred;
   }
-  // 2. The operator-chosen default for this kind — ONLY for non-deck
-  //    callers (ad-hoc browser action/preset runs + the legacy pages).
-  //    Decks are deliberately independent of the default (`allowDefault`
-  //    false): a deck button targets the connection it's PINNED to, so
-  //    changing the default never re-targets a deck.
+  // 2. Non-deck callers only (`allowDefault` true — ad-hoc browser
+  //    action/preset runs + legacy pages): the operator-chosen default for
+  //    this kind, else the first live connection. Convenience fallbacks.
   if (allowDefault) {
     const def = peekPreferences().defaultConnections?.[kind];
     if (def) {
       const c = connectionManager.get(def);
       if (c && c.kind === kind) return def;
     }
+    const matches = connectionManager.listByKind(kind);
+    return matches[0]?.id ?? null;
   }
-  // 3. Fall back to the first live connection of the kind (deterministic,
-  //    default-independent).
-  const matches = connectionManager.listByKind(kind);
-  return matches[0]?.id ?? null;
+  // 3. Deck context (`allowDefault` false): NO implicit fallback. A button
+  //    with no valid pin (unpinned / set to "None" / pinned to a deleted
+  //    connection) has NO target → return null so the press does nothing.
+  //    The key also shows the offline marker. The operator assigns a
+  //    connection (or "None") explicitly in the inspector — a deck never
+  //    silently fires at "some" instance.
+  return null;
 }

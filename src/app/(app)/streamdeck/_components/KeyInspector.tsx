@@ -165,6 +165,11 @@ export function KeyInspector({
   const patchPreset = (patch: Partial<typeof preset>) => {
     onChange({ ...binding, preset: { ...preset, ...patch } });
   };
+  // Mutate the binding's own fields (connectionId = the button's target
+  // connection). `undefined` = None → the key is unassigned (offline + inert).
+  const patchBinding = (patch: Partial<DeckBinding>) => {
+    onChange({ ...binding, ...patch });
+  };
   const patchStepOptions = (
     stepIdx: number,
     patch: Record<string, unknown>
@@ -283,6 +288,21 @@ export function KeyInspector({
         </button>
       </div>
 
+      {/* Connection — which device this button targets. "None" leaves the key
+          unassigned: it shows the offline marker and a press does nothing. */}
+      {connections.some((c) => c.kind === preset.kind) && (
+        <section className="space-y-2">
+          <Eyebrow tone="muted">Connection</Eyebrow>
+          <ConnectionSelect
+            kind={preset.kind}
+            connections={connections}
+            value={binding.connectionId}
+            fallbackId={undefined}
+            onChange={(v) => patchBinding({ connectionId: v })}
+          />
+        </section>
+      )}
+
       {/* Face customisation */}
       <section className="space-y-2">
         <Eyebrow tone="muted">Face</Eyebrow>
@@ -396,20 +416,16 @@ export function KeyInspector({
                   ×
                 </StepIconButton>
               </div>
-              {/* Per-action connection — shown whenever this action's
-                  kind has more than one instance, so the operator picks
-                  which machine THIS action hits. One instance = no
-                  choice, so it's hidden. */}
-              {stepInstances.length > 1 &&
+              {/* Per-action connection override — only for MULTI-STEP buttons
+                  with a multi-instance kind (cross-device chains). A single
+                  step inherits the button's Connection (set above), so its
+                  own picker would be redundant. */}
+              {preset.steps.length > 1 &&
+                stepInstances.length > 1 &&
                 (() => {
-                  // What an UNPINNED step resolves to at runtime: the
-                  // binding-level pin if it's a valid enabled instance of
-                  // this kind, else the FIRST enabled instance. NEVER the
-                  // per-kind default — decks are independent of it, so the
-                  // editor must show the real target, not the default.
-                  const firstEnabledId = stepInstances.find(
-                    (c) => c.enabled
-                  )?.id;
+                  // What an UNPINNED step inherits: the button's pin if it's a
+                  // valid enabled instance of this kind, else None (decks have
+                  // no implicit "first-of-kind" fallback — unpinned = offline).
                   const bindingPinValid =
                     !!binding.connectionId &&
                     stepInstances.some(
@@ -421,7 +437,7 @@ export function KeyInspector({
                       connections={connections}
                       value={step.connectionId}
                       fallbackId={
-                        bindingPinValid ? binding.connectionId : firstEnabledId
+                        bindingPinValid ? binding.connectionId : undefined
                       }
                       onChange={(v) => patchStep(idx, { connectionId: v })}
                     />

@@ -6,10 +6,10 @@ import type { DeviceKind } from "@/lib/core/types";
 
 /**
  * Guards the deck ↔ default decoupling: a deck press (allowDefault=false)
- * must fire against the PINNED connection (or first-of-kind), NEVER the
- * per-kind "default" — which is display-only. Changing the default must
- * not silently re-target a deck. Ad-hoc browser runs (allowDefault=true)
- * still use the default.
+ * fires ONLY against the explicitly PINNED connection. With no valid pin it
+ * fires NOTHING (an unassigned / "None" key is offline + inert) — never the
+ * per-kind "default" nor an implicit first-of-kind. Ad-hoc browser runs
+ * (allowDefault=true) still fall back to the default / first connection.
  */
 
 process.env.NEXUS_DATA_DIR = mkdtempSync(join(tmpdir(), "nexus-deck-"));
@@ -59,14 +59,33 @@ beforeEach(() => {
 });
 
 describe("deck connection resolution (default decoupling)", () => {
-  it("deck press (allowDefault=false) ignores the default → first-of-kind", async () => {
+  it("deck press (allowDefault=false) with NO pin fires nothing (unpinned = offline)", async () => {
     await runSteps([{ actionId: "noop" }], "dk", undefined, false);
-    expect(sends).toEqual(["c1"]); // NOT c2 (the default)
+    expect(sends).toEqual([]); // not c1, not the default c2 — unassigned = inert
+  });
+
+  it("deck press (allowDefault=false) fires the button's pinned connection", async () => {
+    await runSteps([{ actionId: "noop" }], "dk", "c1", false);
+    expect(sends).toEqual(["c1"]);
   });
 
   it("ad-hoc run (allowDefault=true) uses the default", async () => {
     await runSteps([{ actionId: "noop" }], "dk", undefined, true);
     expect(sends).toEqual(["c2"]);
+  });
+
+  it("ad-hoc run (allowDefault=true) with no default falls back to first-of-kind", async () => {
+    setPreferences({
+      connections: [
+        { id: "c1", kind: "dk", label: "c1", enabled: true, config: {} },
+        { id: "c2", kind: "dk", label: "c2", enabled: true, config: {} },
+      ],
+      defaultConnections: {}, // no default → must fall back to first-of-kind
+    });
+    connectionManager.reconcile(getPreferences().connections);
+    sends.length = 0;
+    await runSteps([{ actionId: "noop" }], "dk", undefined, true);
+    expect(sends).toEqual(["c1"]);
   });
 
   it("an explicit pin always wins, even with allowDefault=false", async () => {

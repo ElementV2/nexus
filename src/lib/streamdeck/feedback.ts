@@ -49,10 +49,13 @@ export type ConnectedByConnection = Record<string, boolean>;
  * drives the legacy single-instance pages):
  *   1. The step's pin, then the binding's pin (the operator chose
  *      "this key controls OBS #2").
- *   2. Fallback ONLY for an unpinned legacy binding: the first connection
- *      of that kind with published variables (i.e. the live one), NOT the
- *      first in config order — otherwise a broken instance at index 0
- *      would shadow the working one the key actually reflects.
+ *   2. Fallback for an unpinned legacy binding: the first connection of that
+ *      kind with published variables (i.e. the live one), so a broken
+ *      instance at index 0 doesn't shadow the working one the key reflects.
+ *   3. If NONE has vars yet (e.g. a device that's been down since boot),
+ *      fall back to the first connection in config order — the same one the
+ *      press targets — so the offline marker can still flag it instead of
+ *      the key looking like it just has "no feedback".
  */
 function resolveTargetId(
   kind: string,
@@ -65,7 +68,7 @@ function resolveTargetId(
   for (const id of ids) {
     if (vars[id]) return id;
   }
-  return undefined;
+  return ids[0];
 }
 
 /**
@@ -87,20 +90,21 @@ export function evaluateFeedback(
   if (!step) return null;
   const opts = step.options ?? {};
   const pinned = step.connectionId ?? binding.connectionId;
-  const targetId = resolveTargetId(kind, vars, connectionIdsByKind, pinned);
 
-  // Connection-down marker takes priority and short-circuits the kind rule:
-  // a dropped link makes any tally stale, and the operator needs to SEE the
-  // key has no connection. Only flag when we actually know this connection's
-  // status AND it reports not-connected — never guess "offline" otherwise.
-  if (
-    connectedByConnection &&
-    targetId &&
-    connectedByConnection[targetId] === false
-  ) {
-    return OFFLINE_OVERRIDE;
+  // Offline marker takes priority over any kind rule. Two cases, and only
+  // when connection status is actually available (real callers pass it; the
+  // feedback-rule unit tests don't, so they still exercise the tally paths
+  // below via the vars-based resolution):
+  //   • UNPINNED / "None" — the button isn't assigned to any device, so it's
+  //     "not plugged in" → offline (and the press does nothing, see catalog).
+  //   • Pinned but the connection reports not-connected → offline (stale
+  //     tally would otherwise mislead).
+  if (connectedByConnection) {
+    if (!pinned) return OFFLINE_OVERRIDE;
+    if (connectedByConnection[pinned] === false) return OFFLINE_OVERRIDE;
   }
 
+  const targetId = resolveTargetId(kind, vars, connectionIdsByKind, pinned);
   const scope = targetId ? vars[targetId] : undefined;
   if (!scope) return null;
   return feedbackFor(kind)?.(step.actionId, opts, scope) ?? null;

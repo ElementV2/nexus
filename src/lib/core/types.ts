@@ -217,24 +217,6 @@ export interface VariableDefinition {
 }
 
 /**
- * Feedback a kind exposes. A feedback evaluates against the current
- * variable scope and returns style overrides for the button it's
- * attached to (color/text/icon). Boolean feedbacks are the simplest:
- * "input N is on PGM" → button glows red.
- *
- * Phase 1 declaration only — the evaluator engine ships later.
- */
-export interface FeedbackDefinition {
-  id: string;
-  label: string;
-  description?: string;
-  options?: ActionOption[];
-  /** "boolean" → returns true/false. "advanced" → returns a partial
-   *  style override. */
-  type: "boolean" | "advanced";
-}
-
-/**
  * Pre-baked button template a kind ships. Drag-droppable in the
  * Stream Deck editor (and any other surface). Each preset bundles
  * one or more action ids with frozen option values + a default
@@ -315,9 +297,6 @@ export interface DeviceKind {
   /** Variables this kind publishes — see VariableDefinition for the
    *  Phase 1 declaration-only constraint. */
   variables?: VariableDefinition[];
-
-  /** Feedbacks this kind exposes — see FeedbackDefinition. */
-  feedbacks?: FeedbackDefinition[];
 
   /** Drag-droppable preset tiles for the browser. */
   presets?: PresetDefinition[];

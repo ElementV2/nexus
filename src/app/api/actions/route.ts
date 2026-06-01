@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
-import { listActions, listFeedbacks, listVariables } from "@/lib/core/catalog";
+import { listActions, listVariables } from "@/lib/core/catalog";
 import { ensureBooted } from "@/lib/core/boot";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Catalog of every action, variable, and feedback registered across
- * all device kinds. Single endpoint so the action editor / preset
- * editor / surface configurator only have to fetch once and filter
- * client-side by kind.
+ * Catalog of every action and variable registered across all device
+ * kinds. Single endpoint so the action editor / preset editor / surface
+ * configurator only have to fetch once and filter client-side by kind.
+ * (Stream Deck feedback is imperative per-kind, not declared here.)
  *
  * Notes:
  *   • `toCommand` is stripped — it's a function and can't cross JSON.
@@ -34,15 +34,6 @@ export async function GET() {
       label: e.def.label,
       description: e.def.description,
       hint: e.def.hint,
-    })),
-    feedbacks: listFeedbacks().map((e) => ({
-      globalId: e.globalId,
-      kind: e.kind,
-      id: e.def.id,
-      label: e.def.label,
-      description: e.def.description,
-      options: e.def.options ?? [],
-      type: e.def.type,
     })),
   });
 }

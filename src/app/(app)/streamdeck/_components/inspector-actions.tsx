@@ -31,7 +31,11 @@ export function ConnectionSelect({
   onChange: (v: string | undefined) => void;
 }) {
   const instances = connections.filter((c) => c.kind === kind);
-  const selected = value ?? fallbackId ?? instances[0]?.id ?? "";
+  // "None" = no connection. At binding level (no fallback) it means the key
+  // is unassigned → offline + inert. At step level (a fallback binding pin
+  // exists) it just clears this step's override → inherit the button's pin.
+  const NONE = "__none__";
+  const selected = value ?? fallbackId ?? NONE;
   return (
     <div className="flex items-center gap-2">
       <span
@@ -52,9 +56,9 @@ export function ConnectionSelect({
         value={selected}
         onChange={(e) => {
           const picked = e.target.value;
-          // Picking the fallback row → store undefined (keep following
-          // the default / button target). Otherwise pin the id.
-          onChange(picked === fallbackId ? undefined : picked);
+          // "None" or the inherited fallback row → store undefined (no
+          // explicit pin here). Otherwise pin the chosen id.
+          onChange(picked === NONE || picked === fallbackId ? undefined : picked);
         }}
         style={{
           flex: 1,
@@ -68,6 +72,7 @@ export function ConnectionSelect({
           outline: "none",
         }}
       >
+        <option value={NONE}>None — offline</option>
         {instances.map((c) => (
           <option key={c.id} value={c.id}>
             {c.label}
