@@ -60,6 +60,9 @@ type StreamDeck = {
   ): Promise<void>;
   clearKey(keyIndex: number): Promise<void>;
   clearPanel(): Promise<void>;
+  /** Restore the firmware's standby logo screen — the "plugged in, nothing
+   *  driving it" look. Present on @elgato-stream-deck/node v7. */
+  resetToLogo(): Promise<void>;
   setBrightness(percent: number): Promise<void>;
   close(): Promise<void>;
   on(event: "down" | "up", cb: (control: ControlDef) => void): void;
@@ -132,6 +135,11 @@ let lastLoadError: string | null = null;
  *  collapses it into one HID write. Larger windows feel laggy on
  *  manual edits; smaller ones let glitches through. */
 const RENDER_DEBOUNCE_MS = 60;
+
+/** How long a failed-press error flash stays lit before the key reverts
+ *  to its normal face. Long enough to be unmissable at arm's length, short
+ *  enough not to mask the live state for long. (audit N2) */
+const FLASH_ERROR_MS = 700;
 
 /** TTL for the cached `listDevices()` enumeration (see usage). */
 const LIST_TTL_MS = 1000;
@@ -228,6 +236,11 @@ class DriverImpl {
    *  blocks the event loop. Invalidated on hotplug + satellite change. */
   private devicesCache: { ts: number; list: DeviceSummary[] } | null = null;
   private devicesChangedTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Active error-flash revert timers, keyed by `devicePath:keyIndex`, so a
+   *  second failed press on the same key resets the window instead of
+   *  reverting early. */
+  private flashTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   subscribe(cb: DriverListener): () => void {
     this.listeners.add(cb);
@@ -658,6 +671,41 @@ class DriverImpl {
     }
   }
 
+  /**
+   * Restore EVERY connected deck to the firmware standby logo and release
+   * the local handles. Called on server shutdown so a closed server doesn't
+   * leave stale, now-dead button images lit — the operator sees the same
+   * idle Elgato logo as a freshly-plugged deck that nothing is driving.
+   * Local decks use the SDK's `resetToLogo` (clearPanel as fallback);
+   * satellites are told to do the same on their machine.
+   */
+  async resetAll(): Promise<void> {
+    // Cancel in-flight debounced renders so nothing redraws over the logo.
+    for (const { timer } of this.pendingRenders.values()) clearTimeout(timer);
+    this.pendingRenders.clear();
+
+    const handles = [...this.openHandles.entries()];
+    await Promise.all(
+      handles.map(async ([path, deck]) => {
+        this.invalidateFaceCache(path);
+        try {
+          await deck.resetToLogo();
+        } catch {
+          // Model/SDK without resetToLogo → at least blank the dead buttons.
+          try {
+            await deck.clearPanel();
+          } catch {
+            /* device already gone */
+          }
+        }
+        await this.close(path);
+      })
+    );
+
+    // Tell every satellite to reset its own decks to the logo as well.
+    satelliteRegistry.resetAllDecks();
+  }
+
   async setBrightness(devicePath: string, percent: number): Promise<void> {
     if (devicePath.startsWith("satellite:")) {
       const serial = devicePath.slice("satellite:".length);
@@ -674,6 +722,52 @@ class DriverImpl {
       await deck.setBrightness(Math.max(0, Math.min(100, percent | 0)));
     } catch {
       /* ignore */
+    }
+  }
+
+  /**
+   * Flash a key RED to signal that the press it just ran FAILED (a step
+   * errored / timed out / hit a disconnected device). On a control surface
+   * a press that silently no-ops is the worst failure mode — the operator
+   * must SEE it didn't take. Resolves the serial to its device path(s)
+   * (local + any satellites driving the same serial), lights a red
+   * override over the binding's face, then reverts after FLASH_ERROR_MS.
+   * Best-effort + fire-and-forget; a tally change mid-flash may revert it
+   * early, which is fine. (audit N2)
+   */
+  async flashKeyError(
+    serial: string,
+    keyIndex: number,
+    binding: DeckBinding | undefined
+  ): Promise<void> {
+    const devices = await this.listDevices();
+    const paths = devices
+      .filter((d) => d.serialNumber === serial)
+      .map((d) => d.path);
+    if (paths.length === 0) return;
+    const errorOverride = {
+      bgcolor: "#ff3b30",
+      fgcolor: "#ffffff",
+      badge: { color: "#ffffff", symbol: "!" },
+    };
+    for (const path of paths) {
+      const ck = `${path}:${keyIndex}`;
+      // Light the error face now. renderKey change-detects on the resolved
+      // face signature, so the red (which differs from the normal face)
+      // always draws.
+      this.renderKey(path, keyIndex, binding, errorOverride);
+      const prev = this.flashTimers.get(ck);
+      if (prev) clearTimeout(prev);
+      this.flashTimers.set(
+        ck,
+        setTimeout(() => {
+          this.flashTimers.delete(ck);
+          // Revert to the binding's normal face (no override). The feedback
+          // coordinator re-asserts the live override on the next variable
+          // tick anyway, so this is just the immediate revert.
+          this.renderKey(path, keyIndex, binding, undefined);
+        }, FLASH_ERROR_MS)
+      );
     }
   }
 
@@ -722,6 +816,18 @@ class DriverImpl {
     devicePath: string,
     bindings: Record<number, DeckBinding>
   ): Promise<void> {
+    // A "Load to deck" must repaint EVERY key unconditionally. Clear the
+    // per-key face cache first: change-detection (`lastFace`) otherwise
+    // SKIPS a key whose resolved face matches what we last drew — but the
+    // physical key may actually be blank because another app (e.g. the
+    // Elgato Stream Deck software) grabbed + reset the device, or it was
+    // re-plugged. Symptom: a loaded layout only shows the keys that have
+    // feedback (their override changes the signature when it fires, forcing
+    // a redraw) or the ones the operator presses, while plain keys stay
+    // dark. Invalidating up-front guarantees a full repaint. Covers the
+    // satellite path below too (same cache, `satellite:<serial>:<key>`).
+    this.invalidateFaceCache(devicePath);
+
     // Satellite path: we don't have a HID handle here — look up the
     // device's key count from the satellite registry instead, then
     // forward a render per key. The satellite agent applies them.
@@ -740,6 +846,14 @@ class DriverImpl {
 
     const mods = await loadModules();
     if (!mods) return;
+    // Drop any existing handle before reopening. A handle that another app
+    // (the Elgato software) stole and then released goes stale — writing to
+    // it silently no-ops the key, leaving it blank. `close()` evicts the
+    // dead handle (and re-clears the face cache); `open()` then builds a
+    // fresh, writable one. pushLayout is an explicit, non-hot action, so the
+    // extra reopen is cheap insurance against the "loaded layout won't
+    // draw after another app touched the deck" bug.
+    await this.close(devicePath);
     const deck = await this.open(devicePath);
     if (!deck) return;
     // v7 publishes a CONTROLS array with one entry per physical
@@ -781,6 +895,8 @@ class DriverImpl {
     if (this.devicesChangedTimer) clearTimeout(this.devicesChangedTimer);
     this.devicesChangedTimer = null;
     this.devicesCache = null;
+    for (const t of this.flashTimers.values()) clearTimeout(t);
+    this.flashTimers.clear();
   }
 }
 

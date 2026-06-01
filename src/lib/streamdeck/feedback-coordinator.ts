@@ -23,6 +23,7 @@ import { evaluateFeedback, type VarsByConnection } from "./feedback";
 
 class CoordinatorImpl {
   private unsubVariables: (() => void) | null = null;
+  private unsubDevices: (() => void) | null = null;
   private booted = false;
   /** Single-flight recompute flag: many `set()` calls in the same
    *  tick batch into one walk. Without this, a vMix poll that
@@ -44,6 +45,18 @@ class CoordinatorImpl {
         void this.recompute();
       });
     });
+    // Re-render every paired deck when the device set changes — a deck is
+    // plugged in, or a satellite (re)announces. Without this the coordinator
+    // only ever redrew on a VARIABLE change, so a deck connected after boot
+    // (or already plugged in at a fresh server start) stayed on the standby
+    // logo until the first tally tick instead of showing its last page.
+    this.unsubDevices = streamdeckDriver.subscribe((ev) => {
+      if (ev.type === "devices-changed") this.refresh();
+    });
+    // Initial paint: push the persisted layouts to whatever is already
+    // connected, so launching the server restores each deck's last page
+    // immediately (the device-list enumeration happens inside recompute).
+    this.refresh();
   }
 
   /**
@@ -102,6 +115,8 @@ class CoordinatorImpl {
   dispose(): void {
     this.unsubVariables?.();
     this.unsubVariables = null;
+    this.unsubDevices?.();
+    this.unsubDevices = null;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
     this.booted = false;

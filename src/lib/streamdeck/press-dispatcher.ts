@@ -1,5 +1,5 @@
 import { streamdeckDriver } from "./driver";
-import { getStreamdeckStore } from "@/lib/db/streamdeck";
+import { peekStreamdeckStore } from "@/lib/db/streamdeck";
 import { runSteps } from "@/lib/core/catalog";
 import { hmrSingleton } from "@/lib/utils/hmr-singleton";
 
@@ -32,7 +32,10 @@ class PressDispatcherImpl {
       // re-plug). Same lookup as the SSE forwarder used to do, but
       // here it runs at most once per press regardless of how many
       // SSE consumers are connected.
-      const store = getStreamdeckStore();
+      // Read-only peek — no per-press structuredClone of every layout
+      // (the dispatcher only reads here). Presses are human-rate, but
+      // the clone was a needless allocation on the press critical path.
+      const store = peekStreamdeckStore();
       const serial = event.serialNumber;
       const layout = store.layouts.find((l) =>
         l.deviceSerials.includes(serial)
@@ -46,16 +49,39 @@ class PressDispatcherImpl {
       // it's pinned to (step pin → binding pin → first of kind). It must
       // never follow the per-kind "default" — that's display-only, and a
       // deck must not silently re-target when the operator changes it.
+      const keyIndex = event.keyIndex;
       void runSteps(
         binding.preset.steps,
         binding.preset.kind,
         binding.connectionId,
         false
-      ).catch(() => {
-        /* runSteps already shapes its own error per step; nothing
-           to do at the dispatcher level — driver / SSE error
-           channel will surface broken commands. */
-      });
+      )
+        .then(({ results }) => {
+          // Surface failed steps. A deck press that silently no-ops
+          // (device down / not connected / broker rejected) is the worst
+          // failure mode for a control surface: the operator presses and
+          // nothing happens, with zero feedback. `runSteps` returns the
+          // per-step outcome but the previous code discarded it entirely.
+          // Log which step failed and why so a broken button is visible in
+          // the server logs instead of vanishing.
+          const failed = results.filter((r) => !r.ok);
+          if (failed.length > 0) {
+            console.warn(
+              `[press-dispatcher] key ${serial}#${keyIndex}: ` +
+                `${failed.length}/${results.length} step(s) failed — ` +
+                failed.map((r) => r.error ?? "unknown").join("; ")
+            );
+            // Flash the key red so the operator SEES the press didn't take
+            // (device down / step timed out) instead of assuming success.
+            void streamdeckDriver.flashKeyError(serial, keyIndex, binding);
+          }
+        })
+        .catch((err) => {
+          console.warn(
+            `[press-dispatcher] key ${serial}#${keyIndex}: run threw — ` +
+              (err instanceof Error ? err.message : String(err))
+          );
+        });
     });
   }
 

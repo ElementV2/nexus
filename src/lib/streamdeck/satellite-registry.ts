@@ -78,6 +78,7 @@ export type SatelliteOutMessage =
     }
   | { type: "clear"; serial: string; keyIndex: number }
   | { type: "clear-panel"; serial: string }
+  | { type: "reset"; serial: string }
   | { type: "brightness"; serial: string; percent: number }
   | { type: "hello" };
 
@@ -235,6 +236,25 @@ class SatelliteRegistryImpl {
   /** Returns the satellite owning a given deck serial, if any. */
   ownerOf(serial: string): string | undefined {
     return this.serialOwner.get(serial);
+  }
+
+  /** Tell every connected satellite to reset ALL its decks to the firmware
+   *  logo. Called on server shutdown so remote decks don't keep showing
+   *  stale buttons after the server driving them is gone. */
+  resetAllDecks(): void {
+    for (const sat of this.satellites.values()) {
+      for (const d of sat.devices) {
+        this.send({ type: "reset", serial: d.serial });
+      }
+    }
+  }
+
+  /** Deck serials currently owned by a satellite (empty if unknown). Lets
+   *  the SSE close handler invalidate the driver's per-key face cache for
+   *  each of a departing satellite's decks before it's removed. */
+  serialsOf(id: string): string[] {
+    const entry = this.satellites.get(id);
+    return entry ? entry.devices.map((d) => d.serial) : [];
   }
 
   /**

@@ -26,7 +26,8 @@ vi.mock("@/lib/streamdeck/driver", () => ({
   },
 }));
 vi.mock("@/lib/db/streamdeck", () => ({
-  getStreamdeckStore: () => ({ layouts: m.layouts }),
+  // The dispatcher reads via the no-clone hot-path accessor.
+  peekStreamdeckStore: () => ({ layouts: m.layouts }),
 }));
 vi.mock("@/lib/core/catalog", () => ({
   runSteps: (...args: unknown[]) => {

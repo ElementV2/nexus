@@ -43,10 +43,19 @@ export async function GET(req: NextRequest) {
         // open editors' device lists right away (don't wait ~75 s for the
         // stale-reaper). `removeIfDisconnected` no-ops if a newer SSE
         // already re-attached, so a transient blip + reconnect is safe.
+        // Capture the serials BEFORE removal (the device list is gone after).
+        const serials = satelliteRegistry.serialsOf(id);
         if (satelliteRegistry.removeIfDisconnected(id)) {
-          void import("@/lib/streamdeck/driver").then(({ streamdeckDriver }) =>
-            streamdeckDriver.notifyDevicesChanged()
-          );
+          void import("@/lib/streamdeck/driver").then(({ streamdeckDriver }) => {
+            // Drop the departing decks' cached key faces — otherwise the
+            // `satellite:<serial>:<key>` entries linger in the driver's
+            // `lastFace` map forever (it's otherwise only invalidated on a
+            // re-announce). A reconnect re-renders every key anyway.
+            for (const serial of serials) {
+              streamdeckDriver.invalidateSatellite(serial);
+            }
+            streamdeckDriver.notifyDevicesChanged();
+          });
         }
       };
     },

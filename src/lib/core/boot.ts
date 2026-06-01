@@ -66,6 +66,37 @@ export function ensureBooted(): void {
   void import("@/lib/streamdeck/press-dispatcher").then((m) => {
     m.pressDispatcher.start();
   });
+
+  registerShutdownReset();
+}
+
+const SHUTDOWN_KEY = "__nexus_shutdown_reset_hook__";
+
+/**
+ * Reset connected Stream Decks to the firmware standby logo on a graceful
+ * exit (dev `Ctrl+C` → SIGINT, or any SIGTERM) so a closed server doesn't
+ * leave stale, dead buttons lit. Guarded on `globalThis` so a Next dev HMR
+ * cycle doesn't stack duplicate process listeners.
+ *
+ * The packaged launcher force-kills the server on Windows (`taskkill /F` —
+ * no graceful-signal window), so it instead calls
+ * `POST /api/streamdeck/shutdown` right before the kill. This handler is the
+ * dev / Unix-signal counterpart.
+ */
+function registerShutdownReset(): void {
+  const holder = globalThis as unknown as Record<string, unknown>;
+  if (holder[SHUTDOWN_KEY]) return;
+  holder[SHUTDOWN_KEY] = true;
+  const handler = () => {
+    void import("@/lib/streamdeck/driver")
+      .then(({ streamdeckDriver }) => streamdeckDriver.resetAll())
+      .catch(() => {})
+      .finally(() => process.exit(0));
+    // Failsafe: never hang the exit if the reset stalls (dead device, etc.).
+    setTimeout(() => process.exit(0), 1500).unref?.();
+  };
+  process.once("SIGINT", handler);
+  process.once("SIGTERM", handler);
 }
 
 /**
