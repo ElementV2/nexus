@@ -53,10 +53,37 @@ class CoordinatorImpl {
     this.unsubDevices = streamdeckDriver.subscribe((ev) => {
       if (ev.type === "devices-changed") this.refresh();
     });
-    // Initial paint: push the persisted layouts to whatever is already
-    // connected, so launching the server restores each deck's last page
-    // immediately (the device-list enumeration happens inside recompute).
-    this.refresh();
+    // Initial paint, RETRIED: push the persisted layouts onto whatever is
+    // connected so launching the server restores each deck's last page
+    // headless — without opening the web UI or waiting for a variable tick.
+    // A single attempt wasn't enough: a deck isn't always enumerable the
+    // instant the server boots (the previous process just released it), and
+    // an offline device produces no variable updates to drive a later
+    // recompute, so the deck stayed on the logo until a page was opened.
+    void this.bootRender(0);
+  }
+
+  /** Keep trying to render the persisted layouts until at least one deck is
+   *  actually connected, then do a full recompute. Gives up after ~60s; a
+   *  deck connected later is picked up by the devices-changed listener. The
+   *  `booted` guard makes a stray late timer a no-op after dispose. */
+  private async bootRender(attempt: number): Promise<void> {
+    if (!this.booted) return;
+    try {
+      const status = await streamdeckDriver.status();
+      if (status.state === "ready") {
+        const devices = await streamdeckDriver.listDevices();
+        if (devices.length > 0) {
+          await this.recompute();
+          return; // decks are up and painted — variable/hotplug events take over
+        }
+      }
+    } catch {
+      /* transient (HID still enumerating / optional deps loading) — retry */
+    }
+    if (attempt < 40) {
+      setTimeout(() => void this.bootRender(attempt + 1), 1500);
+    }
   }
 
   /**
