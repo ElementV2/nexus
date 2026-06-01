@@ -53,6 +53,24 @@ export function useVariables(): VariablesByConnection {
       });
       return;
     }
+    // Coalesced batch (the server buffers one microtask of changes into a
+    // single frame) — apply them in ONE state update so a 30-variable vMix
+    // poll triggers one re-render, not 30.
+    if (msg.type === "changes" && Array.isArray(msg.entries)) {
+      const entries = msg.entries;
+      setVars((cur) => {
+        const next: VariablesByConnection = { ...cur };
+        for (const entry of entries) {
+          next[entry.connectionId] = {
+            ...(next[entry.connectionId] ?? {}),
+            [entry.varId]: entry.value,
+          };
+        }
+        return next;
+      });
+      return;
+    }
+    // Legacy single-change frame (kept for safety; the route now coalesces).
     if (msg.type === "change" && msg.connectionId && msg.varId) {
       setVars((cur) => ({
         ...cur,

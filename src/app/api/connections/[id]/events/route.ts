@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { connectionManager } from "@/lib/core/connection-manager";
 import { ensureBooted } from "@/lib/core/boot";
-import { sseResponse } from "@/lib/sse";
+import { sseResponse, type SseHandle } from "@/lib/sse";
 
 export const dynamic = "force-dynamic";
 
@@ -32,15 +32,23 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
     });
   }
 
+  // Re-hydrate after a backpressure drop (audit N5): a slow client that lost
+  // a discrete event (scene-changed, replay-saved…) gets the full snapshot +
+  // status again on the next successful frame, instead of staying desynced.
+  const hydrate = (h: SseHandle) => {
+    h.send({ type: "__status", status: connection.broker.getStatus() });
+    const snapshot = connection.broker.getSnapshot();
+    if (snapshot !== null && snapshot !== undefined) {
+      h.send({ type: "__snapshot", payload: snapshot });
+    }
+  };
+
   return sseResponse({
+    resync: hydrate,
     start(h) {
       // Hydrate the new subscriber with what we already know — current
       // status + last cached snapshot — before live events arrive.
-      h.send({ type: "__status", status: connection.broker.getStatus() });
-      const snapshot = connection.broker.getSnapshot();
-      if (snapshot !== null && snapshot !== undefined) {
-        h.send({ type: "__snapshot", payload: snapshot });
-      }
+      hydrate(h);
       return connection.broker.subscribe((event) => h.send(event));
     },
   });
