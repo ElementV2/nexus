@@ -20,9 +20,12 @@
  */
 
 import type { Canvas } from "@napi-rs/canvas";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { DeckBinding } from "@/lib/db/streamdeck";
 import { hmrSingleton } from "@/lib/utils/hmr-singleton";
 import { satelliteRegistry } from "./satellite-registry";
+import { drawKeyFace, KEY_FONT_FAMILY, type FaceCtx } from "./key-face";
 
 // The @elgato-stream-deck/node v7 type surface is rich; we only need
 // the slices the driver actually touches. Importing as types keeps
@@ -129,17 +132,49 @@ interface LoadedModules {
 
 let loadPromise: Promise<LoadedModules | null> | null = null;
 let lastLoadError: string | null = null;
+let fontRegistered = false;
+
+/**
+ * Register the bundled key-label font (Barlow Semi Condensed) with the
+ * canvas engine so `composeKeyImage` paints the SAME face the browser
+ * editor shows. Idempotent. The TTF ships in `public/fonts` — copied
+ * next to the standalone server (`next-server/public`) by the launcher's
+ * electron-builder config — so it resolves off `process.cwd()` in both
+ * dev and the packaged build. If it can't be found we don't throw: the
+ * canvas falls back to its default sans-serif and keys still render.
+ */
+function registerKeyFont(canvas: LoadedModules["canvas"]): void {
+  if (fontRegistered) return;
+  fontRegistered = true; // one attempt — don't re-stat on every reload
+  // `GlobalFonts` is a value export of @napi-rs/canvas but isn't surfaced
+  // on the dynamic-import namespace type here — reach it through a narrow
+  // cast, and bail gracefully if the build's canvas build lacks it.
+  const gf = (
+    canvas as unknown as {
+      GlobalFonts?: { registerFromPath(path: string, name?: string): boolean };
+    }
+  ).GlobalFonts;
+  if (!gf) return;
+  const candidates = [
+    join(process.cwd(), "public", "fonts", "BarlowSemiCondensed-Medium.ttf"),
+    join(process.cwd(), "fonts", "BarlowSemiCondensed-Medium.ttf"),
+  ];
+  for (const path of candidates) {
+    try {
+      if (!existsSync(path)) continue;
+      gf.registerFromPath(path, KEY_FONT_FAMILY);
+      return;
+    } catch {
+      /* keep trying the next candidate */
+    }
+  }
+}
 
 /** Per-key render coalescing window. 60 ms catches a typical
  *  edit → save echo → variable change burst (~30-50 ms span) and
  *  collapses it into one HID write. Larger windows feel laggy on
  *  manual edits; smaller ones let glitches through. */
 const RENDER_DEBOUNCE_MS = 60;
-
-/** How long a failed-press error flash stays lit before the key reverts
- *  to its normal face. Long enough to be unmissable at arm's length, short
- *  enough not to mask the live state for long. (audit N2) */
-const FLASH_ERROR_MS = 700;
 
 /** TTL for the cached `listDevices()` enumeration (see usage). */
 const LIST_TTL_MS = 1000;
@@ -150,6 +185,7 @@ async function loadModules(): Promise<LoadedModules | null> {
     try {
       const streamdeck = await import("@elgato-stream-deck/node");
       const canvas = await import("@napi-rs/canvas");
+      registerKeyFont(canvas);
       // usb is optional even within the driver — without it we lose
       // hotplug but the rest still works. Wrap in its own try/catch.
       let usb: typeof import("usb") | undefined;
@@ -210,7 +246,7 @@ class DriverImpl {
             bgcolor?: string;
             fgcolor?: string;
             text?: string;
-            badge?: { color: string; symbol?: string };
+            badge?: { color: string; symbol?: string; icon?: "offline" };
           }
         | undefined;
       timer: ReturnType<typeof setTimeout>;
@@ -236,11 +272,6 @@ class DriverImpl {
    *  blocks the event loop. Invalidated on hotplug + satellite change. */
   private devicesCache: { ts: number; list: DeviceSummary[] } | null = null;
   private devicesChangedTimer: ReturnType<typeof setTimeout> | null = null;
-
-  /** Active error-flash revert timers, keyed by `devicePath:keyIndex`, so a
-   *  second failed press on the same key resets the window instead of
-   *  reverting early. */
-  private flashTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   subscribe(cb: DriverListener): () => void {
     this.listeners.add(cb);
@@ -541,7 +572,7 @@ class DriverImpl {
       bgcolor?: string;
       fgcolor?: string;
       text?: string;
-      badge?: { color: string; symbol?: string };
+      badge?: { color: string; symbol?: string; icon?: "offline" };
     }
   ): void {
     // Satellite-owned devices skip the local debounce + HID write
@@ -605,7 +636,7 @@ class DriverImpl {
           bgcolor?: string;
           fgcolor?: string;
           text?: string;
-          badge?: { color: string; symbol?: string };
+          badge?: { color: string; symbol?: string; icon?: "offline" };
         }
       | undefined
   ): Promise<void> {
@@ -722,52 +753,6 @@ class DriverImpl {
       await deck.setBrightness(Math.max(0, Math.min(100, percent | 0)));
     } catch {
       /* ignore */
-    }
-  }
-
-  /**
-   * Flash a key RED to signal that the press it just ran FAILED (a step
-   * errored / timed out / hit a disconnected device). On a control surface
-   * a press that silently no-ops is the worst failure mode — the operator
-   * must SEE it didn't take. Resolves the serial to its device path(s)
-   * (local + any satellites driving the same serial), lights a red
-   * override over the binding's face, then reverts after FLASH_ERROR_MS.
-   * Best-effort + fire-and-forget; a tally change mid-flash may revert it
-   * early, which is fine. (audit N2)
-   */
-  async flashKeyError(
-    serial: string,
-    keyIndex: number,
-    binding: DeckBinding | undefined
-  ): Promise<void> {
-    const devices = await this.listDevices();
-    const paths = devices
-      .filter((d) => d.serialNumber === serial)
-      .map((d) => d.path);
-    if (paths.length === 0) return;
-    const errorOverride = {
-      bgcolor: "#ff3b30",
-      fgcolor: "#ffffff",
-      badge: { color: "#ffffff", symbol: "!" },
-    };
-    for (const path of paths) {
-      const ck = `${path}:${keyIndex}`;
-      // Light the error face now. renderKey change-detects on the resolved
-      // face signature, so the red (which differs from the normal face)
-      // always draws.
-      this.renderKey(path, keyIndex, binding, errorOverride);
-      const prev = this.flashTimers.get(ck);
-      if (prev) clearTimeout(prev);
-      this.flashTimers.set(
-        ck,
-        setTimeout(() => {
-          this.flashTimers.delete(ck);
-          // Revert to the binding's normal face (no override). The feedback
-          // coordinator re-asserts the live override on the next variable
-          // tick anyway, so this is just the immediate revert.
-          this.renderKey(path, keyIndex, binding, undefined);
-        }, FLASH_ERROR_MS)
-      );
     }
   }
 
@@ -895,8 +880,6 @@ class DriverImpl {
     if (this.devicesChangedTimer) clearTimeout(this.devicesChangedTimer);
     this.devicesChangedTimer = null;
     this.devicesCache = null;
-    for (const t of this.flashTimers.values()) clearTimeout(t);
-    this.flashTimers.clear();
   }
 }
 
@@ -934,13 +917,10 @@ function deriveDims(deck: StreamDeck): {
 
 /**
  * Render a key face as a raw RGB buffer the Stream Deck SDK can write
- * directly. Mirrors the look of the preset tiles in the browser:
- *   • Solid bg color (square).
- *   • Centered text — auto-shrunk to fit, dark stroke outline for
- *     contrast on any bg colour, larger base size than before so the
- *     label is readable at arm's length.
- *   • Optional badge dot top-right (active/state indicator).
- *   • Tiny `kind` watermark bottom-right.
+ * directly. The face itself (bg + auto-fit label + badge) is painted by
+ * the shared `drawKeyFace` so the metal matches the browser editor and
+ * the satellite exactly; this function only owns the canvas allocation
+ * and the RGBA→RGB pixel extraction.
  *
  * The output is RGB (3 bytes per pixel) because that's what
  * `fillKeyBuffer({format: "rgb"})` expects — slightly more efficient
@@ -956,7 +936,7 @@ function faceSignature(
     bgcolor?: string;
     fgcolor?: string;
     text?: string;
-    badge?: { color: string; symbol?: string };
+    badge?: { color: string; symbol?: string; icon?: "offline" };
   }
 ): string {
   if (!binding) return "∅";
@@ -964,7 +944,7 @@ function faceSignature(
   const fg = override?.fgcolor ?? binding.preset.fgcolor ?? "";
   const face = override?.text ?? binding.preset.text ?? binding.preset.label ?? "";
   const badge = override?.badge
-    ? `${override.badge.color}|${override.badge.symbol ?? ""}`
+    ? `${override.badge.color}|${override.badge.symbol ?? ""}|${override.badge.icon ?? ""}`
     : "";
   return `${bg}|${fg}|${face}|${badge}`;
 }
@@ -977,7 +957,7 @@ function composeKeyImage(
     bgcolor?: string;
     fgcolor?: string;
     text?: string;
-    badge?: { color: string; symbol?: string };
+    badge?: { color: string; symbol?: string; icon?: "offline" };
   }
 ): Buffer {
   const canvas: Canvas = canvasModule.createCanvas(size, size);
@@ -987,34 +967,16 @@ function composeKeyImage(
   const fg = override?.fgcolor ?? binding.preset.fgcolor ?? "#ffffff";
   const face = override?.text ?? binding.preset.text ?? binding.preset.label ?? "";
 
-  // Background
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, size, size);
-
-  // Main label — split by explicit newlines first, then auto-shrink
-  // each line so the longest one fits within the safe area.
-  drawAutoFitText(ctx, face, size, fg);
-
-  // Badge dot (active indicator)
-  if (override?.badge) {
-    const r = Math.max(5, Math.round(size * 0.06));
-    const pad = Math.round(size * 0.08);
-    ctx.beginPath();
-    ctx.arc(size - pad, pad, r, 0, Math.PI * 2);
-    ctx.fillStyle = override.badge.color;
-    ctx.fill();
-    if (override.badge.symbol) {
-      ctx.fillStyle = "#ffffff";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.font = `700 ${Math.round(r * 1.2)}px sans-serif`;
-      ctx.fillText(override.badge.symbol, size - pad, pad);
-    }
-  }
-
-  // (Kind watermark removed at user request — the operator already
-  // knows the binding's target from context, the corner tag was
-  // visual noise on small keys.)
+  // Single shared drawer — identical to the browser preview + satellite.
+  // Cast: the engine's `fillStyle` is `string | gradient | pattern`, but the
+  // drawer only ever assigns strings, so the narrower `FaceCtx` is safe.
+  drawKeyFace(ctx as unknown as FaceCtx, {
+    size,
+    bg,
+    fg,
+    face,
+    badge: override?.badge,
+  });
 
   // Extract RGBA via getImageData (the only way to get raw pixel
   // bytes from @napi-rs/canvas — its toBuffer() only emits encoded
@@ -1028,69 +990,6 @@ function composeKeyImage(
     out[j + 2] = rgba[i + 2];
   }
   return out;
-}
-
-/**
- * Centered multi-line text with auto-shrink + stroke outline.
- *
- * Sizing strategy:
- *   • Start at 32% of key height (vs old 22%) — much bigger.
- *   • Measure widest line; if it overflows the safe area, scale the
- *     font down until it fits. Floor at 14% so very long labels
- *     remain legible-ish rather than disappearing.
- *
- * Stroke: 2-3 px black outline so light-on-dark and dark-on-light
- * both stay readable when the bg is something nasty (yellow, lime,
- * etc.). A standard trick for surface key rendering.
- */
-function drawAutoFitText(
-  ctx: import("@napi-rs/canvas").CanvasRenderingContext2D,
-  face: string,
-  size: number,
-  color: string
-): void {
-  const lines = face.split(/\n/).map((l) => l.trim()).filter((l) => l.length > 0);
-  if (lines.length === 0) return;
-
-  const safeWidth = size - Math.max(8, Math.round(size * 0.1));
-  const maxFontSize = Math.round(size * 0.32);
-  const minFontSize = Math.max(10, Math.round(size * 0.14));
-  // Reserve a bit more space when there are multiple lines.
-  const perLineCap =
-    lines.length === 1 ? maxFontSize : Math.round((size * 0.7) / lines.length);
-
-  // Binary-search-ish: start at the cap, shrink until the widest
-  // line fits the safe area.
-  let fontSize = Math.min(maxFontSize, perLineCap);
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  for (; fontSize >= minFontSize; fontSize -= 1) {
-    ctx.font = `800 ${fontSize}px sans-serif`;
-    const widest = Math.max(...lines.map((l) => ctx.measureText(l).width));
-    if (widest <= safeWidth) break;
-  }
-  ctx.font = `800 ${fontSize}px sans-serif`;
-
-  // Line layout — tight leading so multi-line uses vertical space
-  // efficiently. Even-line case centers around midpoint; odd-line
-  // case sits the middle line on midpoint.
-  const lineHeight = Math.round(fontSize * 1.02);
-  const totalHeight = lineHeight * lines.length;
-  let y = Math.round(size / 2 - totalHeight / 2 + lineHeight / 2);
-
-  // Stroke first (acts as a halo) then fill.
-  ctx.strokeStyle = "rgba(0,0,0,0.65)";
-  const strokeWidth = Math.max(2, Math.round(size * 0.025));
-  // @napi-rs/canvas honours `lineWidth` even though our shim doesn't
-  // declare it — set via the underlying ctx (cast). Falls back to
-  // default 1px stroke if unsupported, still readable.
-  (ctx as unknown as { lineWidth: number }).lineWidth = strokeWidth;
-  ctx.fillStyle = color;
-  for (const line of lines) {
-    ctx.strokeText(line, size / 2, y);
-    ctx.fillText(line, size / 2, y);
-    y += lineHeight;
-  }
 }
 
 // ─────────────────────────── HMR-safe singleton ───────────────────────

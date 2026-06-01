@@ -32,7 +32,7 @@ export interface RenderOverride {
   bgcolor?: string;
   fgcolor?: string;
   text?: string;
-  badge?: { color: string; symbol?: string };
+  badge?: { color: string; symbol?: string; icon?: "offline" };
 }
 
 export type SatelliteInMessage =

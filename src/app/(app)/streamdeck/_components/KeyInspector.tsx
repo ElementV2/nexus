@@ -10,6 +10,7 @@ import type {
   FireState,
 } from "./types";
 import { ColorField, FaceField, InspectorOptionField } from "./inspector-fields";
+import { KeyFacePreview } from "./KeyFacePreview";
 import {
   AddActionControl,
   ConnectionSelect,
@@ -226,33 +227,20 @@ export function KeyInspector({
         gap: 12,
       }}
     >
-      {/* Face preview + meta */}
+      {/* Face preview + meta — painted by the shared key-face drawer so it
+          matches the physical deck exactly. */}
       <div className="flex items-start gap-3">
-        <div
+        <KeyFacePreview
+          bg={preset.bgcolor ?? "#0a0a0a"}
+          fg={preset.fgcolor ?? "#ffffff"}
+          face={preset.text ?? preset.label}
+          size={88}
           style={{
-            width: 88,
-            height: 88,
             flexShrink: 0,
-            borderRadius: 8,
-            background: preset.bgcolor ?? "#0a0a0a",
-            color: preset.fgcolor ?? "#ffffff",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            textAlign: "center",
-            padding: 6,
-            fontFamily: "var(--font-mono)",
-            fontSize: 12,
-            fontWeight: 700,
-            letterSpacing: "0.04em",
-            lineHeight: 1.1,
             border: "1px solid var(--line-hi)",
             boxShadow: "0 2px 4px rgba(0,0,0,0.4)",
-            whiteSpace: "pre-line",
           }}
-        >
-          {preset.text ?? preset.label}
-        </div>
+        />
         <div style={{ flex: 1, minWidth: 0 }}>
           <Eyebrow tone="muted">Key {keyIndex + 1}</Eyebrow>
           <div

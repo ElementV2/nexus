@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Eyebrow, MonoChip } from "@/components/sw";
+import {
+  KEY_FONT_FAMILY,
+  KEY_FONT_WEIGHT,
+  keyBackgroundCss,
+} from "@/lib/streamdeck/key-face";
 
 /**
  * Unified browser of everything you can drop on a surface. There is ONE
@@ -467,7 +472,7 @@ function PresetTile({
       style={{
         aspectRatio: "1 / 1",
         padding: compact ? 6 : 8,
-        background: bg,
+        background: keyBackgroundCss(bg),
         color: fg,
         border: "1px solid var(--line-hi)",
         outline: justOk
@@ -484,13 +489,16 @@ function PresetTile({
         whiteSpace: "pre-line",
       }}
     >
+      {/* Same key font (Barlow Semi Condensed) the deck + hardware use, with
+          a dark halo so the label stays legible on any face colour — so a
+          preset tile reads like the key it becomes. */}
       <span
         style={{
-          fontSize: compact ? 10 : 13,
-          fontWeight: 700,
-          letterSpacing: "0.04em",
-          lineHeight: 1.1,
-          textShadow: "0 1px 2px rgba(0,0,0,0.3)",
+          fontFamily: `"${KEY_FONT_FAMILY}", var(--font-sans)`,
+          fontSize: compact ? 14 : 18,
+          fontWeight: KEY_FONT_WEIGHT,
+          letterSpacing: "0.01em",
+          lineHeight: 1.05,
         }}
       >
         {face}
@@ -502,6 +510,7 @@ function PresetTile({
           letterSpacing: "0.18em",
           opacity: 0.6,
           textTransform: "uppercase",
+          fontFamily: "var(--font-mono)",
         }}
       >
         {preset.kind}

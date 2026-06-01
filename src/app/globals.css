@@ -4,6 +4,21 @@
 @import "../styles/components.css";
 
 /* ──────────────────────────────────────────────────────────────
+ *  Stream Deck key-label font (bundled, OFL). The SAME face the
+ *  hardware renderer registers with the canvas engine, so the
+ *  on-screen key mockup matches the physical deck. Served from
+ *  /public/fonts. `block` so the canvas preview waits for the real
+ *  glyphs rather than flashing a fallback.
+ * ────────────────────────────────────────────────────────────── */
+@font-face {
+  font-family: "Barlow Semi Condensed";
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("/fonts/BarlowSemiCondensed-Medium.ttf") format("truetype");
+}
+
+/* ──────────────────────────────────────────────────────────────
  *  Expose tokens to Tailwind utilities. Both the new canonical
  *  names and the legacy --sw-* aliases are wired so utility
  *  classes like `bg-bg`, `text-ink`, `border-line` AND the

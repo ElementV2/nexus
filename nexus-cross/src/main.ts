@@ -23,6 +23,7 @@ import {
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Agent } from "./agent";
+import { registerKeyFont } from "./key-image";
 import { loadSettings, saveSettings, type CrossSettings } from "./prefs";
 import { Updater } from "./updater";
 
@@ -197,6 +198,14 @@ app.on("before-quit", async (e) => {
 
 app.whenReady().then(async () => {
   const settings = loadSettings();
+
+  // Register the bundled key-label font BEFORE any deck render so the
+  // satellite paints the same Barlow Semi Condensed face the server does.
+  // resourcePath() covers both the dev tree and the packaged resources dir.
+  registerKeyFont([
+    resourcePath(join("fonts", "BarlowSemiCondensed-Medium.ttf")),
+    resourcePath("BarlowSemiCondensed-Medium.ttf"),
+  ]);
 
   createTray();
   mainWindow = createWindow();

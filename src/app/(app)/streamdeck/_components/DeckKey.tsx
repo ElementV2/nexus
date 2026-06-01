@@ -1,8 +1,14 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useEffect, useRef } from "react";
 import type { DeckBinding } from "@/lib/db/streamdeck";
 import type { FeedbackOverride } from "@/lib/streamdeck/feedback";
+import {
+  drawKeyFace,
+  KEY_FONT_FAMILY,
+  KEY_FONT_WEIGHT,
+  type FaceCtx,
+} from "@/lib/streamdeck/key-face";
 import type { FireState } from "./types";
 
 interface DeckKeyProps {
@@ -56,7 +62,11 @@ function deckKeyEqual(a: DeckKeyProps, b: DeckKeyProps): boolean {
     const ab = ao.badge;
     const bb = bo.badge;
     if (!!ab !== !!bb) return false;
-    if (ab && bb && (ab.color !== bb.color || ab.symbol !== bb.symbol)) {
+    if (
+      ab &&
+      bb &&
+      (ab.color !== bb.color || ab.symbol !== bb.symbol || ab.icon !== bb.icon)
+    ) {
       return false;
     }
   }
@@ -87,6 +97,57 @@ export const DeckKey = memo(function DeckKey({
   const face =
     override?.text ?? binding?.preset.text ?? binding?.preset.label ?? "";
   const badge = override?.badge;
+
+  // Paint the key face on a real <canvas> with the SAME shared drawer the
+  // hardware uses — so the on-screen mockup matches the physical deck
+  // exactly (font, auto-fit sizing, stroke halo, badge). Redraws only when
+  // this key's visual inputs change; ring/hover/fire are CSS on the wrapper
+  // and don't touch the canvas. Waits for the bundled font before drawing
+  // so glyph metrics match the deck.
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const badgeColor = badge?.color;
+  const badgeSymbol = badge?.symbol;
+  const badgeIcon = badge?.icon;
+  useEffect(() => {
+    if (!binding) return;
+    const cvs = canvasRef.current;
+    if (!cvs) return;
+    let cancelled = false;
+    const paint = () => {
+      if (cancelled) return;
+      const rect = cvs.getBoundingClientRect();
+      const sizePx = Math.round(rect.width) || 84;
+      const dpr = window.devicePixelRatio || 1;
+      cvs.width = Math.round(sizePx * dpr);
+      cvs.height = Math.round(sizePx * dpr);
+      const ctx = cvs.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      drawKeyFace(ctx as unknown as FaceCtx, {
+        size: sizePx,
+        bg,
+        fg,
+        face,
+        badge:
+          badgeColor !== undefined
+            ? { color: badgeColor, symbol: badgeSymbol, icon: badgeIcon }
+            : undefined,
+      });
+    };
+    paint();
+    // Redraw once the web font is ready (first mount): the initial paint may
+    // land before Barlow loads, which would mis-measure the auto-fit.
+    const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
+    if (fonts?.load) {
+      fonts
+        .load(`${KEY_FONT_WEIGHT} 16px "${KEY_FONT_FAMILY}"`)
+        .then(paint)
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [binding, bg, fg, face, badgeColor, badgeSymbol, badgeIcon]);
 
   return (
     <div
@@ -165,47 +226,27 @@ export const DeckKey = memo(function DeckKey({
         opacity: isFiring ? 0.6 : 1,
         transform: isFiring ? "scale(0.95)" : "none",
         transition: "transform 120ms, opacity 120ms, outline 120ms",
-        padding: 6,
-        fontFamily: "var(--font-mono)",
+        padding: binding ? 0 : 6,
       }}
     >
       {binding ? (
-        <>
-          <span
-            style={{
-              fontSize: face.length > 6 ? 12 : 14,
-              fontWeight: 800,
-              letterSpacing: "0.04em",
-              lineHeight: 1.05,
-              textShadow:
-                "0 1px 2px rgba(0,0,0,0.6), 0 0 1px rgba(0,0,0,0.6)",
-              whiteSpace: "pre-line",
-              padding: "0 4px",
-            }}
-          >
-            {face}
-          </span>
-          {/* Feedback badge — top-right colored dot mirroring the
-              hardware renderer's badge placement. */}
-          {badge && (
-            <span
-              aria-hidden
-              style={{
-                position: "absolute",
-                top: 4,
-                right: 4,
-                width: 10,
-                height: 10,
-                borderRadius: 5,
-                background: badge.color,
-                boxShadow:
-                  "0 0 4px rgba(0,0,0,0.5), inset 0 0 1px rgba(255,255,255,0.3)",
-              }}
-            />
-          )}
-          {/* (Kind watermark removed at user request — same as
-              the hardware renderer.) */}
-        </>
+        // The face (bg + label + badge) is painted by the shared drawer —
+        // byte-identical to the physical key. Full-bleed over the cell;
+        // the wrapper's border/ring/shadow ride on top. pointer-events off
+        // so drag/click still hit the wrapper.
+        <canvas
+          ref={canvasRef}
+          role="img"
+          aria-label={face || `Key ${index + 1}`}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            borderRadius: 8,
+            pointerEvents: "none",
+          }}
+        />
       ) : (
         <span
           style={{
@@ -214,6 +255,7 @@ export const DeckKey = memo(function DeckKey({
             opacity: hovered ? 0.8 : 0.25,
             textTransform: "uppercase",
             fontWeight: 600,
+            fontFamily: "var(--font-mono)",
           }}
         >
           {hovered ? "drop" : String(index + 1).padStart(2, "0")}

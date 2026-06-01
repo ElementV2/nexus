@@ -32,6 +32,10 @@
       {
         "from": "resources/icon.ico",
         "to": "icon.ico"
+      },
+      {
+        "from": "resources/fonts",
+        "to": "fonts"
       }
     ],
     "asar": true,
