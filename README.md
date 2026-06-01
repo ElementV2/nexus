@@ -37,23 +37,39 @@ LAN URL, a port picker, and a logs viewer.
   big targets, drag-selection guard, no accidental zooming.
 - **Ableton bridge** (optional) — clip launch, scene control, and
   transport over OSC via [AbletonOSC](https://github.com/ideoforms/AbletonOSC).
-- **Auto-update check** — the launcher polls GitHub on startup and
-  shows a banner when a newer release is available.
+- **Auto-update check** — the launcher polls GitHub on startup (then every
+  6 h) and shows a banner when a newer release is available.
 - **Single executable** — `Nexus-Setup.exe` bundles Electron, the
   Next.js standalone build, and `ffmpeg-static` with libsrt for the
   built-in stream player. Around 200 MB on disk.
 
 ---
 
+## Supported devices
+
+Add any number of each in **Network › Connections** — none is mandatory.
+
+| Device | Transport | Default port | Prerequisite |
+|---|---|---|---|
+| **vMix** | HTTP XML API (poll + commands) | 8088 | vMix 27+, Web Controller enabled |
+| **OBS Studio** | obs-websocket v5 (push) | 4455 | obs-websocket (built into OBS 28+), password optional |
+| **Ableton Live** | OSC — AbletonOSC | 11000 send / 11001 recv | AbletonOSC in the MIDI Remote Scripts folder |
+| **Behringer X32 / M32** | OSC over UDP | 10023 | — (always listening) |
+| **grandMA3** | OSC over UDP (command line + executors) | 9000 | OSC input enabled on the console |
+| **grandMA 2** | Telnet command line | 30000 | Telnet enabled; console login |
+| **Elgato Stream Deck** | USB HID (local) or LAN satellite | — | optional HID deps locally, or run nexus-cross on the deck's machine |
+
+Each connection drives the matching operator page(s): vMix → Live / Audio /
+Replay / Playlist / Titles / Colorimetry; OBS → OBS; Ableton → Ableton; the
+mixers/consoles are controlled from the **Stream Deck editor** (actions,
+presets, feedback). Pages appear only when a connection of that kind exists.
+
 ## Requirements
 
-- **vMix 27+** with the Web Controller enabled (HTTP API on port 8088
-  by default). Nexus reads vMix state by polling `/api` over HTTP and
-  sends commands back the same way.
-- **Windows 10 / 11** for the prebuilt launcher. The web UI itself
-  works on any modern browser (mobile Safari, Chrome, Edge, Firefox).
-- **Optional: AbletonOSC** installed in Ableton Live's MIDI Remote
-  Scripts folder, if you want to use the Ableton page.
+- **Windows 10 / 11** for the prebuilt launcher. The web UI runs on any
+  modern browser (mobile Safari, Chrome, Edge, Firefox) — phone, tablet,
+  or a second machine on the same network.
+- **At least one supported device** reachable on the LAN (table above).
 
 ---
 
@@ -78,19 +94,19 @@ stops with it.
 
 ## Quickstart
 
-1. Open vMix → **Settings → Web Controller → Enabled** (port 8088).
-2. Start Nexus.
-3. In the Nexus launcher window, leave the defaults (`All interfaces`,
-   port `9088`) or pick a specific NIC if you have multiple.
-4. Open the GUI. On the **Network** page, set the vMix host to
-   `localhost` (or another machine's IP) and verify the
-   "Connected" pill goes green.
-5. Move to the **Live** page — you should see PGM / PVW and all your
-   inputs.
+1. Start Nexus. In the launcher window, leave the defaults
+   (`All interfaces`, port `9088`) or pick a specific NIC, then **LAUNCH
+   GUI**.
+2. Go to **Network › Connections → Add** and pick a device kind. Fill in
+   its host/port (see [Supported devices](#supported-devices)) and **Test**
+   until the status pill goes green.
+3. Add as many devices as you need — each one lights up its own pages.
 
-For the Ableton page, install AbletonOSC, set the send/recv ports on
-the Network page to match (defaults: send `11000`, recv `11001`), then
-open Ableton.
+Example (vMix): enable **Settings → Web Controller** in vMix (port 8088),
+add a vMix connection pointing at `localhost`, then open **Live** for
+PGM / PVW + inputs. For Ableton, install AbletonOSC first (send `11000`,
+recv `11001`). For Stream Decks, build a page in the **Deck** editor and
+*Load to deck*.
 
 ---
 
@@ -209,7 +225,8 @@ banner links straight to the new `.exe` for a manual upgrade
 │   │   ├── kinds/           # One file per device kind (vmix, obs, ableton,
 │   │   │                    #   x32, grandma2/3) + its <kind>-feedback.ts;
 │   │   │                    #   registered into core
-│   │   ├── vmix/ obs/ ableton/ x32/ grandma3/ osc/  # per-kind brokers
+│   │   ├── vmix/ obs/ ableton/ x32/ grandma3/ grandma2/ osc/  # brokers
+│   │   │                    #   (HTTP poll / WebSocket / OSC-UDP / Telnet)
 │   │   ├── streamdeck/      # HID driver, feedback coordinator, press
 │   │   │                    #   dispatcher, satellite registry
 │   │   └── db/              # JSON data store (preferences, layouts, overlays)
@@ -242,9 +259,9 @@ Stream Deck feedback layer both read from it.
 ### Data flow (UI ↔ a device)
 
 1. A broker maintains the live link to its device — vMix HTTP polling
-   (~150 ms, configurable), an OBS WebSocket, or an Ableton/X32/grandMA
-   UDP socket — and normalizes state into a Zustand store + the variable
-   bus.
+   (~150 ms, configurable), an OBS WebSocket, an Ableton/X32/grandMA3
+   OSC-over-UDP socket, or a grandMA 2 Telnet line — and normalizes state
+   into a Zustand store + the variable bus.
 2. The browser streams that state over **Server-Sent Events** from
    `/api/connections/:id/events` (one EventSource per stream, shared
    across consumers, paused on a hidden tab).
