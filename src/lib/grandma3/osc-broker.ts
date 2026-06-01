@@ -23,6 +23,10 @@ const MA_SPEC: OscUdpSpec = {
   tag: "grandma3",
   ping: { messages: [{ address: "/cmd", args: [""] }], intervalMs: 5_000 },
   connectedOnOpen: true,
+  // Rebind the UDP socket ~2 s after an error (parity with X32). The 5 s
+  // heartbeat would re-create it anyway via `ensureSocket`, but the explicit
+  // retry recovers a network blip faster.
+  socketRetryMs: 2_000,
   testMode: "ping",
 };
 

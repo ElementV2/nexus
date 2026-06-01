@@ -203,7 +203,8 @@ export class VmixStateBroker {
   }
 
   private bumpErrorBackoff() {
-    // Exponential — 1s, 2s, 4s, 8s, 16s, 30s (capped). Resets on success.
+    // Exponential — 1s, 2s, 4s, then capped at ERROR_BACKOFF_MS_MAX (5s) so a
+    // vMix that dropped is retried at least every 5s. Resets on success.
     this.currentErrorBackoff = Math.min(
       ERROR_BACKOFF_MS_MAX,
       this.currentErrorBackoff * 2

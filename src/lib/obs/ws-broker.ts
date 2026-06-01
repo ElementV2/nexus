@@ -53,6 +53,11 @@ const RECONNECT_INITIAL_MS = 1_000;
 // Cap low so OBS recovers within a few seconds of coming back on the LAN
 // (was 30 s — same "feels like it never reconnects" lag as vMix had).
 const RECONNECT_MAX_MS = 5_000;
+// A socket that opens but never reaches "connected" (no Hello, or Identify /
+// snapshot hangs) is force-closed after this, then reconnected. Without it a
+// half-open socket would wedge the loop — `close`/`error` never fire — and
+// the connection would sit "connecting" forever even after OBS came back.
+const CONNECT_WATCHDOG_MS = 10_000;
 const STATS_POLL_MS = 1_500;
 const REQUEST_TIMEOUT_MS = 5_000;
 const SCREENSHOT_TIMEOUT_MS = 5_000;
@@ -154,6 +159,7 @@ export class ObsBroker {
 
   private reconnectMs = RECONNECT_INITIAL_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private statsTimer: ReturnType<typeof setInterval> | null = null;
   private stopGraceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -234,6 +240,10 @@ export class ObsBroker {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    if (this.connectTimer) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
+    }
     if (this.statsTimer) {
       clearInterval(this.statsTimer);
       this.statsTimer = null;
@@ -302,6 +312,11 @@ export class ObsBroker {
     }
     const url = `ws://${this.host}:${this.port}`;
     this.publishStatus("connecting");
+    // Watchdog: force-close + reconnect if this socket doesn't reach
+    // "connected" in time (server reachable but Hello/Identify/snapshot
+    // hangs, or a half-open socket that never fires close/error). Cleared
+    // on a successful snapshot and in onClose/stop.
+    this.armConnectWatchdog();
     try {
       // Subprotocol: obs-websocket v5 accepts JSON or MsgPack. We use
       // JSON since it's what `JSON.parse` already handles natively.
@@ -330,8 +345,14 @@ export class ObsBroker {
       });
 
       ws.addEventListener("error", () => {
-        // Errors land in `close` afterwards on every WebSocket impl —
-        // we just record a friendly message there.
+        // A failed CONNECT (server down / refused) does not reliably fire
+        // `close` on every WebSocket impl — only `error`. If we relied on
+        // `close` alone the reconnect loop would die after the first failed
+        // attempt and never recover when OBS came back. Drive the same
+        // teardown+reconnect path here; `onClose` nulls `this.ws`, so a
+        // trailing `close` for the same socket is ignored by the guard.
+        if (this.ws !== ws) return;
+        this.onClose(1006, "connection error");
       });
     } catch (err) {
       this.publishStatus(
@@ -342,7 +363,33 @@ export class ObsBroker {
     }
   }
 
+  /** (Re)arm the connect watchdog for the socket currently opening. */
+  private armConnectWatchdog() {
+    if (this.connectTimer) clearTimeout(this.connectTimer);
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = null;
+      if (this.status === "connected") return; // already healthy
+      // Stuck in connecting/authenticating → tear the socket down and let
+      // the reconnect loop try again from scratch.
+      const dead = this.ws;
+      this.ws = null;
+      if (dead) {
+        try {
+          dead.close();
+        } catch {
+          /* ignore */
+        }
+      }
+      this.publishStatus("disconnected", "Connection timed out");
+      this.scheduleReconnect();
+    }, CONNECT_WATCHDOG_MS);
+  }
+
   private onClose(code: number, reason: string) {
+    if (this.connectTimer) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
+    }
     // Auth failures are 4009 (bad password) / 4008 (unsupported feature).
     // Surface a clear message so the operator knows what to fix.
     const friendly =
@@ -609,6 +656,11 @@ export class ObsBroker {
     // Full snapshot succeeded → NOW reset the reconnect backoff (a flaky
     // OBS that fails mid-snapshot keeps the grown backoff and won't storm).
     this.reconnectMs = RECONNECT_INITIAL_MS;
+    // Healthy now — cancel the connect watchdog.
+    if (this.connectTimer) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
+    }
     this.publishStatus("connected");
     this.publish({ type: "snapshot", snapshot: this.snapshot });
   }
