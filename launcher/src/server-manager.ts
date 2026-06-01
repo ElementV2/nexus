@@ -334,6 +334,23 @@ export class ServerManager extends EventEmitter {
       clearTimeout(this.runningTimer);
       this.runningTimer = null;
     }
+    // Reset the Stream Decks back to the standby logo BEFORE killing the
+    // server. The Windows kill below is a force-kill (`taskkill /F`) — it
+    // gives the server NO graceful-signal window — so we ask it, while it's
+    // still alive, to release the decks. Best-effort with a short timeout so
+    // a hung / already-dead server never delays quit.
+    try {
+      const host = this.hostname === "0.0.0.0" ? "127.0.0.1" : this.hostname;
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 1200);
+      await fetch(
+        `http://${host}:${this.status.port}/api/streamdeck/shutdown`,
+        { method: "POST", signal: ctrl.signal }
+      ).catch(() => {});
+      clearTimeout(t);
+    } catch {
+      /* never block shutdown on the deck reset */
+    }
     this.stopping = true;
     const p = this.proc as ChildProcess & { __stopping?: boolean };
     p.__stopping = true;

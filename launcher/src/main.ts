@@ -286,9 +286,22 @@ app.on("window-all-closed", () => {
   // Stay alive in the tray
 });
 
-app.on("before-quit", async () => {
+// Electron does NOT await async `before-quit` handlers — it proceeds to tear
+// down the moment they return. So a plain `await server.stop()` gets cut
+// short, killing the server (and skipping the deck-reset it triggers) before
+// it finishes. Pattern: preventDefault the FIRST quit, run the async cleanup
+// to completion, then re-issue the quit (let through by the guard).
+let quitCleanupDone = false;
+app.on("before-quit", async (e) => {
+  if (quitCleanupDone) return;
+  e.preventDefault();
   quitting = true;
-  if (server) await server.stop();
+  try {
+    if (server) await server.stop();
+  } finally {
+    quitCleanupDone = true;
+    app.quit();
+  }
 });
 
 app.whenReady().then(async () => {
