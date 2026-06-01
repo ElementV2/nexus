@@ -409,3 +409,72 @@ body.is-locked .ghost--muted { color: var(--pgm); font-weight: 700; }
 /* Scrollbar (decks overflow) */
 .cell--grow::-webkit-scrollbar { width: 6px; }
 .cell--grow::-webkit-scrollbar-thumb { background: var(--line-hi); }
+
+/* ── Quit confirm modal (mirrors the launcher) ───────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal-overlay.is-open { display: flex; }
+
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--line-hi);
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+}
+.modal-content { padding: 20px 22px 18px; }
+.modal-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin: 8px 0 10px;
+  color: var(--ink);
+}
+.modal-body {
+  font-size: 12px;
+  color: var(--mid);
+  line-height: 1.5;
+}
+.modal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--line);
+}
+.modal-btn {
+  height: 44px;
+  background: none;
+  border: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.08s ease, color 0.08s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--ink);
+}
+.modal-btn--ghost {
+  color: var(--mid);
+  border-right: 1px solid var(--line);
+}
+.modal-btn--ghost:hover {
+  background: var(--card-hi);
+  color: var(--ink);
+}
+.modal-btn--danger {
+  background: var(--pgm-tint);
+  color: var(--pgm);
+}
+.modal-btn--danger:hover { background: var(--pgm); color: #fff; }

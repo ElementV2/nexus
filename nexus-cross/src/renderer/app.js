@@ -107,13 +107,22 @@ function renderState(status) {
 
 function renderDevices(status) {
   const devices = (status && status.devices) || [];
+  const blocked = (status && status.blocked) || 0;
   if (devices.length === 0) {
-    // Keep this terse — the same-PC / deck-in-use explanation lives in
-    // the conflict warning above when it applies. A bare "no deck" here
-    // covers the plain case (remote box, nothing plugged in yet).
-    devicesEl.innerHTML =
-      '<div class="muted">No deck detected. If one is plugged in, another app may ' +
-      "be using it (a deck opens in one program at a time).</div>";
+    if (blocked > 0) {
+      // Enumeration SAW a deck but open() failed — another program holds the
+      // USB handle (a deck opens in one program at a time). Usual culprits:
+      // Elgato's Stream Deck software (auto-starts at login), or the Nexus
+      // server itself when Cross is on the same PC. Say so explicitly instead
+      // of the misleading "no deck".
+      devicesEl.innerHTML =
+        '<div class="muted">Deck plugged in but <b>in use by another app</b> ' +
+        "(Elgato Stream Deck software, or the Nexus server on this PC). " +
+        "Close it so Cross can take the deck.</div>";
+    } else {
+      devicesEl.innerHTML =
+        '<div class="muted">No deck detected. Plug one in.</div>';
+    }
     return;
   }
   const satLabel = (status && status.label) || "";
@@ -243,7 +252,21 @@ bannerEl.addEventListener("click", () => {
 });
 
 $("hide").addEventListener("click", () => api.hide());
-$("quit").addEventListener("click", () => api.quit());
+// Quit goes through a confirm modal (mirrors the launcher): quitting resets
+// the local decks to the standby logo, so make it a deliberate choice.
+$("quit").addEventListener("click", () => {
+  $("quitConfirm").classList.add("is-open");
+});
+$("quitCancel").addEventListener("click", () => {
+  $("quitConfirm").classList.remove("is-open");
+});
+$("quitConfirmBtn").addEventListener("click", () => api.quit());
+// Esc dismisses the modal.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && $("quitConfirm").classList.contains("is-open")) {
+    $("quitConfirm").classList.remove("is-open");
+  }
+});
 
 api.onStatus(render);
 api.onUpdateInfo(showUpdate);

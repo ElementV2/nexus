@@ -111,6 +111,24 @@
       <span class="meta-strip-version mono" id="version">—</span>
     </div>
 
+    <!-- ── QUIT CONFIRM ──────────────────────────────── -->
+    <div class="modal-overlay" id="quitConfirm">
+      <div class="modal">
+        <div class="modal-content">
+          <div class="eyebrow eyebrow--accent">Confirm</div>
+          <h2 class="modal-title">Quit Nexus Cross?</h2>
+          <p class="modal-body">
+            The Stream Deck(s) on this machine will return to the standby logo
+            and stop responding to the server.
+          </p>
+        </div>
+        <div class="modal-actions">
+          <button class="modal-btn modal-btn--ghost" id="quitCancel">Cancel</button>
+          <button class="modal-btn modal-btn--danger" id="quitConfirmBtn">Quit ✕</button>
+        </div>
+      </div>
+    </div>
+
     <script src="app.js"></script>
   </body>
 </html>

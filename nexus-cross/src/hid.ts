@@ -66,6 +66,9 @@ type DeckHandle = {
   ): Promise<void>;
   clearKey(keyIndex: number): Promise<void>;
   clearPanel(): Promise<void>;
+  /** Restore the firmware standby logo (the "plugged in, nothing driving
+   *  it" screen). Present on @elgato-stream-deck/node v7. */
+  resetToLogo(): Promise<void>;
   setBrightness(percent: number): Promise<void>;
   close(): Promise<void>;
   on(event: "down" | "up", cb: (control: ControlDef) => void): void;
@@ -295,6 +298,33 @@ export class HidManager {
         err instanceof Error ? err.message : err
       );
     }
+  }
+
+  /** Restore one deck to the firmware standby logo (clearPanel fallback). */
+  async resetToLogo(serial: string): Promise<void> {
+    const deck = this.decks.get(serial);
+    if (!deck) return;
+    try {
+      await deck.handle.resetToLogo();
+    } catch {
+      try {
+        await deck.handle.clearPanel();
+      } catch (err) {
+        console.warn(
+          `[hid] resetToLogo ${serial} failed:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
+  }
+
+  /** Restore EVERY open deck on this machine to the standby logo. Called when
+   *  the satellite quits or is told to reset by the server, so the local
+   *  decks don't keep showing stale buttons no one drives anymore. */
+  async resetAll(): Promise<void> {
+    await Promise.all(
+      [...this.decks.keys()].map((serial) => this.resetToLogo(serial))
+    );
   }
 
   async setBrightness(serial: string, percent: number): Promise<void> {

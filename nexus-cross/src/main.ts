@@ -145,7 +145,7 @@ function wireIpc(): void {
   // server IP / port / name, then reconnect. Stays disconnected until the
   // next Connect (the local-server watcher won't auto-resume without a
   // block transition).
-  ipcMain.handle("cross:disconnect", () => agent?.stop());
+  ipcMain.handle("cross:disconnect", () => agent?.disconnect());
   ipcMain.on("cross:open-external", async (_e, url: string) => {
     // Only hand http(s) URLs to the OS — never file:/custom schemes.
     if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
@@ -174,9 +174,25 @@ app.on("second-instance", showWindow);
 app.on("window-all-closed", () => {
   /* stay alive in the tray */
 });
-app.on("before-quit", async () => {
+// Electron doesn't await async `before-quit` handlers, so the deck reset
+// below would get cut short. preventDefault the first quit, run the cleanup
+// to completion, then re-issue the quit (let through by the guard).
+let quitCleanupDone = false;
+app.on("before-quit", async (e) => {
+  if (quitCleanupDone) return;
+  e.preventDefault();
   quitting = true;
-  await agent?.stop();
+  try {
+    // Release the physical Stream Decks on THIS machine back to the standby
+    // logo — a quit shouldn't leave stale, dead buttons lit.
+    await agent?.resetDecks();
+    await agent?.stop();
+  } catch {
+    /* best effort — never block the quit on a deck reset */
+  } finally {
+    quitCleanupDone = true;
+    app.quit();
+  }
 });
 
 app.whenReady().then(async () => {

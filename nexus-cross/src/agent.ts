@@ -59,6 +59,10 @@ export class Agent extends EventEmitter {
    *  concurrent starts from both opening the deck or leaking an uplink. */
   private startGen = 0;
   private watchTimer: ReturnType<typeof setInterval> | null = null;
+  /** Armed when the server link drops; if it stays down past a short grace
+   *  window we reset the local decks to the standby logo (the server whose
+   *  buttons they show is gone). Cancelled the instant the link comes back. */
+  private linkDownResetTimer: ReturnType<typeof setTimeout> | null = null;
   private status: AgentStatus = {
     running: false,
     serverUrl: "",
@@ -180,6 +184,13 @@ export class Agent extends EventEmitter {
 
   // ── Lifecycle ────────────────────────────────────────────────────
 
+  /** Reset every local deck to the firmware standby logo. Called on app
+   *  quit so the physical Stream Decks on THIS machine don't keep showing
+   *  stale buttons after the satellite that drove them is gone. */
+  async resetDecks(): Promise<void> {
+    await this.hid?.resetAll();
+  }
+
   /** (Re)start the agent with the given settings. Tears down any
    *  previous run first so a settings change reconnects cleanly.
    *
@@ -256,12 +267,31 @@ export class Agent extends EventEmitter {
     uplink.onState((s) => {
       if (this.blockedByLocal) return;
       this.publish({ connected: s.connected, lastError: s.error });
-      // Re-announce on EVERY (re)connection. A satellite launched before
-      // the server (auto-connect) fails its boot-time announce while the
-      // server is down; without this it would only re-register if/when the
-      // server's `hello` arrives. Announcing the moment the link comes up
-      // makes the decks appear without a manual Save & connect.
-      if (s.connected) void uplink.announce(hid.list());
+      if (s.connected) {
+        // Reconnected before the grace window → cancel the pending reset; the
+        // server re-renders the layout on the announce below anyway.
+        if (this.linkDownResetTimer) {
+          clearTimeout(this.linkDownResetTimer);
+          this.linkDownResetTimer = null;
+        }
+        // Re-announce on EVERY (re)connection. A satellite launched before
+        // the server (auto-connect) fails its boot-time announce while the
+        // server is down; without this it would only re-register if/when the
+        // server's `hello` arrives. Announcing the moment the link comes up
+        // makes the decks appear without a manual Save & connect.
+        void uplink.announce(hid.list());
+      } else if (!this.linkDownResetTimer) {
+        // Lost the server. If it doesn't come back within the grace window,
+        // the decks are showing buttons that no longer do anything — reset
+        // them to the standby logo ourselves. This is the RELIABLE path: a
+        // force-killed server can't send us a `reset` before it dies, but the
+        // dropped link is something we detect locally. A quick blip reconnects
+        // (above) and cancels this first.
+        this.linkDownResetTimer = setTimeout(() => {
+          this.linkDownResetTimer = null;
+          void hid.resetAll();
+        }, 3_000);
+      }
     });
 
     uplink.subscribe((msg) => {
@@ -274,6 +304,11 @@ export class Agent extends EventEmitter {
           break;
         case "clear-panel":
           void hid.clearPanel(msg.serial);
+          break;
+        case "reset":
+          // The server is shutting down (or told us to) — drop the now-dead
+          // buttons back to the standby logo.
+          void hid.resetToLogo(msg.serial);
           break;
         case "brightness":
           void hid.setBrightness(msg.serial, msg.percent);
@@ -306,6 +341,10 @@ export class Agent extends EventEmitter {
 
   async stop(): Promise<void> {
     this.startGen++; // supersede any in-flight start()
+    if (this.linkDownResetTimer) {
+      clearTimeout(this.linkDownResetTimer);
+      this.linkDownResetTimer = null;
+    }
     this.uplink?.stop();
     this.uplink = null;
     if (this.hid) {
@@ -320,6 +359,37 @@ export class Agent extends EventEmitter {
       localServer: this.blockedByLocal,
       label: this.label,
     });
+  }
+
+  /**
+   * Drop the SERVER bridge but KEEP the local decks open and listed. This is
+   * what the window's "Disconnect" button wants: the operator means "stop
+   * talking to the server" (to edit the IP / reconnect), NOT "let go of my
+   * Stream Deck". `stop()` disposes the whole HID layer (right for a restart
+   * / app quit), which made the deck vanish from the list on Disconnect —
+   * the bug. Here we only tear down the uplink and reset the decks to the
+   * standby logo (nothing drives them now), leaving them enumerated so they
+   * stay visible.
+   */
+  async disconnect(): Promise<void> {
+    this.startGen++; // supersede any in-flight start()
+    if (this.linkDownResetTimer) {
+      clearTimeout(this.linkDownResetTimer);
+      this.linkDownResetTimer = null;
+    }
+    this.uplink?.stop();
+    this.uplink = null;
+    // Reset the still-open decks to the logo — no server drives them now.
+    await this.hid?.resetAll();
+    this.publish({
+      running: false,
+      connected: false,
+      localServer: this.blockedByLocal,
+      label: this.label,
+      lastError: undefined,
+    });
+    // Keep the device list populated (the decks are still ours).
+    this.refreshDevices();
   }
 }
 

@@ -45,5 +45,6 @@ export type SatelliteInMessage =
     }
   | { type: "clear"; serial: string; keyIndex: number }
   | { type: "clear-panel"; serial: string }
+  | { type: "reset"; serial: string }
   | { type: "brightness"; serial: string; percent: number }
   | { type: "hello" };
