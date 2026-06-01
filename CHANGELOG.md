@@ -16,6 +16,34 @@ updater compares against the version embedded in its own installer asset
 name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
 shared release tag.
 
+## 0.1.17 — main app · 0.1.6 — Nexus Cross
+
+Audit pass (V3) — correctness, performance, and connection handling.
+
+### Stream Deck
+- **Unassigned / "None" keys are clearly offline.** A key not pinned to a
+  connection shows the offline marker and a press does nothing — no more
+  silently firing at "some" instance. A binding-level **Connection** picker
+  (with **None**) was added to the inspector.
+- **Multi-step buttons show the right tally.** Feedback now reflects the
+  first action that has state, even when it isn't the first step.
+- **Snappier feedback at scale.** A variable change only re-evaluates the
+  keys whose connection actually changed (not every key on every deck).
+
+### Connections
+- **grandMA3** is now labelled **"direct send · unverified"** — one-way OSC
+  can't confirm the console is there, so the status is honest.
+- **vMix:** a deleted/renumbered input no longer leaves a ghost mute-tally.
+- **OBS:** events that arrive while connecting are no longer lost; a stuck
+  "meters" re-identify can't wedge the connection.
+- **Single source of truth.** The legacy mirrored `*_host` preference fields
+  were removed — every page reads its connection's config directly.
+
+### Performance / robustness
+- Variable updates are coalesced into one frame per tick (and one re-render
+  instead of dozens). A slow browser tab that drops a frame now re-syncs
+  instead of going stale until a reload.
+
 ## 0.1.16 — main app · 0.1.6 — Nexus Cross
 
 ### Stream Deck — key rendering overhaul
