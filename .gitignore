@@ -82,6 +82,9 @@ public/downloads/
 # network scan output (local-only)
 api.json
 
+# local technical audit notes — never publish to the (public) repo
+AUDIT*.md
+
 # dev-mode data dir (only used when running `npm run dev` without the
 # Electron launcher — see src/lib/db/index.ts)
 .nexus-data/
