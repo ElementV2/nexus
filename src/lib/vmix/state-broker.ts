@@ -164,7 +164,11 @@ export class VmixStateBroker {
         // Skip the parse + publish; new subscribers still hydrate from the
         // cached `lastMessage`. Refresh its `ts` so a liveness watchdog
         // keyed on it doesn't flag an idle-but-connected vMix as stale.
-        this.lastMessage.ts = Date.now();
+        // Replace the object rather than mutating in place — the same
+        // reference was already handed to subscribers and is returned by
+        // getSnapshot(); mutating `.ts` underneath them is shared-mutable
+        // state. Cheap shallow copy, no re-parse, no fan-out.
+        this.lastMessage = { ...this.lastMessage, ts: Date.now() };
         this.currentErrorBackoff = ERROR_BACKOFF_MS_INITIAL;
       } else {
         this.lastRaw = raw;

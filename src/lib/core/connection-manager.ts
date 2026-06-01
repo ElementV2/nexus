@@ -83,11 +83,30 @@ class ConnectionManagerImpl {
         );
         continue;
       }
-      const broker = kind.make({
-        id: cfg.id,
-        label: cfg.label,
-        config: cfg.config,
-      });
+      // Guard `make()` + bridge attach: a kind's `make` calls its
+      // `parseConfig` and THROWS on an invalid config blob (corrupt prefs
+      // file, schema drift across versions, an un-validated bulk write).
+      // Without this try/catch a SINGLE bad entry aborts the whole
+      // reconcile mid-loop — every later connection is never created, and
+      // because `ensureBooted` already latched `booted=true`, the press
+      // dispatcher / feedback coordinator never start either. One malformed
+      // row would silently disable every device and every physical key for
+      // the session. Skip the bad entry and keep going, like the
+      // unknown-kind branch above.
+      let broker: BrokerImpl;
+      try {
+        broker = kind.make({
+          id: cfg.id,
+          label: cfg.label,
+          config: cfg.config,
+        });
+      } catch (err) {
+        console.warn(
+          `[connection-manager] skipping connection ${cfg.id} (${cfg.kind}): ` +
+            `make() failed — ${err instanceof Error ? err.message : String(err)}`
+        );
+        continue;
+      }
       this.connections.set(cfg.id, {
         id: cfg.id,
         kind: cfg.kind,
@@ -97,8 +116,18 @@ class ConnectionManagerImpl {
       this.lastConfig.set(cfg.id, cfgJson);
       // Attach the variable bridge so the surface buttons, feedbacks,
       // and `$(...)` text substitution see live values without anyone
-      // opening the per-kind page first.
-      const unattach = attachBridge(cfg.kind, cfg.id, broker);
+      // opening the per-kind page first. A misbehaving bridge must not
+      // take down the reconcile either.
+      let unattach: () => void;
+      try {
+        unattach = attachBridge(cfg.kind, cfg.id, broker);
+      } catch (err) {
+        console.warn(
+          `[connection-manager] bridge attach failed for ${cfg.id}: ` +
+            `${err instanceof Error ? err.message : String(err)}`
+        );
+        unattach = () => {};
+      }
       this.bridgeTeardowns.set(cfg.id, unattach);
     }
     // Dispose anything no longer in the desired set.

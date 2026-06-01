@@ -50,6 +50,20 @@ function makeKind(kind: string): DeviceKind {
 registerDeviceKind(makeKind("auditstub"));
 registerDeviceKind(makeKind("auditstub2"));
 
+// A kind whose make() THROWS — mirrors a real kind rejecting an invalid
+// config blob (its parseConfig fails inside make). The manager must survive
+// it and keep building the OTHER connections in the same batch.
+registerDeviceKind({
+  kind: "auditthrows",
+  displayName: "auditthrows",
+  icon: (() => null) as unknown as DeviceKind["icon"],
+  parseConfig: (raw) => ({ ok: true, config: raw }),
+  defaultConfig: () => ({}),
+  make: () => {
+    throw new Error("invalid config (simulated)");
+  },
+});
+
 const cfg = (
   id: string,
   config: unknown,
@@ -112,6 +126,27 @@ describe("connectionManager.reconcile", () => {
     expect(firstBroker?.disposed).toBe(1); // old kind's broker torn down
     expect(connectionManager.get("c1")?.kind).toBe("auditstub2");
     expect(makeCount).toBe(2);
+  });
+
+  it("survives a connection whose make() throws and still builds the others (B1)", () => {
+    expect(() =>
+      connectionManager.reconcile([
+        cfg("bad", {}, true, "auditthrows"),
+        cfg("good", { h: 1 }, true, "auditstub"),
+      ])
+    ).not.toThrow();
+    // The throwing entry is skipped; the healthy one in the same batch is
+    // still materialized (the bug: a single bad config aborted the whole
+    // reconcile, leaving every later connection — and the press dispatcher
+    // / feedback coordinator started after it — dead for the session).
+    expect(connectionManager.get("bad")).toBeUndefined();
+    expect(connectionManager.get("good")).toBeDefined();
+  });
+
+  it("does not retain a connection whose make() throws", () => {
+    connectionManager.reconcile([cfg("bad", {}, true, "auditthrows")]);
+    expect(connectionManager.get("bad")).toBeUndefined();
+    expect(connectionManager.list()).toEqual([]);
   });
 
   it("listByKind returns only matching live connections", () => {

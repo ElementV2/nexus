@@ -171,6 +171,11 @@ export class ObsBroker {
    *  volume-meter bit on/off via `setVolumeMetersEnabled`. */
   private subscriptions = DEFAULT_EVENT_SUBSCRIPTIONS;
 
+  /** True while we're waiting for the Identified that answers a
+   *  REIDENTIFY (volume-meter toggle) — as opposed to a fresh connect.
+   *  Lets `onIdentified` skip the full snapshot rebuild in that case. */
+  private reidentifying = false;
+
   // ───────────────────────── Subscriber API ─────────────────────────
 
   subscribe(cb: Subscriber): () => void {
@@ -252,6 +257,7 @@ export class ObsBroker {
     this.obsVersion = undefined;
     this.obsWebSocketVersion = undefined;
     this.platform = undefined;
+    this.reidentifying = false;
   }
 
   /** Apply a new config and reconnect if host/port/password changed.
@@ -283,6 +289,9 @@ export class ObsBroker {
   // ───────────────────────── Socket open ────────────────────────────
 
   private openSocket() {
+    // Fresh socket → any pending re-identify is moot; the next Identified
+    // must trigger a real snapshot build.
+    this.reidentifying = false;
     const Ctor = (globalThis as { WebSocket?: WSConstructor }).WebSocket;
     if (!Ctor) {
       this.publishStatus(
@@ -357,6 +366,15 @@ export class ObsBroker {
       p.reject(new Error("OBS disconnected"));
       this.pending.delete(id);
     }
+    // 4009 (wrong password) / 4008 (RPC version mismatch) are PERMANENT
+    // faults: retrying every few seconds just storms a server that will
+    // reject us identically forever (and flaps the status). Stop the
+    // auto-reconnect loop — a config edit (`updateConfig`) re-opens the
+    // socket with the corrected password, so a real fix still reconnects.
+    if (code === 4009 || code === 4008) {
+      this.reconnectMs = RECONNECT_INITIAL_MS;
+      return;
+    }
     this.scheduleReconnect();
   }
 
@@ -418,6 +436,15 @@ export class ObsBroker {
   }
 
   private async onIdentified(_id: IdentifiedPayload) {
+    // A REIDENTIFY (meter-subscription toggle) is also answered with an
+    // Identified. That is NOT a fresh connect — the snapshot and stats
+    // poll are already live, so rebuilding the whole snapshot (~20
+    // round-trips) on every audio-panel open/close is pure waste. Just
+    // clear the flag and keep running.
+    if (this.reidentifying) {
+      this.reidentifying = false;
+      return;
+    }
     // NOTE: reconnect backoff is reset only after a FULLY successful
     // snapshot (see fetchSnapshot) — not here. Resetting on identify meant
     // that an OBS that authenticates but then fails every snapshot looped
@@ -731,6 +758,14 @@ export class ObsBroker {
           index: s.sceneIndex,
         }));
         snap.scenes = scenes.sort((a, b) => a.index - b.index);
+        // Drop cached scene-items for scenes that no longer exist —
+        // otherwise a deleted scene's item array lingers in
+        // `sceneItemsByScene` forever (it's only ever deleted on rename),
+        // a slow bounded leak across a long session of scene churn.
+        const liveNames = new Set(snap.scenes.map((s) => s.name));
+        for (const name of Object.keys(snap.sceneItemsByScene)) {
+          if (!liveNames.has(name)) delete snap.sceneItemsByScene[name];
+        }
         this.publish({ type: "scenes-changed", scenes: snap.scenes });
         break;
       }
@@ -1283,6 +1318,9 @@ export class ObsBroker {
       ? SUBSCRIPTIONS_WITH_METERS
       : DEFAULT_EVENT_SUBSCRIPTIONS;
     if (this.status !== "connected") return;
+    // Mark the next Identified as a re-identify so onIdentified skips the
+    // full snapshot rebuild (the data is already current).
+    this.reidentifying = true;
     this.send({
       op: OP_REIDENTIFY,
       d: { eventSubscriptions: this.subscriptions },

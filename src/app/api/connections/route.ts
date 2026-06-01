@@ -116,10 +116,22 @@ export async function PUT(request: NextRequest) {
   }
   const patch = body.patch as Parameters<typeof updateConnection>[1];
   // Restore any redacted secret in the patched config from the stored
-  // value so a host/port-only edit doesn't blank the password.
+  // value so a host/port-only edit doesn't blank the password, THEN
+  // validate it against the kind's schema before persisting. Without the
+  // validation an invalid blob lands in preferences.json and later makes
+  // `connectionManager.reconcile` -> `kind.make()` throw (the single-entry
+  // PUT already validates; this bulk path used to skip it).
   if (patch.config !== undefined) {
     const existing = getPreferences().connections.find((c) => c.id === body.id);
-    patch.config = restoreConfigSecrets(patch.config, existing?.config);
+    if (!existing) {
+      return NextResponse.json({ error: "Connection not found" }, { status: 404 });
+    }
+    patch.config = restoreConfigSecrets(patch.config, existing.config);
+    const parsed = validateConfig(existing.kind, patch.config);
+    if (!parsed.ok) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+    patch.config = parsed.config;
   }
   const updated = updateConnection(body.id, patch);
   reconcileFromPreferences();

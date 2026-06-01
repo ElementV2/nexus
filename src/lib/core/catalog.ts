@@ -54,11 +54,34 @@ export function listActions(): CatalogActionEntry[] {
   return out;
 }
 
+// Per-kind action index, cached by the kind's `actions` array identity.
+// `getAction` is on the press critical path and `runStep` calls it per
+// step; a linear `.find()` over a large catalog (vMix ships ~450 actions)
+// ran on every press. The WeakMap is keyed by the array REFERENCE, so an
+// HMR re-register (which produces a fresh array) transparently rebuilds
+// the index and lets the stale one be collected.
+const actionIndexCache = new WeakMap<
+  ActionDefinition[],
+  Map<string, ActionDefinition>
+>();
+
+function actionIndexFor(
+  actions: ActionDefinition[]
+): Map<string, ActionDefinition> {
+  let idx = actionIndexCache.get(actions);
+  if (!idx) {
+    idx = new Map(actions.map((a) => [a.id, a]));
+    actionIndexCache.set(actions, idx);
+  }
+  return idx;
+}
+
 export function getAction(globalId: string): CatalogActionEntry | undefined {
   const [kind, id] = splitGlobalId(globalId);
   if (!kind || !id) return undefined;
   const k = getKind(kind);
-  const def = k?.actions?.find((a) => a.id === id);
+  if (!k?.actions) return undefined;
+  const def = actionIndexFor(k.actions).get(id);
   return def ? { globalId, kind, def } : undefined;
 }
 
@@ -107,6 +130,41 @@ export interface ActionRunResult {
 }
 
 /**
+ * Hard cap on how long ONE step may take. The brokers have their own
+ * (longer) transport timeouts — vMix aborts a command fetch at 5 s, OBS a
+ * request at 5 s. On a multi-step button fired sequentially, a single
+ * step pointed at a slow/dead device would otherwise FREEZE every step
+ * after it for up to that full transport timeout (the "press cut+mute,
+ * cut lands, everything else hangs 5 s" failure). This caps the per-step
+ * wait so the surface stays responsive; a genuinely reachable LAN device
+ * answers in single-digit ms, far under this. The underlying send still
+ * runs to completion in the background (and may land late) — we just stop
+ * blocking the sequence on it. (audit N1)
+ */
+const STEP_TIMEOUT_MS = 1500;
+
+/** Resolve `p`, or reject with a timeout error after `ms`. Does NOT cancel
+ *  `p` — the broker owns its own abort/cleanup; this only bounds the wait. */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms}ms`)),
+      ms
+    );
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
+/**
  * Execute one action against one connection. Looks up the action
  * definition in the registry, validates that the connection's kind
  * matches, asks the kind to translate options into a command, then
@@ -151,7 +209,11 @@ export async function runAction(
     };
   }
   try {
-    const data = await conn.broker.send(command);
+    const data = await withTimeout(
+      conn.broker.send(command),
+      STEP_TIMEOUT_MS,
+      `Action "${globalActionId}"`
+    );
     return { ok: true, data };
   } catch (err) {
     return {
