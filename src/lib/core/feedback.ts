@@ -24,9 +24,17 @@ export interface FeedbackOverride {
   /** Replace the button face text — e.g. show the active scene name on a
    *  generic "Set program scene" button. */
   text?: string;
-  /** Small dot in the top-right corner. */
-  badge?: { color: string; symbol?: string };
+  /** Top-right marker. A plain dot (optional centred symbol), or
+   *  `icon: "offline"` for the struck-through wi-fi "no connection" glyph. */
+  badge?: { color: string; symbol?: string; icon?: "offline" };
 }
+
+/** The persistent "this key's target connection isn't established" marker:
+ *  a struck-through wi-fi glyph top-right, leaving the operator's chosen
+ *  bg/fg untouched. Applied centrally by `evaluateFeedback` (see there). */
+export const OFFLINE_OVERRIDE: FeedbackOverride = {
+  badge: { color: "#ff3b30", icon: "offline" },
+};
 
 /**
  * A kind's feedback rule. Given the pressed action's id, its frozen option
@@ -61,8 +69,6 @@ export function feedbackFor(kind: string): FeedbackFn | undefined {
 export function disconnectedOverride(
   vars: Record<string, unknown>
 ): FeedbackOverride | null {
-  if (vars.connected === false) {
-    return { fgcolor: "rgba(255,255,255,0.35)", badge: { color: "#ff3b30" } };
-  }
+  if (vars.connected === false) return OFFLINE_OVERRIDE;
   return null;
 }

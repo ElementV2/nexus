@@ -144,6 +144,15 @@ export default function StreamdeckPage() {
     }
     return out;
   }, [connectionsData]);
+  // `<connectionId>` → connected, so the mockup shows the same persistent
+  // offline marker the hardware does for a key whose target link is down.
+  const connectedByConnection = useMemo(() => {
+    const out: Record<string, boolean> = {};
+    for (const c of connectionsData?.connections ?? []) {
+      out[c.id] = c.status === "connected";
+    }
+    return out;
+  }, [connectionsData]);
   // Default connection per kind + the flat connection list — the
   // inspector's per-action target picker and the mockup feedback resolve
   // the connection a key shows + controls — pinned, or first-of-kind.
@@ -1088,7 +1097,12 @@ export default function StreamdeckPage() {
                   // shows in real time (tally PGM/PVW, stream/rec
                   // active, current OBS scene, ...).
                   const override = binding
-                    ? evaluateFeedback(binding, vars, connectionIdsByKind)
+                    ? evaluateFeedback(
+                        binding,
+                        vars,
+                        connectionIdsByKind,
+                        connectedByConnection
+                      )
                     : null;
                   return (
                     <DeckKey

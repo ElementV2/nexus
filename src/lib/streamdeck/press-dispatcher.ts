@@ -71,9 +71,10 @@ class PressDispatcherImpl {
                 `${failed.length}/${results.length} step(s) failed — ` +
                 failed.map((r) => r.error ?? "unknown").join("; ")
             );
-            // Flash the key red so the operator SEES the press didn't take
-            // (device down / step timed out) instead of assuming success.
-            void streamdeckDriver.flashKeyError(serial, keyIndex, binding);
+            // No red flash here: a failed press almost always means the
+            // target connection is down, and that's now shown PERSISTENTLY
+            // by the offline marker (feedback coordinator) — clearer than a
+            // brief flash, and it's already on the key before the press.
           }
         })
         .catch((err) => {

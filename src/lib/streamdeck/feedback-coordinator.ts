@@ -21,6 +21,11 @@ import { evaluateFeedback, type VarsByConnection } from "./feedback";
  */
 
 
+/** How often the coordinator re-checks connection health to refresh the
+ *  offline marker. Bounds how long a silent DROP can stay hidden; a
+ *  reconnect clears the marker sooner via its snapshot's variable updates. */
+const STATUS_POLL_MS = 5_000;
+
 class CoordinatorImpl {
   private unsubVariables: (() => void) | null = null;
   private unsubDevices: (() => void) | null = null;
@@ -33,6 +38,11 @@ class CoordinatorImpl {
    *  (each announce calls refresh) coalesces into ONE recompute instead
    *  of N back-to-back HID re-enumerations. */
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Periodic recompute so a connection going up/down updates the offline
+   *  marker even when it publishes no variable change (a dropped vMix stops
+   *  emitting; without this its keys would never gain the offline icon).
+   *  Cheap: the driver skips keys whose resolved face is unchanged. */
+  private statusTimer: ReturnType<typeof setInterval> | null = null;
 
   start(): void {
     if (this.booted) return;
@@ -61,6 +71,15 @@ class CoordinatorImpl {
     // an offline device produces no variable updates to drive a later
     // recompute, so the deck stayed on the logo until a page was opened.
     void this.bootRender(0);
+    // Poll connection health so the offline marker tracks status changes
+    // that don't ride on a variable update (a dropped link stops publishing).
+    // A reconnect's fresh snapshot DOES publish variables, so the marker
+    // clears instantly then — this 5 s tick only bounds how long a *drop*
+    // can hide. Every broker reconnects on its own within ≤5 s, so the whole
+    // loop self-heals without the operator touching the Network page.
+    this.statusTimer = setInterval(() => {
+      if (this.booted) this.refresh();
+    }, STATUS_POLL_MS);
   }
 
   /** Keep trying to render the persisted layouts until at least one deck is
@@ -108,6 +127,7 @@ class CoordinatorImpl {
     const layouts = peekStreamdeckStore().layouts;
     const vars = buildVarsByConnection();
     const kinds = buildKindIndex();
+    const connected = buildConnectedIndex();
 
     for (const layout of layouts) {
       if (layout.deviceSerials.length === 0) continue;
@@ -120,7 +140,7 @@ class CoordinatorImpl {
       for (const [keyStr, binding] of Object.entries(layout.bindings)) {
         const keyIndex = Number(keyStr);
         if (!Number.isFinite(keyIndex)) continue;
-        const override = evaluateFeedback(binding, vars, kinds);
+        const override = evaluateFeedback(binding, vars, kinds, connected);
         for (const path of paths) {
           streamdeckDriver.renderKey(path, keyIndex, binding, override ?? undefined);
         }
@@ -146,6 +166,8 @@ class CoordinatorImpl {
     this.unsubDevices = null;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
+    if (this.statusTimer) clearInterval(this.statusTimer);
+    this.statusTimer = null;
     this.booted = false;
   }
 }
@@ -164,6 +186,23 @@ function buildKindIndex(): Record<string, string[]> {
   for (const c of connectionManager.list()) {
     if (!out[c.kind]) out[c.kind] = [];
     out[c.kind].push(c.id);
+  }
+  return out;
+}
+
+/** `<connectionId>` → is the broker currently connected. Drives the
+ *  persistent offline marker. A connection mid-(re)connect or errored reads
+ *  `false`, so its keys show "no connection" until the link is up. */
+function buildConnectedIndex(): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const c of connectionManager.list()) {
+    let status: string;
+    try {
+      status = c.broker.getStatus();
+    } catch {
+      status = "error";
+    }
+    out[c.id] = status === "connected";
   }
   return out;
 }
