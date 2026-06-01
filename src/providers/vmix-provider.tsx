@@ -1,96 +1,61 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useVmixEvents } from "@/hooks/use-vmix-events";
 import { useAbletonEvents } from "@/hooks/use-ableton-events";
 import { useObsEvents } from "@/hooks/use-obs-events";
+import { useConnections } from "@/hooks/use-connections";
 import { useVmixStore } from "@/stores/vmix-store";
 
 export function VmixProvider({ children }: { children: React.ReactNode }) {
-  useLoadPreferences();
+  useSyncVmixDefault();
   useVmixEvents();
   useAbletonEvents();
   useObsEvents();
   return <>{children}</>;
 }
 
-interface PrefsResponse {
-  vmix_host: string;
-  vmix_port: number;
-  vmix_srt_port: number;
-  polling_interval: number;
+interface VmixCfg {
+  host?: string;
+  port?: number;
+  srtPort?: number;
+  pollingInterval?: number;
 }
 
-const PREFS_FETCH_TIMEOUT_MS = 3000;
-
 /**
- * Mirror the server-side preferences into the client store.
+ * Mirror the DEFAULT vMix connection's config into the client vMix store
+ * (host / port / SRT port / poll interval). The legacy single-instance pages
+ * (live / playlist / title / colour) read the store, so this is what makes
+ * "the default vMix" the connection they drive.
  *
- * Previously polled every 5 s — on a 4-hour show that's ~2880 fetches
- * per tab for data that rarely changes. In-app writers (Connections
- * panel, Network scan) call `PUT /api/preferences` and mutate the
- * store directly, so the only "external" writer is the launcher
- * window — and an operator who touches the launcher is also touching
- * the browser, which fires `focus`. So we fetch once on mount and
- * refetch on window focus: same behaviour, zero idle traffic.
+ * Sources from `/api/connections` (the registry — the single source of truth)
+ * via the shared `useConnections` poller, NOT the old flat `vmix_host` mirror
+ * fields. Re-runs only when the connections payload actually changes (the
+ * hook byte-diffs before publishing), so there's no idle churn.
  */
-function useLoadPreferences() {
+function useSyncVmixDefault() {
+  const { data } = useConnections();
   const setConnectionInfo = useVmixStore((s) => s.setConnectionInfo);
   const setPollingInterval = useVmixStore((s) => s.setPollingInterval);
-  const last = useRef<PrefsResponse | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    let inFlight: AbortController | null = null;
-
-    const sync = async () => {
-      inFlight?.abort();
-      inFlight = new AbortController();
-      const timeout = setTimeout(
-        () => inFlight?.abort(),
-        PREFS_FETCH_TIMEOUT_MS
-      );
-      try {
-        const res = await fetch("/api/preferences", {
-          cache: "no-store",
-          signal: inFlight.signal,
-        });
-        if (!res.ok) return;
-        const prefs = (await res.json()) as PrefsResponse;
-        if (cancelled) return;
-        const prev = last.current;
-        if (
-          !prev ||
-          prev.vmix_host !== prefs.vmix_host ||
-          prev.vmix_port !== prefs.vmix_port ||
-          prev.vmix_srt_port !== prefs.vmix_srt_port
-        ) {
-          setConnectionInfo(
-            prefs.vmix_host,
-            prefs.vmix_port,
-            prefs.vmix_srt_port
-          );
-        }
-        if (!prev || prev.polling_interval !== prefs.polling_interval) {
-          setPollingInterval(prefs.polling_interval);
-        }
-        // Only mutate the ref AFTER the cancel guard so an unmounted
-        // component never publishes a stale read.
-        last.current = prefs;
-      } catch {
-        // server warming up, request aborted, or network blip
-      } finally {
-        clearTimeout(timeout);
-      }
-    };
-
-    sync();
-    const onFocus = () => sync();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("focus", onFocus);
-      inFlight?.abort();
-    };
-  }, [setConnectionInfo, setPollingInterval]);
+    const conns = data?.connections ?? [];
+    if (conns.length === 0) return;
+    const defId = data?.defaults?.vmix;
+    const conn =
+      conns.find((c) => c.id === defId && c.kind === "vmix") ??
+      conns.find((c) => c.kind === "vmix" && c.enabled) ??
+      conns.find((c) => c.kind === "vmix");
+    if (!conn) return;
+    const cfg = (conn.config ?? {}) as VmixCfg;
+    if (typeof cfg.host !== "string" || !cfg.host) return;
+    setConnectionInfo(
+      cfg.host,
+      typeof cfg.port === "number" ? cfg.port : 8088,
+      typeof cfg.srtPort === "number" ? cfg.srtPort : 5000
+    );
+    if (typeof cfg.pollingInterval === "number") {
+      setPollingInterval(cfg.pollingInterval);
+    }
+  }, [data, setConnectionInfo, setPollingInterval]);
 }

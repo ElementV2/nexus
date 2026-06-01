@@ -7,63 +7,24 @@ import {
 import type { ConnectionConfig } from "@/lib/core/types";
 
 export interface AppPreferences {
-  /** vMix HTTP API host (where vMix is running) */
-  vmix_host: string;
-  /** vMix HTTP API port (default 8088) */
-  vmix_port: number;
-  /** vMix SRT publisher port (default 5000) */
-  vmix_srt_port: number;
-  /** How often the UI polls the vMix XML state (ms) */
-  polling_interval: number;
   /** Optional shared PIN — not enforced yet */
   pin?: string;
 
-  /** AbletonOSC host (the machine running Live + AbletonOSC) */
-  ableton_host: string;
-  /** Port AbletonOSC listens on (default 11000) */
-  ableton_send_port: number;
-  /** Port AbletonOSC replies to (default 11001) */
-  ableton_recv_port: number;
-
-  /** OBS WebSocket host (machine running OBS Studio + obs-websocket v5) */
-  obs_host: string;
-  /** OBS WebSocket port (default 4455) */
-  obs_port: number;
-  /** Optional OBS WebSocket password — empty string when auth is off */
-  obs_password: string;
-
-  /** Recent vMix hosts the user has connected to, MRU order, cap 6. */
-  vmix_recent_hosts: string[];
-  /** Recent Ableton hosts the user has connected to, MRU order, cap 6. */
-  ableton_recent_hosts: string[];
-  /** Recent OBS hosts the user has connected to, MRU order, cap 6. */
-  obs_recent_hosts: string[];
-
   /**
-   * Multi-instance connections registry. Source of truth for which
-   * devices the manager spins up at boot. Auto-populated from the
-   * legacy `*_host` / `*_port` / `*_password` keys when absent so
-   * existing users see no disruption on first load post-upgrade.
-   *
-   * Each entry's `config` shape is opaque to this module — validated
-   * per-kind at the registry layer. Keep legacy keys readable in
-   * parallel: the broker for kind="vmix" still pulls from
-   * `vmix_host`/`vmix_port` until vMix is migrated to the registry too.
+   * Multi-instance connections registry — the SINGLE source of truth for
+   * which devices the manager spins up at boot. Each entry's `config` shape
+   * is opaque here (validated per-kind at the registry layer). The legacy
+   * single-instance pages (live / playlist / title / colour) and the SRT
+   * route read the DEFAULT connection's config directly (see
+   * `defaultConnectionConfig`) — there are no flat `*_host` mirror fields
+   * anymore.
    */
   connections: ConnectionConfig[];
 
   /**
    * Default connection per kind: `{ vmix: "<id>", ableton: "<id>" }`.
-   *
-   * Two roles:
-   *   1. Surfaces (Stream Deck) that fire an action without pinning a
-   *      connection use this kind's default instead of "first enabled".
-   *   2. The legacy single-instance pages (live / playlist / title /
-   *      colour) read the `*_host`/`*_port` fields — so whenever a
-   *      default changes (or the default connection's config is
-   *      edited) we mirror that connection's host/port back into the
-   *      legacy fields. That makes "the default vMix" the one those
-   *      pages drive, exactly like a multi-instance control surface.
+   * Surfaces (Stream Deck) that fire without an explicit pin, and the legacy
+   * single-instance pages, target this kind's default.
    */
   defaultConnections: Record<string, string>;
 
@@ -81,7 +42,6 @@ export interface AppPreferences {
 }
 
 const FILE = "preferences.json";
-const RECENT_CAP = 6;
 
 /**
  * Sentinel returned in place of stored secrets so the real value never
@@ -143,15 +103,13 @@ export function restoreConfigSecrets(
 }
 
 /**
- * Redact every secret a `getPreferences()` response would otherwise
- * leak: the legacy `obs_password` field and each connection's
- * per-instance config. Call ONLY on response boundaries — never before
- * persisting. Returns a copy.
+ * Redact every secret a `getPreferences()` response would otherwise leak —
+ * each connection's per-instance config (OBS / grandMA2 password). Call ONLY
+ * on response boundaries — never before persisting. Returns a copy.
  */
 export function redactPreferences(prefs: AppPreferences): AppPreferences {
   return {
     ...prefs,
-    obs_password: prefs.obs_password ? REDACTED_SECRET : "",
     connections: prefs.connections.map((c) => ({
       ...c,
       config: redactConfigSecrets(c.config),
@@ -160,84 +118,19 @@ export function redactPreferences(prefs: AppPreferences): AppPreferences {
 }
 
 /**
- * Legacy flat preference key → per-kind connection-config key. The legacy
- * `vmix_host`/`obs_*`/`ableton_*` fields are a DERIVED mirror of each
- * kind's default connection (see `applyDefaultsToLegacy`); the connection
- * is the single source of truth. Editing a legacy field therefore has to
- * be translated into a connection-config edit (see `legacyConfigPatches`)
- * — writing the legacy field directly is a no-op because the next
- * `applyDefaultsToLegacy` re-mirrors the connection's current value over
- * it. This map is the one place that correspondence lives.
+ * Config blob of the DEFAULT connection for a kind, or null. The single
+ * source of truth that the legacy single-instance pages + the SRT route read
+ * instead of the old flat `*_host`/`*_port` mirror fields.
  */
-const LEGACY_FIELD_MAP: Record<string, Record<string, string>> = {
-  vmix: {
-    vmix_host: "host",
-    vmix_port: "port",
-    vmix_srt_port: "srtPort",
-    polling_interval: "pollingInterval",
-  },
-  obs: {
-    obs_host: "host",
-    obs_port: "port",
-    obs_password: "password",
-  },
-  ableton: {
-    ableton_host: "host",
-    ableton_send_port: "sendPort",
-    ableton_recv_port: "recvPort",
-  },
-};
-
-/**
- * Extract, from a preferences PUT body, the per-kind config patches that
- * legacy device-field edits imply. Only keys actually present in the body
- * are included, so a `{ vmix_host }` edit yields `{ vmix: { host } }` and
- * touches nothing else. Pure.
- */
-export function legacyConfigPatches(
-  body: Record<string, unknown>
-): Record<string, Record<string, unknown>> {
-  const out: Record<string, Record<string, unknown>> = {};
-  for (const [kind, map] of Object.entries(LEGACY_FIELD_MAP)) {
-    let patch: Record<string, unknown> | null = null;
-    for (const [legacyKey, cfgKey] of Object.entries(map)) {
-      if (body[legacyKey] !== undefined) {
-        (patch ??= {})[cfgKey] = body[legacyKey];
-      }
-    }
-    if (patch) out[kind] = patch;
-  }
-  return out;
-}
-
-/**
- * Apply per-kind config patches onto each kind's DEFAULT connection,
- * returning a new connections array. Kinds with no default connection are
- * skipped (nothing to target — the edit falls back to the legacy field,
- * preserving pre-registry behaviour). Pure.
- */
-export function applyLegacyPatchesToConnections(
-  connections: ConnectionConfig[],
-  defaults: Record<string, string>,
-  patches: Record<string, Record<string, unknown>>
-): ConnectionConfig[] {
-  let next = connections;
-  for (const [kind, patch] of Object.entries(patches)) {
-    const targetId = defaults[kind];
-    if (!targetId) continue;
-    next = next.map((c) =>
-      c.id === targetId
-        ? {
-            ...c,
-            config: {
-              ...((c.config as Record<string, unknown> | null) ?? {}),
-              ...patch,
-            },
-          }
-        : c
-    );
-  }
-  return next;
+export function defaultConnectionConfig(
+  kind: string
+): Record<string, unknown> | null {
+  const p = peekPreferences();
+  const id = p.defaultConnections[kind];
+  if (!id) return null;
+  const conn = p.connections.find((c) => c.id === id);
+  if (!conn || conn.kind !== kind) return null;
+  return (conn.config ?? {}) as Record<string, unknown>;
 }
 
 /**
@@ -254,19 +147,6 @@ export function applyLegacyPatchesToConnections(
 let prefsCache: { mtime: number | null; value: AppPreferences } | null = null;
 
 export const DEFAULT_PREFERENCES: AppPreferences = {
-  vmix_host: "localhost",
-  vmix_port: VMIX_DEFAULT_PORT,
-  vmix_srt_port: 5000,
-  polling_interval: POLLING_INTERVAL_MS,
-  ableton_host: "127.0.0.1",
-  ableton_send_port: 11000,
-  ableton_recv_port: 11001,
-  obs_host: "127.0.0.1",
-  obs_port: 4455,
-  obs_password: "",
-  vmix_recent_hosts: [],
-  ableton_recent_hosts: [],
-  obs_recent_hosts: [],
   connections: [],
   defaultConnections: {},
   connectionsSeeded: false,
@@ -278,33 +158,28 @@ function computePreferences(): AppPreferences {
   if (prefsCache && prefsCache.mtime === mtime) {
     return prefsCache.value;
   }
-  const merged = {
+  const raw = readJson<Record<string, unknown>>(FILE, {});
+  // Pick ONLY the known fields — never spread `raw` wholesale, or a
+  // pre-registry file's flat `*_host` keys would leak back onto the typed
+  // shape and get re-persisted. The seed reads the flat keys defensively.
+  const merged: AppPreferences = {
     ...DEFAULT_PREFERENCES,
-    ...readJson<Partial<AppPreferences>>(FILE, {}),
+    ...(typeof raw.pin === "string" ? { pin: raw.pin } : {}),
+    connections: sanitizeConnections(raw.connections),
+    connectionsSeeded: raw.connectionsSeeded === true,
   };
-  // A hand-edited or partially-corrupted prefs file could leave
-  // `*_recent_hosts` as a non-array (null, string, object). Anything
-  // downstream that calls `.filter` / `.map` on it would crash. Coerce
-  // back to a clean array of strings.
-  merged.vmix_recent_hosts = sanitizeHostList(merged.vmix_recent_hosts);
-  merged.ableton_recent_hosts = sanitizeHostList(merged.ableton_recent_hosts);
-  merged.obs_recent_hosts = sanitizeHostList(merged.obs_recent_hosts);
-  merged.connections = sanitizeConnections(merged.connections);
-  merged.connectionsSeeded = merged.connectionsSeeded === true;
-  // Auto-seed `connections[]` from legacy keys for users upgrading
-  // from a build that only had named host/port fields. We don't write
-  // back here on purpose — the synthetic entries materialize at read
-  // time only and become persisted the first time the user saves any
-  // connection-related field. Keeps the migration zero-touch.
+  // Auto-seed `connections[]` for a fresh install, or migrate a pre-registry
+  // file that only had flat `*_host`/`*_port` keys. Materialised at read time
+  // only; persisted on the first connection write.
   //
-  // Gated on `connectionsSeeded`: once any connection write has
-  // persisted, an empty list is a deliberate "no connections" state
-  // (the operator deleted them all) and must NOT be re-seeded.
+  // Gated on `connectionsSeeded`: once any connection write has persisted, an
+  // empty list is a deliberate "no connections" state (the operator deleted
+  // them all) and must NOT be re-seeded.
   if (!merged.connectionsSeeded && merged.connections.length === 0) {
-    merged.connections = synthesizeLegacyConnections(merged);
+    merged.connections = synthesizeLegacyConnections(raw);
   }
   merged.defaultConnections = sanitizeDefaults(
-    merged.defaultConnections,
+    raw.defaultConnections,
     merged.connections
   );
   prefsCache = { mtime, value: merged };
@@ -361,57 +236,6 @@ function sanitizeDefaults(
 }
 
 /**
- * Mirror each default connection's host/port config into the legacy
- * single-instance fields (`vmix_host`, `obs_*`, `ableton_*`). The
- * legacy live/playlist/title pages still read those, so this is what
- * makes "the default vMix" the connection those pages drive. Pure —
- * returns a patched copy, never writes.
- */
-function applyDefaultsToLegacy(p: AppPreferences): AppPreferences {
-  const next = { ...p };
-  const byId = new Map(p.connections.map((c) => [c.id, c]));
-  const cfgOf = (kind: string): Record<string, unknown> | null => {
-    const id = p.defaultConnections[kind];
-    if (!id) return null;
-    const conn = byId.get(id);
-    if (!conn || conn.kind !== kind) return null;
-    return (conn.config ?? {}) as Record<string, unknown>;
-  };
-  const num = (v: unknown, fallback: number): number => {
-    const n = typeof v === "number" ? v : Number(v);
-    return Number.isFinite(n) ? n : fallback;
-  };
-  const str = (v: unknown, fallback: string): string =>
-    typeof v === "string" && v ? v : fallback;
-
-  const vmix = cfgOf("vmix");
-  if (vmix) {
-    next.vmix_host = str(vmix.host, next.vmix_host);
-    next.vmix_port = num(vmix.port, next.vmix_port);
-    next.vmix_srt_port = num(vmix.srtPort, next.vmix_srt_port);
-    next.polling_interval = num(vmix.pollingInterval, next.polling_interval);
-  }
-  const obs = cfgOf("obs");
-  if (obs) {
-    next.obs_host = str(obs.host, next.obs_host);
-    next.obs_port = num(obs.port, next.obs_port);
-    next.obs_password = str(obs.password, next.obs_password);
-  }
-  const ableton = cfgOf("ableton");
-  if (ableton) {
-    next.ableton_host = str(ableton.host, next.ableton_host);
-    next.ableton_send_port = num(ableton.sendPort, next.ableton_send_port);
-    next.ableton_recv_port = num(ableton.recvPort, next.ableton_recv_port);
-  }
-  return next;
-}
-
-function sanitizeHostList(v: unknown): string[] {
-  if (!Array.isArray(v)) return [];
-  return v.filter((x): x is string => typeof x === "string" && x.length > 0);
-}
-
-/**
  * Strip clearly-invalid entries from the persisted connections list.
  * A bad entry (missing kind / id) would explode in the manager loop;
  * dropping it silently is preferable to taking down the whole boot.
@@ -437,21 +261,23 @@ function sanitizeConnections(v: unknown): ConnectionConfig[] {
 }
 
 /**
- * Build a default `connections[]` from the legacy per-device fields.
- * Used only when the persisted list is empty so existing installs
- * upgrade in place. IDs are deterministic (`legacy-<kind>`) so a user
- * editing the synthesized entry and saving preserves the same row
- * instead of accumulating duplicates across reloads.
- *
- * Only vMix is seeded unconditionally — it's the historical core and
- * the live / playlist / title / colour pages depend on a vMix broker
- * existing. OBS and Ableton are seeded ONLY when the operator actually
- * pointed them at a non-default host in a previous build; otherwise a
- * fresh install would surface OBS / Ableton sidebar pages for gear
- * that was never connected. New OBS / Ableton connections are added
- * explicitly via the connections panel.
+ * Seed `connections[]` when the persisted list is empty: a default vMix
+ * connection (the historical core — the live / playlist / title / colour
+ * pages need a vMix broker), plus OBS / Ableton ONLY if a PRE-REGISTRY file
+ * pointed them at a non-default host. The legacy flat `*_host`/`*_port` keys
+ * are read defensively from the raw JSON (`raw`) so an upgrading install
+ * migrates in place; a fresh install just gets vMix on its default host.
+ * Deterministic ids (`legacy-<kind>`) so editing + saving preserves the row.
  */
-function synthesizeLegacyConnections(p: AppPreferences): ConnectionConfig[] {
+function synthesizeLegacyConnections(
+  raw: Record<string, unknown>
+): ConnectionConfig[] {
+  const num = (v: unknown, fallback: number): number => {
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+
   const out: ConnectionConfig[] = [
     {
       id: "legacy-vmix",
@@ -459,141 +285,77 @@ function synthesizeLegacyConnections(p: AppPreferences): ConnectionConfig[] {
       label: "vMix",
       enabled: true,
       config: {
-        host: p.vmix_host,
-        port: p.vmix_port,
-        pollingInterval: p.polling_interval,
-        srtPort: p.vmix_srt_port,
+        host: str(raw.vmix_host) || "localhost",
+        port: num(raw.vmix_port, VMIX_DEFAULT_PORT),
+        pollingInterval: num(raw.polling_interval, POLLING_INTERVAL_MS),
+        srtPort: num(raw.vmix_srt_port, 5000),
       },
     },
   ];
-  if (p.obs_host && p.obs_host !== DEFAULT_PREFERENCES.obs_host) {
+  const obsHost = str(raw.obs_host);
+  if (obsHost && obsHost !== "127.0.0.1") {
     out.push({
       id: "legacy-obs",
       kind: "obs",
       label: "OBS Studio",
       enabled: true,
       config: {
-        host: p.obs_host,
-        port: p.obs_port,
-        password: p.obs_password,
+        host: obsHost,
+        port: num(raw.obs_port, 4455),
+        password: str(raw.obs_password),
       },
     });
   }
-  if (
-    p.ableton_host &&
-    p.ableton_host !== DEFAULT_PREFERENCES.ableton_host
-  ) {
+  const abletonHost = str(raw.ableton_host);
+  if (abletonHost && abletonHost !== "127.0.0.1") {
     out.push({
       id: "legacy-ableton",
       kind: "ableton",
       label: "Ableton Live",
       enabled: true,
       config: {
-        host: p.ableton_host,
-        sendPort: p.ableton_send_port,
-        recvPort: p.ableton_recv_port,
+        host: abletonHost,
+        sendPort: num(raw.ableton_send_port, 11000),
+        recvPort: num(raw.ableton_recv_port, 11001),
       },
     });
   }
   return out;
 }
 
-/**
- * Prepend a host to the MRU list, deduping (case-insensitive) and
- * capping length. Returns the new list. No-op for empty / falsy hosts.
- */
-function bumpRecent(list: string[], host: string | undefined): string[] {
-  const trimmed = host?.trim();
-  if (!trimmed) return list;
-  const lower = trimmed.toLowerCase();
-  const filtered = list.filter((h) => h.toLowerCase() !== lower);
-  return [trimmed, ...filtered].slice(0, RECENT_CAP);
-}
-
 export function setPreferences(
   partial: Partial<AppPreferences>
 ): AppPreferences {
   const current = getPreferences();
-
-  // Trim host strings before merging so a pasted "  10.0.0.5  " is
-  // stored canonical and the MRU dedup (which is case-insensitive but
-  // strict on whitespace) actually fires across consecutive saves.
-  const cleaned: Partial<AppPreferences> = { ...partial };
-  if (typeof cleaned.vmix_host === "string") {
-    cleaned.vmix_host = cleaned.vmix_host.trim();
-  }
-  if (typeof cleaned.ableton_host === "string") {
-    cleaned.ableton_host = cleaned.ableton_host.trim();
-  }
-  if (typeof cleaned.obs_host === "string") {
-    cleaned.obs_host = cleaned.obs_host.trim();
-  }
-
-  const next: AppPreferences = { ...current, ...cleaned };
+  const next: AppPreferences = { ...current, ...partial };
   // Any persisted write latches the migration: from here on an empty
   // connections list is honoured as-is and never re-seeded.
   next.connectionsSeeded = true;
 
-  // Auto-track recent hosts whenever the active host actually changes.
-  // The UI never needs to manage the MRU list — it just edits the host
-  // field and we record the history server-side.
-  if (
-    cleaned.vmix_host !== undefined &&
-    cleaned.vmix_host !== current.vmix_host
-  ) {
-    next.vmix_recent_hosts = bumpRecent(
-      current.vmix_recent_hosts ?? [],
-      cleaned.vmix_host
-    );
-  }
-  if (
-    cleaned.ableton_host !== undefined &&
-    cleaned.ableton_host !== current.ableton_host
-  ) {
-    next.ableton_recent_hosts = bumpRecent(
-      current.ableton_recent_hosts ?? [],
-      cleaned.ableton_host
-    );
-  }
-  if (
-    cleaned.obs_host !== undefined &&
-    cleaned.obs_host !== current.obs_host
-  ) {
-    next.obs_recent_hosts = bumpRecent(
-      current.obs_recent_hosts ?? [],
-      cleaned.obs_host
-    );
+  // Sanitize an incoming connections list — if the caller passes something
+  // malformed we still write a clean array (instead of corrupting the file).
+  if (partial.connections !== undefined) {
+    next.connections = sanitizeConnections(partial.connections);
   }
 
-  // Sanitize an incoming connections list — if the caller passes
-  // something malformed we still write a clean array (instead of
-  // corrupting the file).
-  if (cleaned.connections !== undefined) {
-    next.connections = sanitizeConnections(cleaned.connections);
-  }
-
-  // Keep the defaults map honest against the (possibly new) connection
-  // list, then mirror the default connections' config into the legacy
-  // single-instance fields so the live/playlist/title pages always
-  // track the chosen default.
+  // Keep the defaults map honest against the (possibly new) connection list.
   next.defaultConnections = sanitizeDefaults(
-    cleaned.defaultConnections ?? next.defaultConnections,
+    partial.defaultConnections ?? next.defaultConnections,
     next.connections
   );
-  const synced = applyDefaultsToLegacy(next);
 
-  writeJson(FILE, synced);
-  // Prime the cache with the just-written value so the inevitable
-  // post-write `getPreferences()` (reconcile, response body) is a clone,
-  // not a full recompute. Keyed by the fresh mtime.
-  prefsCache = { mtime: fileMtimeMs(FILE), value: synced };
-  return structuredClone(synced);
+  writeJson(FILE, next);
+  // Prime the cache with the just-written value so the inevitable post-write
+  // `getPreferences()` (reconcile, response body) is a clone, not a full
+  // recompute. Keyed by the fresh mtime.
+  prefsCache = { mtime: fileMtimeMs(FILE), value: next };
+  return structuredClone(next);
 }
 
 /**
- * Set (or clear, with `null`) the default connection for a kind. The
- * write path mirrors the new default's host/port into the legacy
- * fields so the single-instance pages follow it immediately.
+ * Set (or clear, with `null`) the default connection for a kind. The legacy
+ * single-instance pages read the default connection's config directly, so
+ * they follow the new default immediately.
  */
 export function setDefaultConnection(
   kind: string,

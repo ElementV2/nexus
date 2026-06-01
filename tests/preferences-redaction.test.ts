@@ -85,10 +85,9 @@ describe("restoreConfigSecrets", () => {
 });
 
 describe("redactPreferences", () => {
-  it("masks obs_password and per-connection secrets, leaves the rest", () => {
+  it("masks per-connection secrets, leaves the rest", () => {
     const prefs = {
       ...DEFAULT_PREFERENCES,
-      obs_password: "topsecret",
       connections: [
         {
           id: "a",
@@ -107,22 +106,24 @@ describe("redactPreferences", () => {
       ],
     };
     const out = redactPreferences(prefs);
-    expect(out.obs_password).toBe(REDACTED_SECRET);
     expect((out.connections[0].config as Record<string, unknown>).password).toBe(
       REDACTED_SECRET
     );
     expect((out.connections[0].config as Record<string, unknown>).host).toBe("h");
     expect(out.connections[1].config).toEqual({ host: "v", port: 8088 });
     // Original object untouched (we only redact a copy for the response).
-    expect(prefs.obs_password).toBe("topsecret");
     expect((prefs.connections[0].config as Record<string, unknown>).password).toBe(
       "p1"
     );
   });
 
-  it("keeps an empty obs_password empty", () => {
-    expect(
-      redactPreferences({ ...DEFAULT_PREFERENCES, obs_password: "" }).obs_password
-    ).toBe("");
+  it("leaves a connection with no password untouched", () => {
+    const out = redactPreferences({
+      ...DEFAULT_PREFERENCES,
+      connections: [
+        { id: "a", kind: "vmix", label: "vMix", enabled: true, config: { host: "v" } },
+      ],
+    });
+    expect(out.connections[0].config).toEqual({ host: "v" });
   });
 });

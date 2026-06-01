@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useVmixStore } from "@/stores/vmix-store";
+import { useConnections } from "@/hooks/use-connections";
 import {
   TopBar,
   Section,
@@ -150,6 +151,54 @@ function NetworkPage() {
   const currentHost = useVmixStore((s) => s.vmixHost);
   const currentPort = useVmixStore((s) => s.vmixPort);
   const currentSrtPort = useVmixStore((s) => s.vmixSrtPort);
+  const { data: connData, refresh: refreshConnections } = useConnections();
+
+  // Point the DEFAULT connection of a kind at a freshly-discovered IP by
+  // patching its registry config (the single source of truth) and saving the
+  // connections list — no more flat `*_host` fields. Creates the connection
+  // if none exists yet (e.g. a wiped registry).
+  async function pointDefaultConnection(
+    kind: string,
+    ip: string,
+    extra: Record<string, unknown>
+  ): Promise<boolean> {
+    const conns = connData?.connections ?? [];
+    const defId = connData?.defaults?.[kind];
+    const target =
+      conns.find((c) => c.id === defId && c.kind === kind) ??
+      conns.find((c) => c.kind === kind && c.enabled) ??
+      conns.find((c) => c.kind === kind);
+    const patched = target
+      ? conns.map((c) =>
+          c.id === target.id
+            ? {
+                ...c,
+                config: {
+                  ...((c.config as Record<string, unknown> | null) ?? {}),
+                  host: ip,
+                  ...extra,
+                },
+              }
+            : c
+        )
+      : [
+          ...conns,
+          {
+            id: crypto.randomUUID(),
+            kind,
+            label: kind === "vmix" ? "vMix" : kind === "obs" ? "OBS Studio" : kind,
+            enabled: true,
+            config: { host: ip, ...extra },
+          },
+        ];
+    const res = await fetch("/api/preferences", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ connections: patched }),
+    });
+    if (res.ok) refreshConnections();
+    return res.ok;
+  }
 
   const scanId = searchParams.get("scan");
 
@@ -201,12 +250,8 @@ function NetworkPage() {
     }
     setVmixConnecting(ip);
     try {
-      const res = await fetch("/api/preferences", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vmix_host: ip, vmix_port: currentPort }),
-      });
-      if (!res.ok) throw new Error("Failed to save preferences");
+      const ok = await pointDefaultConnection("vmix", ip, { port: currentPort });
+      if (!ok) throw new Error("Failed to save preferences");
       setConnectionInfo(ip, currentPort, currentSrtPort);
       router.push("/live");
     } catch {
@@ -216,12 +261,8 @@ function NetworkPage() {
 
   async function connectObs(ip: string) {
     try {
-      const res = await fetch("/api/preferences", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ obs_host: ip, obs_port: 4455 }),
-      });
-      if (!res.ok) throw new Error("Failed to save preferences");
+      const ok = await pointDefaultConnection("obs", ip, { port: 4455 });
+      if (!ok) throw new Error("Failed to save preferences");
       router.push("/obs");
     } catch {
       /* surfaced via the OBS card */

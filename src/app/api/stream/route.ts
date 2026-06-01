@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { spawn, type ChildProcess } from "child_process";
 import ffmpegStaticImport from "ffmpeg-static";
-import { getPreferences } from "@/lib/db/preferences";
+import { defaultConnectionConfig } from "@/lib/db/preferences";
 
 export const dynamic = "force-dynamic";
 
@@ -148,22 +148,27 @@ function ensureRelay(host: string, port: string): Relay {
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest) {
-  const prefs = getPreferences();
   const sp = request.nextUrl.searchParams;
+  // Default vMix connection's config (the source of truth — no flat fields).
+  const vmix = defaultConnectionConfig("vmix");
 
   // Let the caller stream a SPECIFIC vMix (the floating player's picker)
   // without touching the global default. Fall back to the default vMix
-  // prefs when no query is given. Host is validated to a bare host/IP so
+  // connection when no query is given. Host is validated to a bare host/IP so
   // it can't smuggle extra SRT URL params.
   const HOST_RE = /^[A-Za-z0-9.\-]+$/;
   const qHost = sp.get("host");
-  const host = qHost && HOST_RE.test(qHost) ? qHost : prefs.vmix_host;
+  const defHost = typeof vmix?.host === "string" ? vmix.host : "";
+  const host = qHost && HOST_RE.test(qHost) ? qHost : defHost;
 
   const qPort = Number(sp.get("srtPort"));
+  const defSrt = Number(vmix?.srtPort);
   const srtPort =
     Number.isInteger(qPort) && qPort >= 1 && qPort <= 65535
       ? qPort
-      : prefs.vmix_srt_port;
+      : Number.isInteger(defSrt) && defSrt >= 1 && defSrt <= 65535
+        ? defSrt
+        : 5000;
   const port = String(srtPort);
 
   if (!host) {

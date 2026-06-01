@@ -4,9 +4,7 @@ import {
   setPreferences,
   redactPreferences,
   restoreConfigSecrets,
-  legacyConfigPatches,
-  applyLegacyPatchesToConnections,
-  REDACTED_SECRET,
+  type AppPreferences,
 } from "@/lib/db/preferences";
 import { ensureBooted, reconcileFromPreferences } from "@/lib/core/boot";
 
@@ -18,18 +16,10 @@ export async function GET() {
 }
 
 /**
- * Update preferences.
- *
- * The legacy flat device fields (`vmix_host`, `obs_*`, `ableton_*`) are a
- * DERIVED mirror of each kind's default connection — the registry
- * connection is the single source of truth. So a legacy-field edit in the
- * body is translated into that connection's config (see
- * `legacyConfigPatches`), then persisted through the registry. Writing the
- * legacy field directly would be silently undone by `applyDefaultsToLegacy`
- * re-mirroring the connection's current value — which is exactly why the
- * Network page's "Connect to vMix/OBS" used to no-op once a connection
- * existed. Routing the edit through the connection fixes that and reconciles
- * the broker so the new host takes effect immediately.
+ * Update preferences. The registry `connections` are the single source of
+ * truth (the old flat `*_host` mirror fields are gone). A `connections` write
+ * reconciles the live brokers so a host/port/password change takes effect
+ * immediately.
  */
 export async function PUT(request: NextRequest) {
   ensureBooted();
@@ -40,9 +30,8 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // Redacted-secret hygiene: a sentinel echoed back from a GET means
-  // "unchanged" — strip it so the stored value is preserved.
-  if (body.obs_password === REDACTED_SECRET) delete body.obs_password;
+  // Restore any redacted secret sentinels echoed back in a connections write
+  // to their stored value (the editor round-trips `••••••••` when untouched).
   if (Array.isArray(body.connections)) {
     const existingById = new Map(
       getPreferences().connections.map((c) => [c.id, c])
@@ -60,27 +49,9 @@ export async function PUT(request: NextRequest) {
     });
   }
 
-  // Translate legacy device-field edits → default-connection config edits.
-  const patches = legacyConfigPatches(body);
-
-  const updated = setPreferences(body);
-
-  if (Object.keys(patches).length > 0) {
-    const connections = applyLegacyPatchesToConnections(
-      updated.connections,
-      updated.defaultConnections,
-      patches
-    );
-    const synced = setPreferences({ connections });
-    // Reconcile so the per-instance broker picks up the new host/port/
-    // password immediately (no stale-config window).
-    reconcileFromPreferences();
-    return NextResponse.json(redactPreferences(synced));
-  }
-
-  // A direct `connections` write (bulk save with no legacy device-field
-  // edit) still changes the broker set → reconcile so the live brokers
-  // match the just-persisted list instead of waiting for another route.
+  const updated = setPreferences(body as Partial<AppPreferences>);
+  // A `connections` write changes the broker set → reconcile so the live
+  // brokers match the just-persisted list immediately (no stale-config window).
   if (Array.isArray(body.connections)) reconcileFromPreferences();
   return NextResponse.json(redactPreferences(updated));
 }
