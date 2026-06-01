@@ -7,13 +7,15 @@ import { evaluateFeedback, type VarsByConnection } from "./feedback";
 
 /**
  * Bridge between the VariableBus and the Stream Deck driver. Subscribes
- * once at boot; whenever a published variable changes, walks every
- * persisted layout's bindings and re-pushes the affected keys with
- * feedback overrides applied.
+ * once at boot; when published variables change it re-pushes the affected
+ * keys with feedback overrides applied.
  *
- * Naive full-walk is fine at our scale (a typical operator has 1-2
- * decks × 32 keys = 64 bindings). Optimizing to a dep graph would
- * cost more code than it saves in CPU.
+ * Targeted recompute (audit N12): a plain variable tick only re-evaluates
+ * keys whose TARGET connection actually changed — tracked via the changed
+ * `connectionId` the variable bus hands the subscriber. A vMix tally tick no
+ * longer walks every OBS/Ableton key. A FULL pass (boot, device change, the
+ * 5 s status poll) re-evaluates everything; unpinned keys carry no variable
+ * dependency (they're offline) and only refresh on a full pass.
  *
  * Coordinator also pushes the initial render for every paired layout
  * on boot — without it, the operator would see stale keys until the
@@ -34,6 +36,12 @@ class CoordinatorImpl {
    *  tick batch into one walk. Without this, a vMix poll that
    *  publishes 5 variables fires 5 walks back-to-back. */
   private recomputeQueued = false;
+  /** Connections whose variables changed since the last recompute — the
+   *  next pass only re-evaluates keys targeting these. */
+  private dirty = new Set<string>();
+  /** Set when the next pass must re-evaluate EVERY key (boot, device change,
+   *  status poll) rather than just the dirty connections'. */
+  private fullPending = false;
   /** Trailing-debounce for refresh() so a satellite reconnect storm
    *  (each announce calls refresh) coalesces into ONE recompute instead
    *  of N back-to-back HID re-enumerations. */
@@ -47,7 +55,8 @@ class CoordinatorImpl {
   start(): void {
     if (this.booted) return;
     this.booted = true;
-    this.unsubVariables = variableBus.subscribe(() => {
+    this.unsubVariables = variableBus.subscribe((entry) => {
+      this.dirty.add(entry.connectionId);
       if (this.recomputeQueued) return;
       this.recomputeQueued = true;
       queueMicrotask(() => {
@@ -93,6 +102,7 @@ class CoordinatorImpl {
       if (status.state === "ready") {
         const devices = await streamdeckDriver.listDevices();
         if (devices.length > 0) {
+          this.fullPending = true;
           await this.recompute();
           return; // decks are up and painted — variable/hotplug events take over
         }
@@ -117,6 +127,14 @@ class CoordinatorImpl {
    * the driver and let its debounce handle the work.
    */
   private async recompute(): Promise<void> {
+    // Capture + reset the dirty/full state up-front: variable changes that
+    // land during the awaits below go into a fresh batch and queue another
+    // pass, so none are lost.
+    const full = this.fullPending;
+    const dirty = this.dirty;
+    this.fullPending = false;
+    this.dirty = new Set();
+
     const status = await streamdeckDriver.status();
     if (status.state !== "ready") return;
     const devices = await streamdeckDriver.listDevices();
@@ -140,6 +158,13 @@ class CoordinatorImpl {
       for (const [keyStr, binding] of Object.entries(layout.bindings)) {
         const keyIndex = Number(keyStr);
         if (!Number.isFinite(keyIndex)) continue;
+        // Targeted pass: skip keys whose target connection didn't change.
+        // (Unpinned keys have no pin → only refreshed on a full pass.)
+        if (!full) {
+          const pin =
+            binding.preset.steps[0]?.connectionId ?? binding.connectionId;
+          if (!pin || !dirty.has(pin)) continue;
+        }
         const override = evaluateFeedback(binding, vars, kinds, connected);
         for (const path of paths) {
           streamdeckDriver.renderKey(path, keyIndex, binding, override ?? undefined);
@@ -152,6 +177,7 @@ class CoordinatorImpl {
    *  or fresh device connect. Trailing-debounced (150 ms) so a burst of
    *  satellite (re)announces collapses into one walk. */
   refresh(): void {
+    this.fullPending = true;
     if (this.refreshTimer) return;
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;

@@ -1,12 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import {
-  drawKeyFace,
-  KEY_FONT_FAMILY,
-  KEY_FONT_WEIGHT,
-  type FaceCtx,
-} from "@/lib/streamdeck/key-face";
+import { drawKeyFace, type FaceCtx } from "@/lib/streamdeck/key-face";
+import { whenKeyFontReady } from "./key-font";
 
 interface KeyFacePreviewProps {
   bg: string;
@@ -63,13 +59,7 @@ export function KeyFacePreview({
       });
     };
     paint();
-    const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
-    if (fonts?.load) {
-      fonts
-        .load(`${KEY_FONT_WEIGHT} 16px "${KEY_FONT_FAMILY}"`)
-        .then(paint)
-        .catch(() => {});
-    }
+    void whenKeyFontReady().then(paint);
     return () => {
       cancelled = true;
     };

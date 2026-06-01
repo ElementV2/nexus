@@ -3,12 +3,8 @@
 import { memo, useEffect, useRef } from "react";
 import type { DeckBinding } from "@/lib/db/streamdeck";
 import type { FeedbackOverride } from "@/lib/streamdeck/feedback";
-import {
-  drawKeyFace,
-  KEY_FONT_FAMILY,
-  KEY_FONT_WEIGHT,
-  type FaceCtx,
-} from "@/lib/streamdeck/key-face";
+import { drawKeyFace, type FaceCtx } from "@/lib/streamdeck/key-face";
+import { whenKeyFontReady } from "./key-font";
 import type { FireState } from "./types";
 
 interface DeckKeyProps {
@@ -136,14 +132,9 @@ export const DeckKey = memo(function DeckKey({
     };
     paint();
     // Redraw once the web font is ready (first mount): the initial paint may
-    // land before Barlow loads, which would mis-measure the auto-fit.
-    const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
-    if (fonts?.load) {
-      fonts
-        .load(`${KEY_FONT_WEIGHT} 16px "${KEY_FONT_FAMILY}"`)
-        .then(paint)
-        .catch(() => {});
-    }
+    // land before Barlow loads, which would mis-measure the auto-fit. Shared
+    // memoised promise — no per-key font-load allocation.
+    void whenKeyFontReady().then(paint);
     return () => {
       cancelled = true;
     };
