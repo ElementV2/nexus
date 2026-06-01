@@ -16,6 +16,35 @@ updater compares against the version embedded in its own installer asset
 name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
 shared release tag.
 
+## 0.1.16 — main app · 0.1.6 — Nexus Cross
+
+### Stream Deck — key rendering overhaul
+- **One shared renderer** paints every key face — the physical deck, the
+  editor grid, the inspector preview, the preset tiles, and the satellite
+  — so a key looks **identical everywhere**.
+- **New legible font** (Barlow Semi Condensed, bundled) replaces the old
+  mixed sans/mono; far clearer on small keys.
+- **Subtle diagonal background gradient** derived from the chosen colour
+  (no more flat slabs).
+- **Line breaks only where you type them** — no automatic wrapping — and
+  **no text outline/shadow**: it's your fg colour on your bg, nothing
+  added.
+
+### Stream Deck — persistent "no connection" marker
+- A small struck-through wi-fi glyph now appears (top-right) on any key
+  whose **target connection isn't established**, visible *before* the
+  press. Replaces the old red press-failure flash + white dot.
+- The marker resolves the **same** connection the key's feedback reads, so
+  a connected key never shows offline because a broken sibling sits first
+  in config order.
+
+### Connections — bulletproof auto-reconnect
+- **OBS** now reliably reconnects after a WebSocket drop (it previously
+  could get stuck "disconnected" until you reopened the Network page).
+- Every broker retries / heartbeats within **≤5 s** and recovers on its
+  own — vMix, OBS, grandMA2, Ableton, X32, grandMA3 — with no manual
+  intervention.
+
 ## 0.1.15 — main app · 0.1.5 — Nexus Cross
 
 ### Stream Deck — works headless, restores itself
