@@ -102,11 +102,21 @@ class VmixAdapter implements BrokerImpl {
 
   subscribe(cb: (event: KindEvent) => void): () => void {
     // vMix state-broker emits raw `Message` objects (no `type` field).
-    // Wrap each one in `{ type: "state", ... }` so the generic SSE
-    // route — which JSON-stringifies untyped messages just fine — and
-    // the consumer hook can both dispatch by tag like every other kind.
+    // Wrap each one in `{ type: "state", ... }` so the generic SSE route
+    // and the consumer hook can dispatch by tag like every other kind.
+    //
+    // The broker's StateMessage carries the full `raw` XML (~10-40 KB) for
+    // its internal byte-identical short-circuit, but we DON'T forward it:
+    // its only client was the (now-removed) debug page, yet it was
+    // JSON-stringified into every SSE frame for every connected client on
+    // every changed tick — the dominant serialization cost on this path.
+    // Forward only the parsed state. (audit N11)
     return this.broker.subscribe((msg) => {
-      cb({ type: "state", ...msg } as KindEvent);
+      if (msg.ok) {
+        cb({ type: "state", ok: true, state: msg.state, ts: msg.ts } as KindEvent);
+      } else {
+        cb({ type: "state", ok: false, error: msg.error, ts: msg.ts } as KindEvent);
+      }
     });
   }
 

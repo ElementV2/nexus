@@ -16,7 +16,6 @@ import {
   Layers,
   Wifi,
   Tv,
-  Activity,
   Menu,
   X,
   Music2,
@@ -36,12 +35,12 @@ interface NavItem {
 
 /**
  * Hard-wired pages that exist regardless of which devices are
- * configured. Just the cross-cutting ones (home/dashboard) — every
- * device-specific page is contributed by its kind via the registry,
- * so adding or removing a connection toggles them automatically.
+ * configured. Every device-specific page is contributed by its kind via
+ * the registry, so adding or removing a connection toggles them
+ * automatically. (The old dashboard "home" hub was removed — the deck is
+ * the always-present landing.)
  */
 const STATIC_NAV: NavItem[] = [
-  { href: "/dashboard",  label: "Home", icon: Activity },
   { href: "/streamdeck", label: "Deck", icon: Gamepad2 },
 ];
 
@@ -225,10 +224,7 @@ export function Sidebar({ onToggleStream, streamOpen }: SidebarProps) {
 
       <div className="flex-1 overflow-y-auto">
         {nav.map((item) => {
-          const isActive =
-            item.href === "/dashboard"
-              ? pathname === "/dashboard"
-              : pathname.startsWith(item.href);
+          const isActive = pathname.startsWith(item.href);
           return <NavTile key={item.href} item={item} active={isActive} />;
         })}
 

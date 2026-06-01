@@ -196,7 +196,7 @@ function NetworkPage() {
 
   async function connectVmix(ip: string) {
     if (connected && currentHost === ip) {
-      router.push("/dashboard");
+      router.push("/live");
       return;
     }
     setVmixConnecting(ip);
@@ -208,7 +208,7 @@ function NetworkPage() {
       });
       if (!res.ok) throw new Error("Failed to save preferences");
       setConnectionInfo(ip, currentPort, currentSrtPort);
-      router.push("/dashboard");
+      router.push("/live");
     } catch {
       setVmixConnecting(null);
     }
