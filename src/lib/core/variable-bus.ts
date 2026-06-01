@@ -66,6 +66,23 @@ class VariableBusImpl {
     return this.values.get(composeKey(connectionId, varId))?.value;
   }
 
+  /** Remove a single variable (notifying listeners with a `null` value) —
+   *  used when a dynamic entity disappears (e.g. a vMix input is deleted) so
+   *  its variables don't linger and drive stale feedback. No-op if absent. */
+  remove(connectionId: string, varId: string): void {
+    const key = composeKey(connectionId, varId);
+    if (!this.values.has(key)) return;
+    this.values.delete(key);
+    const entry: VariableEntry = { connectionId, varId, value: null, ts: Date.now() };
+    for (const l of this.listeners) {
+      try {
+        l(entry);
+      } catch {
+        /* a misbehaving listener should not break the bus */
+      }
+    }
+  }
+
   /** Snapshot of every known variable. Used by the API list endpoint
    *  and by new SSE subscribers to hydrate before deltas arrive. */
   snapshot(): VariableEntry[] {

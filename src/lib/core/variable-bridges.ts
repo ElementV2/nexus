@@ -68,6 +68,10 @@ interface VmixStateMessage {
 const VMIX_BUS_LETTERS = ["A", "B", "C", "D", "E", "F", "G"] as const;
 
 function bridgeVmix(connectionId: string, broker: BrokerImpl): () => void {
+  // Input numbers we published per-input vars for last snapshot, so a
+  // deleted/renumbered input's `input_<n>_*` vars are purged instead of
+  // lingering and driving a stale mute-tally feedback (audit N22).
+  let lastInputNums = new Set<number>();
   return broker.subscribe((event: KindEvent) => {
     if (event.type !== "state") return;
     const msg = event as unknown as VmixStateMessage & KindEvent;
@@ -117,13 +121,23 @@ function bridgeVmix(connectionId: string, broker: BrokerImpl): () => void {
     }
     // Per-input mute (mic-mute tally) for inputs that carry audio — keyed by
     // number, with a `_key` companion so a key-pinned mute button resolves.
+    const inputNums = new Set<number>();
     for (const inp of inputs) {
       if (inp.hasAudio && typeof inp.number === "number") {
+        inputNums.add(inp.number);
         batch[`input_${inp.number}_muted`] = Boolean(inp.muted);
         batch[`input_${inp.number}_key`] = inp.key ?? "";
       }
     }
     variableBus.setBatch(connectionId, batch);
+    // Purge per-input vars for inputs that vanished since the last snapshot.
+    for (const n of lastInputNums) {
+      if (!inputNums.has(n)) {
+        variableBus.remove(connectionId, `input_${n}_muted`);
+        variableBus.remove(connectionId, `input_${n}_key`);
+      }
+    }
+    lastInputNums = inputNums;
   });
 }
 

@@ -81,7 +81,17 @@ export function writeJson<T>(name: string, value: T): void {
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, JSON.stringify(value, null, 2), "utf-8");
   renameSync(tmp, path);
+  // Our own write changed the file — drop the mtime cache so the next read
+  // re-stats and the parse cache refreshes immediately (no stale self-read).
+  mtimeCache.delete(name);
 }
+
+/** Short TTL cache of `statSync().mtimeMs` per file. The coordinator's hot
+ *  path calls `fileMtimeMs` several times/sec via `peek*`; without this each
+ *  call hit a sync syscall (audit N14). External (launcher) writes are still
+ *  picked up within the TTL; our own writes invalidate immediately above. */
+const mtimeCache = new Map<string, { ts: number; mtime: number | null }>();
+const MTIME_TTL_MS = 250;
 
 /**
  * Last-modified time (ms) of a data file, or null if it doesn't exist.
@@ -91,9 +101,15 @@ export function writeJson<T>(name: string, value: T): void {
  * external writes from the launcher process.
  */
 export function fileMtimeMs(name: string): number | null {
+  const now = Date.now();
+  const cached = mtimeCache.get(name);
+  if (cached && now - cached.ts < MTIME_TTL_MS) return cached.mtime;
+  let mtime: number | null;
   try {
-    return statSync(join(DATA_DIR, name)).mtimeMs;
+    mtime = statSync(join(DATA_DIR, name)).mtimeMs;
   } catch {
-    return null;
+    mtime = null;
   }
+  mtimeCache.set(name, { ts: now, mtime });
+  return mtime;
 }

@@ -181,6 +181,10 @@ export class ObsBroker {
    *  REIDENTIFY (volume-meter toggle) — as opposed to a fresh connect.
    *  Lets `onIdentified` skip the full snapshot rebuild in that case. */
   private reidentifying = false;
+  /** Watchdog so a REIDENTIFY that never gets answered doesn't leave
+   *  `reidentifying` stuck true (which would make a later genuine fresh
+   *  Identified skip its snapshot rebuild). Cleared on Identified/stop. */
+  private reidentifyTimer: ReturnType<typeof setTimeout> | null = null;
 
   // ───────────────────────── Subscriber API ─────────────────────────
 
@@ -243,6 +247,10 @@ export class ObsBroker {
     if (this.connectTimer) {
       clearTimeout(this.connectTimer);
       this.connectTimer = null;
+    }
+    if (this.reidentifyTimer) {
+      clearTimeout(this.reidentifyTimer);
+      this.reidentifyTimer = null;
     }
     if (this.statsTimer) {
       clearInterval(this.statsTimer);
@@ -490,6 +498,10 @@ export class ObsBroker {
     // clear the flag and keep running.
     if (this.reidentifying) {
       this.reidentifying = false;
+      if (this.reidentifyTimer) {
+        clearTimeout(this.reidentifyTimer);
+        this.reidentifyTimer = null;
+      }
       return;
     }
     // NOTE: reconnect backoff is reset only after a FULLY successful
@@ -1371,8 +1383,15 @@ export class ObsBroker {
       : DEFAULT_EVENT_SUBSCRIPTIONS;
     if (this.status !== "connected") return;
     // Mark the next Identified as a re-identify so onIdentified skips the
-    // full snapshot rebuild (the data is already current).
+    // full snapshot rebuild (the data is already current). Guard it with a
+    // watchdog: if OBS never answers, clear the flag so a later real connect
+    // still rebuilds its snapshot.
     this.reidentifying = true;
+    if (this.reidentifyTimer) clearTimeout(this.reidentifyTimer);
+    this.reidentifyTimer = setTimeout(() => {
+      this.reidentifyTimer = null;
+      this.reidentifying = false;
+    }, 3_000);
     this.send({
       op: OP_REIDENTIFY,
       d: { eventSubscriptions: this.subscriptions },
