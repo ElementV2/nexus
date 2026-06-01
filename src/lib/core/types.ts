@@ -263,6 +263,14 @@ export interface DeviceKind {
   readonly tagline?: string;
 
   /**
+   * True for fire-and-forget transports that get NO reply (grandMA3 OSC is
+   * send-only over UDP). The "connected" status for these is optimistic —
+   * the link can't be verified — so the UI labels them "direct send, status
+   * not verified" instead of implying a confirmed connection.
+   */
+  readonly sendOnly?: boolean;
+
+  /**
    * Validate a raw config object loaded from preferences or POSTed by
    * the UI. Returns a typed config or a human-readable error. The
    * config shape is whatever the kind needs (host/port/password for

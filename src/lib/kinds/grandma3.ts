@@ -332,7 +332,10 @@ const grandma3Kind: DeviceKind = {
   kind: "grandma3",
   displayName: "grandMA3",
   icon: Lightbulb,
-  tagline: "OSC over UDP (CommandLine + faders)",
+  tagline: "OSC over UDP · direct send (no status feedback)",
+  // OSC to MA is one-way (UDP, no reply) — we can't verify the console is
+  // actually there, so the "connected" state is optimistic. The UI flags it.
+  sendOnly: true,
   parseConfig: parseMAConfig,
   defaultConfig: (): MAConfig => ({ host: "192.168.1.50", port: 9000, prefix: "" }),
   // No dedicated page — controlled from the Stream Deck editor.

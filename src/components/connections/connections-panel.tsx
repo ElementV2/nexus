@@ -533,6 +533,24 @@ function ConnectionCard({
           }}
         />
         <StatusBadge status={conn.status} />
+        {kind.sendOnly && (
+          <span
+            title="One-way OSC over UDP — the console never replies, so the link can't be verified. The status is optimistic; a press is sent blind."
+            style={{
+              fontSize: 9,
+              letterSpacing: "0.04em",
+              color: "var(--sub)",
+              textTransform: "uppercase",
+              fontFamily: "var(--font-mono)",
+              border: "1px solid var(--line-hi)",
+              borderRadius: 3,
+              padding: "1px 5px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            direct send · unverified
+          </span>
+        )}
         {(showDefault || isDefault) && (
           <button
             onClick={onSetDefault}

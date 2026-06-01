@@ -41,6 +41,7 @@ export async function GET() {
     kind: k.kind,
     displayName: k.displayName,
     tagline: k.tagline,
+    sendOnly: k.sendOnly,
     defaultConfig: k.defaultConfig(),
     pages: k.pages?.map((p) => ({ href: p.href, label: p.label })),
   }));

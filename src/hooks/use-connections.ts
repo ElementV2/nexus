@@ -20,6 +20,8 @@ export interface KindRow {
   kind: string;
   displayName: string;
   tagline?: string;
+  /** Fire-and-forget transport (no reply) — "connected" is optimistic. */
+  sendOnly?: boolean;
   defaultConfig: unknown;
   pages?: Array<{ href: string; label: string }>;
 }
