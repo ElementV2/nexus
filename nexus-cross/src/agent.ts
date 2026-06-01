@@ -199,9 +199,20 @@ export class Agent extends EventEmitter {
    *  shows "1 deck found" before you connect. The network uplink is only
    *  created once a server URL exists. */
   async start(settings: CrossSettings): Promise<void> {
-    await this.stop();
-    // Claim this run AFTER the teardown's bump; if a newer start/stop/block
-    // happens during any await below, `gen` diverges and we bail.
+    // Reconnect the SERVER link WITHOUT tearing down the local deck. The HID
+    // is independent of the uplink, so a manual Connect must not close +
+    // reopen the deck — that made it vanish from the list for a few seconds.
+    // Stop only the uplink here; full HID teardown stays in stop() /
+    // disconnect() / block() (the real "release the deck" paths).
+    this.startGen++;
+    if (this.linkDownResetTimer) {
+      clearTimeout(this.linkDownResetTimer);
+      this.linkDownResetTimer = null;
+    }
+    this.uplink?.stop();
+    this.uplink = null;
+    // Claim this run AFTER the bump; if a newer start/stop/block happens
+    // during any await below, `gen` diverges and we bail.
     const gen = this.startGen;
     this.lastSettings = settings;
     const cfg = toSatelliteConfig(settings);
@@ -221,8 +232,11 @@ export class Agent extends EventEmitter {
     // (a manual restart after a block would otherwise stay silently dead).
     this.blockedByLocal = false;
 
-    // Always bring up HID — it has nothing to do with the server.
-    const hid = new HidManager();
+    // Bring up HID — independent of the server. Reuse an already-open
+    // manager so a reconnect doesn't flicker the deck out of the list; only
+    // create + enumerate one when we don't have it yet. Never disposed here.
+    const freshHid = !this.hid;
+    const hid = this.hid ?? new HidManager();
     this.hid = hid;
 
     if (!cfg.serverUrl) {
@@ -235,12 +249,13 @@ export class Agent extends EventEmitter {
         lastError: "No server URL set",
       });
       hid.onDeviceChange(() => this.refreshDevices());
-      await hid.refresh();
-      if (gen !== this.startGen) {
-        void hid.dispose();
-        return;
+      if (freshHid) {
+        await hid.refresh();
+        // Superseded during enumeration → a newer run owns this.hid; bail
+        // WITHOUT disposing (it's the shared, persistent deck handle now).
+        if (gen !== this.startGen) return;
+        hid.watchHotplug();
       }
-      hid.watchHotplug();
       this.refreshDevices();
       return;
     }
@@ -323,15 +338,13 @@ export class Agent extends EventEmitter {
       }
     });
 
-    await hid.refresh();
-    if (gen !== this.startGen) {
-      // A newer start/stop/block superseded us during enumeration — tear
-      // down THIS run's hid (the newer run owns this.hid/uplink) and bail
-      // so we don't announce on a stale uplink or double-open the deck.
-      void hid.dispose();
-      return;
+    if (freshHid) {
+      await hid.refresh();
+      // Superseded during enumeration → the newer run owns this.hid; bail
+      // without disposing the shared deck handle.
+      if (gen !== this.startGen) return;
+      hid.watchHotplug();
     }
-    hid.watchHotplug();
     this.refreshDevices();
     // Best-effort — never block start() (and therefore the IPC caller /
     // boot) on a network round-trip. announce() has its own timeout and
