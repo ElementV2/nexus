@@ -22,13 +22,15 @@ LAN URL, a port picker, and a logs viewer.
 - **Multi-page operator UI** — Live (PGM/PVW routing + transition
   picker), OBS (scenes/audio/media/filters), Stream Deck editor, Replay
   (transport + channels + events + marks), Audio, Playlist, Titles, Web
-  Assets, Colorimetry, Network, Ableton, Timers, Live preview, Dashboard.
+  Assets, Colorimetry, Network, Ableton, Timers, Live preview.
 - **Multi-device, multi-instance** — several vMix / OBS / Ableton / X32 /
   grandMA connections at once, each on its own broker, with a default
   per kind.
 - **Stream Deck surfaces** — a drag-and-drop layout editor; one page can
   drive many decks, local or on remote machines via the nexus-cross
-  satellite; live tally/feedback on the keys.
+  satellite; live tally/feedback on the keys. Decks work **headless** (no
+  browser needed), **restore their last page on launch**, flash a key red
+  when a press fails, and **reset to the standby logo on shutdown**.
 - **LAN-first** — bind the server to a specific interface or all
   interfaces; share the URL with co-operators on the same network.
 - **Touch-friendly** — designed for tablets sitting on FOH consoles;
@@ -191,9 +193,7 @@ banner links straight to the new `.exe` for a manual upgrade
 │   │   │   ├── network/      # Connections panel + LAN device scanner
 │   │   │   ├── ableton/      # Clip launcher + transport (OSC)
 │   │   │   ├── timers/       # Countdown / countup timers on overlays
-│   │   │   ├── live-preview/ # Compact MPEG-TS viewer
-│   │   │   ├── dashboard/    # Multi-pane overview
-│   │   │   └── debug-xml/    # Raw vMix XML inspector
+│   │   │   └── live-preview/ # Compact MPEG-TS viewer
 │   │   ├── api/             # Route handlers:
 │   │   │                    #   connections/:id (command + SSE events),
 │   │   │                    #   streamdeck (devices, push, satellite, events),
@@ -207,7 +207,8 @@ banner links straight to the new `.exe` for a manual upgrade
 │   │   ├── core/            # Device-kind registry, per-instance broker
 │   │   │                    #   adapter, connection manager, variable bus
 │   │   ├── kinds/           # One file per device kind (vmix, obs, ableton,
-│   │   │                    #   x32, grandma2/3) — registered into core
+│   │   │                    #   x32, grandma2/3) + its <kind>-feedback.ts;
+│   │   │                    #   registered into core
 │   │   ├── vmix/ obs/ ableton/ x32/ grandma3/ osc/  # per-kind brokers
 │   │   ├── streamdeck/      # HID driver, feedback coordinator, press
 │   │   │                    #   dispatcher, satellite registry

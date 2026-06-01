@@ -16,6 +16,75 @@ updater compares against the version embedded in its own installer asset
 name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
 shared release tag.
 
+## 0.1.15 — main app · 0.1.5 — Nexus Cross
+
+### Stream Deck — works headless, restores itself
+- **The deck now works without opening the web UI.** On server start the
+  device runtime boots itself (a startup self-request triggers the broker
+  reconcile + press dispatcher + feedback coordinator), so a plugged-in
+  deck **responds to presses and shows live feedback** with no browser
+  open.
+- **Last page restored on launch.** When the server (re)starts, each deck
+  is repainted with the layout paired to its serial — retried until the
+  deck is actually connected, so a deck that wasn't ready the instant the
+  server came up still gets its page.
+- **Decks reset to the Elgato standby logo on shutdown** instead of
+  leaving stale, dead buttons lit. Local decks reset on a clean quit (the
+  launcher releases them before killing the server); satellite decks reset
+  on quit **and** when they lose the server (so a force-killed server still
+  leaves them clean).
+- **A failed press flashes the key red** (with a `!` badge) instead of
+  silently doing nothing — on a control surface you now *see* when an
+  action didn't take (device down / timed out). Failed steps are also
+  logged server-side.
+- **"Load to deck" always repaints every key** (fresh handle + cache
+  invalidation), fixing the case where a loaded layout only showed the
+  keys with feedback / the ones you pressed after another app (e.g. Elgato
+  Stream Deck) had touched the device.
+
+### Multi-action reliability
+- **A slow or dead device can no longer freeze a multi-action button.**
+  Each step is capped (1.5 s) instead of blocking the whole sequence for
+  the broker's full transport timeout.
+
+### Nexus Cross (satellite)
+- **The deck stays listed across a reconnect.** Clicking Connect used to
+  close + reopen the HID, so the deck vanished from the window for a few
+  seconds — the deck handle is now independent of the server link.
+- **Disconnect keeps the deck visible** (and resets it to the logo) instead
+  of dropping it from the list.
+- **Quit confirmation dialog** (mirrors the launcher) — quitting releases
+  the local decks, so it's now a deliberate choice.
+- **Clearer "deck in use by another app" message** when a deck is detected
+  but can't be opened (another program holds it), instead of a misleading
+  "no deck detected".
+
+### Stability & correctness hardening
+- **A single invalid connection can no longer brick every device.** One
+  bad config used to abort the whole reconcile, leaving the app with no
+  brokers and no working keys; bad entries are now skipped and logged.
+- **OBS stops reconnecting in a tight loop on a permanent auth failure**
+  (wrong password / RPC mismatch).
+- Smaller fixes: a re-identify (audio-meter toggle) no longer triggers a
+  full OBS snapshot rebuild; deleted OBS scenes no longer linger in the
+  cached snapshot; a departed satellite's key-face cache is purged; the
+  vMix state message is no longer mutated after it's been handed out.
+
+### Internals
+- **Feedback is now data-driven per kind.** Each device declares its
+  Stream Deck feedback rules in a co-located `kinds/<kind>-feedback.ts`
+  module that self-registers, replacing the central hardcoded switch
+  (behaviour unchanged).
+- **vMix SSE no longer ships the full raw XML** in every state frame — its
+  only consumer (the removed debug page) is gone, cutting the dominant
+  serialization cost on the vMix path.
+- **Action lookup is indexed** (was a linear scan over ~450 vMix actions
+  per press).
+
+### Removed
+- The **Dashboard hub** and the **raw-XML debug** pages were removed; the
+  deck is now the default landing page.
+
 ## 0.1.8
 
 ### Multi-instance connections
