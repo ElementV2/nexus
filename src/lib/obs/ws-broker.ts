@@ -185,6 +185,12 @@ export class ObsBroker {
    *  `reidentifying` stuck true (which would make a later genuine fresh
    *  Identified skip its snapshot rebuild). Cleared on Identified/stop. */
   private reidentifyTimer: ReturnType<typeof setTimeout> | null = null;
+  /** While the initial snapshot is being fetched (~20 sequential requests),
+   *  OBS events still arrive but `this.snapshot` is null. We buffer them here
+   *  and replay them once the snapshot is built, so an operator action during
+   *  connect isn't silently dropped (audit N4). */
+  private buildingSnapshot = false;
+  private eventBuffer: EventPayload[] = [];
 
   // ───────────────────────── Subscriber API ─────────────────────────
 
@@ -271,6 +277,8 @@ export class ObsBroker {
     }
     this.status = "disconnected";
     this.snapshot = null;
+    this.buildingSnapshot = false;
+    this.eventBuffer = [];
     this.lastStatusEvent = null;
     this.obsVersion = undefined;
     this.obsWebSocketVersion = undefined;
@@ -410,6 +418,8 @@ export class ObsBroker {
             : reason || `Connection closed (code ${code})`;
     this.publishStatus("disconnected", friendly);
     this.snapshot = null;
+    this.buildingSnapshot = false;
+    this.eventBuffer = [];
     this.ws = null;
     if (this.statsTimer) {
       clearInterval(this.statsTimer);
@@ -533,6 +543,9 @@ export class ObsBroker {
   // ───────────────────────── Snapshot build ─────────────────────────
 
   private async fetchSnapshot() {
+    // Start buffering events that arrive while we build the snapshot below.
+    this.buildingSnapshot = true;
+    this.eventBuffer = [];
     const version = await this.request<{
       obsVersion: string;
       obsWebSocketVersion: string;
@@ -675,6 +688,14 @@ export class ObsBroker {
     }
     this.publishStatus("connected");
     this.publish({ type: "snapshot", snapshot: this.snapshot });
+
+    // Replay any events that landed during the build now that the snapshot
+    // exists — applies the newest changes on top (idempotent / newest-wins),
+    // so an action taken mid-connect isn't lost.
+    this.buildingSnapshot = false;
+    const buffered = this.eventBuffer;
+    this.eventBuffer = [];
+    for (const p of buffered) this.onEvent(p);
   }
 
   private async tryFetchAudio(inputName: string): Promise<ObsAudioInput | null> {
@@ -806,7 +827,12 @@ export class ObsBroker {
 
   private onEvent(payload: EventPayload) {
     const d = payload.eventData;
-    if (!this.snapshot) return;
+    if (!this.snapshot) {
+      // Snapshot not built yet — buffer so we don't lose changes that
+      // happen during the connect handshake; replayed in fetchSnapshot.
+      if (this.buildingSnapshot) this.eventBuffer.push(payload);
+      return;
+    }
     const snap = this.snapshot;
 
     switch (payload.eventType) {
