@@ -324,8 +324,40 @@ export class ServerManager extends EventEmitter {
       this.runningTimer = null;
       if (this.proc === proc && this.status.phase === "starting") {
         this.updateStatus({ phase: "running" });
+        // Warm up the device runtime: hit a route once so the server's
+        // `ensureBooted()` runs (broker reconcile + Stream Deck press
+        // dispatcher + feedback coordinator + last-page render) WITHOUT
+        // waiting for someone to open the web UI. Done over HTTP — NOT by
+        // importing the app in-process — so it runs in the route context;
+        // that's the safe way to trigger headless boot (an in-process /
+        // instrumentation hook lands in a separate module context and
+        // duplicates singletons). Best-effort.
+        void this.warmUpRuntime();
       }
     }, 2000);
+  }
+
+  /** Fire one request at the freshly-started server so its device runtime
+   *  boots without the web UI being opened. Retries briefly because a dev
+   *  server compiles the route on first hit. Never throws. */
+  private async warmUpRuntime(): Promise<void> {
+    const host = this.hostname === "0.0.0.0" ? "127.0.0.1" : this.hostname;
+    const url = `http://${host}:${this.status.port}/api/connections`;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 5000);
+        const res = await fetch(url, { signal: ctrl.signal });
+        clearTimeout(t);
+        if (res.ok) {
+          this.log("info", "Device runtime warmed up (headless boot).");
+          return;
+        }
+      } catch {
+        /* server may still be compiling the route — retry */
+      }
+      await new Promise((r) => setTimeout(r, 1500));
+    }
   }
 
   async stop(): Promise<void> {
