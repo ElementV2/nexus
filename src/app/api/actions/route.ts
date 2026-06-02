@@ -25,6 +25,8 @@ export async function GET() {
       label: e.def.label,
       description: e.def.description,
       category: e.def.category,
+      bgcolor: e.def.bgcolor,
+      fgcolor: e.def.fgcolor,
       options: e.def.options ?? [],
     })),
     variables: listVariables().map((e) => ({

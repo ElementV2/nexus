@@ -187,6 +187,12 @@ export interface ActionDefinition {
   description?: string;
   /** Grouping in the preset browser (e.g. "Transitions", "Audio"). */
   category?: string;
+  /** Optional tile colours used when the unified browser synthesizes a
+   *  draggable tile from this action (i.e. the kind ships no separate
+   *  curated preset for it). Hex or CSS colour. Falls back to a neutral
+   *  face when unset. */
+  bgcolor?: string;
+  fgcolor?: string;
   /** Editor schema — array, not object, so the UI can preserve order. */
   options?: ActionOption[];
   /**

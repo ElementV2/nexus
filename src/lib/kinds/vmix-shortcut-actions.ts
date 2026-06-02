@@ -1,4 +1,4 @@
-import type { ActionDefinition, ActionOption, PresetDefinition } from "@/lib/core/types";
+import type { ActionDefinition, ActionOption } from "@/lib/core/types";
 import {
   VMIX_SHORTCUTS,
   type VmixCategory,
@@ -13,18 +13,22 @@ import {
  * documented vMix Function (numbered/lettered families already condensed
  * into one templated entry, e.g. `OverlayInput{ch}` covers 1..8,
  * `SetBus{bus}Volume` covers A..G). Here we turn each entry into ONE
- * ActionDefinition + ONE PresetDefinition so the operator gets every vMix
- * command as a single button WITHOUT ~790 near-duplicate tiles: a family
- * becomes one action whose placeholder (overlay #, bus, …) is an option
- * picker alongside Input / Value / etc.
+ * ActionDefinition so the operator gets every vMix command as a single
+ * button WITHOUT ~790 near-duplicate tiles: a family becomes one action
+ * whose placeholder (overlay #, bus, …) is an option picker alongside
+ * Input / Value / etc.
  *
- * This generated catalog is the ONLY vMix action/preset source — the kind
- * (`src/lib/kinds/vmix.ts`) wires `vmixShortcutActions`/`vmixShortcutPresets`
- * straight in; there is no separate hand-curated tile list. (The legacy
- * operator pages build their own commands via `src/lib/vmix/commands.ts`,
- * a typed-builder convenience layer; both ultimately emit the same
- * `VmixCommand` and go through the same dispatch.) Generated ids are
- * namespaced `sc-…`.
+ * vMix ships ACTIONS ONLY — no separate preset list. Each generated vMix
+ * preset used to be a 1:1 mirror of its action that added nothing but a
+ * tile colour, so we carry the colour ON the action (`bgcolor`/`fgcolor`)
+ * and let the unified browser synthesize the draggable tile from it. The
+ * multi-step capability ("several actions on one key") lives on the deck
+ * key/binding, not in this catalog — so dropping presets loses nothing.
+ *
+ * (The legacy operator pages build their own commands via
+ * `src/lib/vmix/commands.ts`, a typed-builder convenience layer; both
+ * ultimately emit the same `VmixCommand` and go through the same dispatch.)
+ * Generated ids are namespaced `sc-…`.
  */
 
 // vMix's NAMED transition functions (Cut, Fade, Wipe, …) are NOT in the
@@ -330,12 +334,8 @@ const CATEGORY_COLOR: Record<VmixCategory, Color> = {
   Browser: { bgcolor: "#636366", fgcolor: "#ffffff" },
 };
 
-function build(): {
-  actions: ActionDefinition[];
-  presets: PresetDefinition[];
-} {
+function build(): ActionDefinition[] {
   const actions: ActionDefinition[] = [];
-  const presets: PresetDefinition[] = [];
   const seen = new Set<string>();
 
   for (const s of ALL_SHORTCUTS) {
@@ -372,39 +372,30 @@ function build(): {
     const label = humanize(s.fn);
     const toCommand = buildToCommand(s);
 
+    // Tile colour carried ON the action: inherit the curated colour for
+    // the same vMix Function (resolved with default options), else a
+    // per-category accent. The unified browser uses this when it
+    // synthesizes the draggable tile (vMix ships no separate presets).
+    const defaults: Record<string, unknown> = {};
+    for (const o of options) {
+      if (o.default !== undefined) defaults[o.id] = o.default;
+    }
+    const fn = (toCommand(defaults) as { Function?: string }).Function ?? "";
+    const color = CURATED_COLOR_BY_FN[fn] ?? CATEGORY_COLOR[s.category];
+
     actions.push({
       id,
       label,
       category: s.category,
       description: s.description || undefined,
+      bgcolor: color.bgcolor,
+      fgcolor: color.fgcolor,
       options: options.length ? options : undefined,
       toCommand,
     });
-
-    // Default option values for the dropped preset.
-    const defaults: Record<string, unknown> = {};
-    for (const o of options) {
-      if (o.default !== undefined) defaults[o.id] = o.default;
-    }
-    // Colour: inherit the curated tile's colour for the same vMix Function
-    // (resolved with default options), else fall back to a category accent.
-    const fn = (toCommand(defaults) as { Function?: string }).Function ?? "";
-    const color = CURATED_COLOR_BY_FN[fn] ?? CATEGORY_COLOR[s.category];
-    presets.push({
-      id,
-      label,
-      category: `vMix · ${s.category}`,
-      text: label,
-      bgcolor: color.bgcolor,
-      fgcolor: color.fgcolor,
-      steps: [{ actionId: id, options: defaults }],
-    });
   }
 
-  return { actions, presets };
+  return actions;
 }
 
-const generated = build();
-
-export const vmixShortcutActions: ActionDefinition[] = generated.actions;
-export const vmixShortcutPresets: PresetDefinition[] = generated.presets;
+export const vmixShortcutActions: ActionDefinition[] = build();

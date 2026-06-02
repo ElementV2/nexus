@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  vmixShortcutActions,
-  vmixShortcutPresets,
-} from "@/lib/kinds/vmix-shortcut-actions";
+import { vmixShortcutActions } from "@/lib/kinds/vmix-shortcut-actions";
 import { VMIX_SHORTCUTS } from "@/lib/vmix/shortcuts";
 
 const byId = new Map(vmixShortcutActions.map((a) => [a.id, a]));
@@ -10,10 +7,10 @@ const cmd = (id: string, options: Record<string, unknown>) =>
   byId.get(id)!.toCommand(options) as Record<string, unknown>;
 
 describe("vMix shortcut generation — coverage", () => {
-  it("produces one action AND one preset per shortcut (scraped + named transitions)", () => {
-    expect(vmixShortcutActions.length).toBe(vmixShortcutPresets.length);
+  it("produces one action per shortcut (scraped + named transitions)", () => {
     // Every scraped entry, plus the manually-added named transitions
-    // (Cut/Fade/Wipe/…) the reference omits.
+    // (Cut/Fade/Wipe/…) the reference omits. vMix ships ACTIONS ONLY —
+    // there is no parallel preset list (the browser synthesizes tiles).
     expect(vmixShortcutActions.length).toBeGreaterThan(VMIX_SHORTCUTS.length);
   });
 
@@ -34,31 +31,22 @@ describe("vMix shortcut generation — coverage", () => {
     );
   });
 
-  it("every preset references an action that exists", () => {
-    for (const p of vmixShortcutPresets) {
-      for (const step of p.steps) {
-        expect(byId.has(step.actionId)).toBe(true);
-      }
+  it("every action carries a tile colour (so synthesized tiles aren't plain)", () => {
+    for (const a of vmixShortcutActions) {
+      expect(a.bgcolor, a.id).toBeTruthy();
+      expect(a.fgcolor, a.id).toBeTruthy();
     }
   });
 
-  it("every generated preset has a colour (no plain tiles)", () => {
-    for (const p of vmixShortcutPresets) {
-      expect(p.bgcolor, p.id).toBeTruthy();
-      expect(p.fgcolor, p.id).toBeTruthy();
-    }
-  });
-
-  it("colours tiles but NEVER red/green at rest (those are live-feedback only)", () => {
-    const byPid = new Map(vmixShortcutPresets.map((p) => [p.id, p]));
+  it("colours actions but NEVER red/green at rest (those are live-feedback only)", () => {
     // Tally buttons sit on a neutral base so the red/green feedback shows.
-    expect(byPid.get("sc-cut")?.bgcolor).toBe("#2c2c2e");
-    expect(byPid.get("sc-previewinput")?.bgcolor).toBe("#2c2c2e");
-    expect(byPid.get("sc-fade")?.bgcolor).toBe("#ff9500"); // orange (fade)
-    // No generated tile may use the reserved feedback colours as its base.
-    for (const p of vmixShortcutPresets) {
-      expect(p.bgcolor, p.id).not.toBe("#ff3b30"); // feedback red
-      expect(p.bgcolor, p.id).not.toBe("#34c759"); // feedback green
+    expect(byId.get("sc-cut")?.bgcolor).toBe("#2c2c2e");
+    expect(byId.get("sc-previewinput")?.bgcolor).toBe("#2c2c2e");
+    expect(byId.get("sc-fade")?.bgcolor).toBe("#ff9500"); // orange (fade)
+    // No action may use the reserved feedback colours as its base.
+    for (const a of vmixShortcutActions) {
+      expect(a.bgcolor, a.id).not.toBe("#ff3b30"); // feedback red
+      expect(a.bgcolor, a.id).not.toBe("#34c759"); // feedback green
     }
   });
 });

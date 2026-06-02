@@ -95,6 +95,9 @@ export interface ActionCatalogEntry {
   kind: string;
   id: string;
   label: string;
+  category?: string;
+  bgcolor?: string;
+  fgcolor?: string;
   options: ActionOptionDef[];
 }
 

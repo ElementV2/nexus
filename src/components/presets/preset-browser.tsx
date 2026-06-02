@@ -59,6 +59,8 @@ interface ActionEntry {
   label: string;
   description?: string;
   category?: string;
+  bgcolor?: string;
+  fgcolor?: string;
   options: ActionOptionDef[];
 }
 
@@ -141,8 +143,11 @@ export function PresetBrowserPanel({
         label: a.label,
         category: a.category,
         text: a.label.toUpperCase().slice(0, 12),
-        bgcolor: "#2c2c2e",
-        fgcolor: "#ffffff",
+        // Action-supplied tile colour (e.g. vMix carries its category
+        // accent on the action since it ships no presets); neutral face
+        // when the kind didn't specify one.
+        bgcolor: a.bgcolor ?? "#2c2c2e",
+        fgcolor: a.fgcolor ?? "#ffffff",
         steps: [{ actionId: a.id, options: defaultsOf(a.options) }],
         synthetic: true,
       }));

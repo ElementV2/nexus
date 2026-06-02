@@ -21,10 +21,7 @@ import type {
   KindEvent,
   VariableDefinition,
 } from "@/lib/core/types";
-import {
-  vmixShortcutActions,
-  vmixShortcutPresets,
-} from "./vmix-shortcut-actions";
+import { vmixShortcutActions } from "./vmix-shortcut-actions";
 
 /**
  * vMix kind — fully per-instance.
@@ -310,13 +307,12 @@ const vmixKind: DeviceKind = {
     { href: "/titles", label: "Titles", icon: Type },
     { href: "/colorimetry", label: "Color", icon: Palette },
   ],
-  // Actions + presets are the single generated vMix catalog — every
-  // documented Function (families condensed to one parameterized entry),
-  // plus the named transitions the reference omits. Curated colours are
-  // carried onto the matching tiles inside the generator.
+  // ONE generated vMix catalog: every documented Function (families
+  // condensed to one parameterized entry) + the named transitions the
+  // reference omits. Each action carries its tile colour; the unified
+  // browser synthesizes the draggable tile, so vMix ships NO presets.
   actions: vmixShortcutActions,
   variables: vmixVariables,
-  presets: vmixShortcutPresets,
   make({ config }): BrokerImpl {
     const parsed = parseVmixConfig(config);
     if (!parsed.ok) {
