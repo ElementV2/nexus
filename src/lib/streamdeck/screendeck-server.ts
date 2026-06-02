@@ -27,6 +27,7 @@
 
 import net from "node:net";
 import { hmrSingleton } from "@/lib/utils/hmr-singleton";
+import { createLogger } from "@/lib/core/logger";
 
 /** A virtual surface registered by a connected client. */
 export interface ScreendeckDevice {
@@ -60,6 +61,12 @@ interface Conn {
 // several missed beats (client crashed / network dropped without FIN).
 const PING_MS = 4_000;
 const STALE_MS = 16_000;
+// Retry cadence when the listener can't bind (port transiently held by a
+// just-killed previous instance, or a real Companion). Keeps the satellite
+// server self-healing instead of dying silently on the first conflict.
+const REBIND_MS = 2_000;
+
+const log = createLogger("screendeck");
 
 class ScreendeckServerImpl {
   private server: net.Server | null = null;
@@ -71,6 +78,10 @@ class ScreendeckServerImpl {
   private changeListeners = new Set<() => void>();
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private lastError: string | null = null;
+  /** Port we WANT bound (null = disabled). Drives the rebind-retry loop so a
+   *  transient bind failure self-heals instead of leaving the server dead. */
+  private desiredPort: number | null = null;
+  private rebindTimer: ReturnType<typeof setTimeout> | null = null;
 
   // ─────────────────────────── lifecycle ──────────────────────────────
 
@@ -85,12 +96,17 @@ class ScreendeckServerImpl {
     const server = net.createServer((socket) => this.onConnect(socket));
     server.on("error", (err) => {
       this.lastError = err instanceof Error ? err.message : String(err);
-      // EADDRINUSE etc. — drop the half-built server so a later restart
-      // (port change in prefs) can rebind cleanly.
+      // EADDRINUSE etc. — drop the half-built server and RETRY so a later
+      // free-up (a just-killed previous instance releasing the port) rebinds
+      // on its own. Previously this gave up silently → listener dead, no log,
+      // ScreenDeck "can't find decks" with no clue why.
       this.server = null;
+      log.warn(`listener bind failed on :${port} — ${this.lastError}`);
+      this.scheduleRebind(port);
     });
     server.on("listening", () => {
       this.lastError = null;
+      log.info(`Companion-Satellite listener up on 0.0.0.0:${port}`);
     });
     try {
       // 0.0.0.0 so a ScreenDeck on another LAN machine can reach us —
@@ -98,6 +114,8 @@ class ScreendeckServerImpl {
       server.listen(port, "0.0.0.0");
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
+      log.warn(`listen() threw on :${port} — ${this.lastError}`);
+      this.scheduleRebind(port);
       return;
     }
     this.server = server;
@@ -107,7 +125,22 @@ class ScreendeckServerImpl {
     }
   }
 
+  /** Retry binding `port` while it's still the desired one and we're not
+   *  already listening. One pending retry at a time. */
+  private scheduleRebind(port: number): void {
+    if (this.rebindTimer) return;
+    this.rebindTimer = setTimeout(() => {
+      this.rebindTimer = null;
+      if (this.desiredPort === port && !this.server) this.start(port);
+    }, REBIND_MS);
+    this.rebindTimer.unref?.();
+  }
+
   stop(): void {
+    if (this.rebindTimer) {
+      clearTimeout(this.rebindTimer);
+      this.rebindTimer = null;
+    }
     for (const c of this.conns) {
       try {
         c.socket.destroy();
@@ -131,10 +164,13 @@ class ScreendeckServerImpl {
    *  when disabled. Called at boot and after any preferences write. */
   apply(config: { enabled: boolean; port: number }): void {
     if (!config.enabled) {
+      this.desiredPort = null;
       this.stop();
       this.port = 0;
+      log.info("Companion-Satellite server disabled");
       return;
     }
+    this.desiredPort = config.port;
     this.start(config.port);
   }
 
@@ -147,6 +183,7 @@ class ScreendeckServerImpl {
   }
 
   dispose(): void {
+    this.desiredPort = null;
     this.stop();
     if (this.keepaliveTimer) clearInterval(this.keepaliveTimer);
     this.keepaliveTimer = null;
@@ -257,6 +294,7 @@ class ScreendeckServerImpl {
       deviceIds: new Set(),
     };
     this.conns.add(conn);
+    log.info(`client connected from ${conn.remoteAddr ?? "?"}`);
     socket.on("data", (chunk) => this.onData(conn, chunk));
     socket.on("error", () => this.dropConn(conn));
     socket.on("close", () => this.dropConn(conn));
@@ -286,7 +324,14 @@ class ScreendeckServerImpl {
       if (this.devices.delete(id)) removed = true;
     }
     conn.deviceIds.clear();
-    if (removed) this.emitChange();
+    if (removed) {
+      log.info(
+        `client ${conn.remoteAddr ?? "?"} disconnected — surface(s) removed (${this.devices.size} active)`
+      );
+      this.emitChange();
+    } else {
+      log.debug(`client ${conn.remoteAddr ?? "?"} disconnected`);
+    }
   }
 
   private write(conn: Conn, line: string): void {
@@ -366,6 +411,10 @@ class ScreendeckServerImpl {
     this.devices.set(deviceId, { dev, conn });
     conn.deviceIds.add(deviceId);
     this.write(conn, `ADD-DEVICE OK DEVICEID=${deviceId}\n`);
+    log.info(
+      `surface registered: "${dev.productName}" ${cols}x${rows} ` +
+        `id=${deviceId} from ${conn.remoteAddr ?? "?"} (${this.devices.size} active)`
+    );
     this.emitChange();
   }
 
