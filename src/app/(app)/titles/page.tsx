@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useVmixStore } from "@/stores/vmix-store";
 import { useVmixCommand } from "@/hooks/use-vmix-command";
 import { useThrottle } from "@/lib/utils/throttle";
@@ -57,13 +57,25 @@ function TimeSegment({
    *  HH:MM:SS group is conventional and self-explanatory. */
   label: string;
 }) {
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    onChange(e.deltaY < 0 ? Math.min(max, value + 1) : Math.max(0, value - 1));
-  };
+  // Wheel-to-step, bound natively as non-passive: React's onWheel is
+  // passive, so preventDefault() there is ignored and logs a browser
+  // warning. A native { passive: false } listener stops the page scrolling
+  // while the operator dials a value.
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      onChange(e.deltaY < 0 ? Math.min(max, value + 1) : Math.max(0, value - 1));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [value, max, onChange]);
 
   return (
     <input
+      ref={ref}
       type="text"
       inputMode="numeric"
       value={String(value).padStart(2, "0")}
@@ -71,7 +83,6 @@ function TimeSegment({
         const n = parseInt(e.target.value, 10);
         if (!isNaN(n)) onChange(Math.min(max, Math.max(0, n)));
       }}
-      onWheel={handleWheel}
       className="sw-input text-center font-mono"
       style={{ width: 50, fontSize: 22, fontWeight: 700, padding: "6px 0" }}
       aria-label={label}

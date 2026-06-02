@@ -58,9 +58,12 @@ export function EditorCanvas() {
     };
   }, []);
 
-  // Wheel zoom — zoom toward cursor
+  // Wheel zoom — zoom toward cursor. Bound as a NATIVE non-passive
+  // listener (see effect below): React attaches `wheel` passively, so an
+  // onWheel handler can't preventDefault (it's ignored + logs a browser
+  // warning). A native { passive: false } listener can.
   const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
+    (e: WheelEvent) => {
       if (!containerRef.current) return;
       e.preventDefault();
 
@@ -84,6 +87,16 @@ export function EditorCanvas() {
     },
     [zoom, fitScale, pan]
   );
+
+  // Attach the wheel handler natively as non-passive so preventDefault()
+  // actually suppresses page scroll while zooming (React's onWheel is
+  // passive). Re-binds when the handler closure changes.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, [handleWheel]);
 
   // Pan — middle mouse or space+left click
   const handlePointerDown = useCallback(
@@ -253,7 +266,6 @@ export function EditorCanvas() {
         grabCursor ? "cursor-grab" : "",
         ready && overlay ? "opacity-100" : "opacity-0"
       )}
-      onWheel={handleWheel}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
