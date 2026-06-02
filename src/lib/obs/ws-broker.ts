@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createLogger } from "@/lib/core/logger";
 import {
   buildAuthResponse,
   DEFAULT_EVENT_SUBSCRIPTIONS,
@@ -48,6 +49,8 @@ export interface ObsBrokerConfig {
 }
 
 type Subscriber = (e: ObsEvent) => void;
+
+const obsLog = createLogger("obs");
 
 const RECONNECT_INITIAL_MS = 1_000;
 // Cap low so OBS recovers within a few seconds of coming back on the LAN
@@ -1876,6 +1879,19 @@ export class ObsBroker {
   // ───────────────────────── Publishing ─────────────────────────────
 
   private publishStatus(status: ObsConnectionStatus, error?: string) {
+    // Log only real transitions (publishStatus can repeat the same state),
+    // so the activity log reads as a clean connect/disconnect timeline
+    // instead of spamming a line per reconnect tick.
+    if (status !== this.status) {
+      const where = `${this.host}:${this.port}`;
+      if (status === "connected") {
+        obsLog.info(`connected to ${where} (OBS ${this.obsVersion ?? "?"})`);
+      } else if (status === "disconnected") {
+        obsLog.warn(`disconnected from ${where}${error ? ` — ${error}` : ""}`);
+      } else {
+        obsLog.debug(`${status} ${where}${error ? ` — ${error}` : ""}`);
+      }
+    }
     this.status = status;
     const event: ObsEvent = {
       type: "status",

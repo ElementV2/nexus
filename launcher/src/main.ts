@@ -26,6 +26,22 @@ let server: ServerManager | null = null;
 let updater: Updater | null = null;
 let quitting = false;
 
+// Funnel launcher (Electron main) crashes into the same activity log + file
+// as the server output. Without this, a main-process throw dies silently to
+// a place no operator ever looks — the whole point of this feature is that a
+// crash leaves a trace on disk. Best-effort: `server` may not exist yet.
+process.on("uncaughtException", (err) => {
+  console.error("[launcher] uncaughtException:", err);
+  server?.note("err", `Launcher uncaughtException — ${err.stack || err.message}`);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[launcher] unhandledRejection:", reason);
+  server?.note(
+    "err",
+    `Launcher unhandledRejection — ${reason instanceof Error ? reason.stack || reason.message : String(reason)}`
+  );
+});
+
 interface LauncherSettings {
   port: number;
   /** IPv4 the web server binds to. "0.0.0.0" = all interfaces. */
@@ -204,6 +220,13 @@ function wireIpc(srv: ServerManager) {
   ipcMain.handle("launcher:get-version", () => app.getVersion());
   ipcMain.handle("launcher:get-status", () => srv.getStatus());
   ipcMain.handle("launcher:get-logs", () => srv.getLogs());
+  ipcMain.handle("launcher:open-logs", async () => {
+    // Reveal the logs folder in the OS file manager so an operator can grab
+    // the day's file for a bug report without hunting through %APPDATA%.
+    const dir = srv.logsDirectory();
+    const err = await shell.openPath(dir);
+    if (err) console.warn("[launcher] openPath failed:", dir, err);
+  });
   ipcMain.handle("launcher:get-settings", () => loadSettings());
   ipcMain.handle("launcher:get-interfaces", () => listInterfaces());
   ipcMain.handle("launcher:set-port", async (_e, port: number) => {

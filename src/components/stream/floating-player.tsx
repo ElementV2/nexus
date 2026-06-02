@@ -4,6 +4,9 @@ import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { Volume2, VolumeX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConnections } from "@/hooks/use-connections";
+import { createClientLogger } from "@/lib/client-log";
+
+const log = createClientLogger("stream");
 
 const LS_POS_KEY = "vmix-stream-position";
 
@@ -142,6 +145,7 @@ export function FloatingPlayer({ open, onClose }: FloatingPlayerProps) {
     destroyedRef.current = false;
     setStatus("connecting");
     setErrorMsg(null);
+    log.info(`connecting to srt://${host}:${port}`);
 
     try {
       const mpegts = (await import("mpegts.js")).default;
@@ -149,6 +153,7 @@ export function FloatingPlayer({ open, onClose }: FloatingPlayerProps) {
       if (!mpegts.isSupported()) {
         setStatus("error");
         setErrorMsg("mpegts.js is not supported in this browser.");
+        log.error("mpegts.js is not supported in this browser");
         return;
       }
       mpegts.LoggingControl.enableAll = false;
@@ -168,11 +173,17 @@ export function FloatingPlayer({ open, onClose }: FloatingPlayerProps) {
 
       mp.on(
         mpegts.Events.ERROR,
-        (_type: string, _detail: string, info: { msg?: string }) => {
+        (type: string, detail: string, info: { msg?: string }) => {
           if (!destroyedRef.current) {
             setStatus("error");
             setErrorMsg(friendlyError(info?.msg ?? "Unknown stream error"));
           }
+          // Log the RAW type/detail/msg (not the friendly UI text) — that's
+          // what's useful in a bug report to tell apart "FFmpeg missing" vs
+          // "vMix SRT off" vs "network".
+          log.error(
+            `srt://${host}:${port} error — ${type}/${detail}: ${info?.msg ?? "unknown"}`
+          );
         }
       );
 
@@ -181,6 +192,7 @@ export function FloatingPlayer({ open, onClose }: FloatingPlayerProps) {
           setStatus("error");
           setErrorMsg("Stream ended.");
         }
+        log.warn(`srt://${host}:${port} stream ended`);
       });
 
       mp.attachMediaElement(videoRef.current);
@@ -188,15 +200,22 @@ export function FloatingPlayer({ open, onClose }: FloatingPlayerProps) {
 
       try {
         await videoRef.current.play();
-        if (!destroyedRef.current) setStatus("playing");
+        if (!destroyedRef.current) {
+          setStatus("playing");
+          log.info(`playing srt://${host}:${port}`);
+        }
       } catch {
-        if (!destroyedRef.current) setStatus("playing");
+        if (!destroyedRef.current) {
+          setStatus("playing");
+          log.info(`playing srt://${host}:${port} (autoplay muted)`);
+        }
       }
     } catch (err) {
       if (!destroyedRef.current) {
         setStatus("error");
         setErrorMsg(friendlyError(String(err)));
       }
+      log.error(`srt://${host}:${port} connect failed — ${String(err)}`);
     }
   }, [host, port]);
 

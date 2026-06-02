@@ -24,6 +24,7 @@ import {
   Gamepad2,
   Sliders,
   Lightbulb,
+  ScrollText,
 } from "lucide-react";
 
 type Icon = typeof Monitor;
@@ -47,6 +48,7 @@ const STATIC_NAV: NavItem[] = [
 const TRAILING_NAV: NavItem[] = [
   { href: "/web-assets", label: "Assets", icon: Layers },
   { href: "/network",    label: "Network", icon: Wifi },
+  { href: "/logs",       label: "Logs", icon: ScrollText },
 ];
 
 /**

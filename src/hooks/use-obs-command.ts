@@ -213,11 +213,10 @@ export function useObsCommand() {
 
   return useCallback(
     async (cmd: ObsCommand) => {
-      const res = await send(cmd);
-      if (!res.ok) {
-        console.warn(`[obs] ${cmd.action}: ${res.error}`);
-      }
-      return res;
+      // Per-command logging (success + failure) is centralized in
+      // useConnectionCommand so every kind logs uniformly — no per-hook
+      // console line needed here (it would double-log on the Logs page).
+      return await send(cmd);
     },
     [send]
   );

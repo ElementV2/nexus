@@ -3,6 +3,41 @@ import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir, networkInterfaces, platform } from "node:os";
 import { delimiter, join } from "node:path";
+import { FileLogger } from "./file-logger";
+
+/**
+ * Lines emitted by the app's structured logger look like
+ * `LEVEL [scope] message` (e.g. `WARN [obs] disconnected — wrong password`).
+ * Recover BOTH the level and the scope so the activity panel + the on-disk
+ * CSV classify each line by the app's intent (not the crude
+ * "stdout = info / stderr = warn" stream split) and expose `scope` as its
+ * own filterable column. Continuation lines (stack traces) carry neither
+ * token and inherit the stream's level + a "trace" scope.
+ */
+const LEVEL_TOKEN_RE = /^(DEBUG|INFO|WARN|ERROR)\s+(.*)$/s;
+const SCOPE_TOKEN_RE = /^\[([^\]]+)\]\s+(.*)$/s;
+
+function parseLine(
+  line: string,
+  fallbackLevel: ServerLog["level"],
+  fallbackScope: string
+): { level: ServerLog["level"]; scope: string; message: string } {
+  let level = fallbackLevel;
+  let scope = fallbackScope;
+  let rest = line;
+  const lv = LEVEL_TOKEN_RE.exec(rest);
+  if (lv) {
+    const tok = lv[1];
+    level = tok === "ERROR" ? "err" : tok === "WARN" ? "warn" : "info";
+    rest = lv[2];
+  }
+  const sc = SCOPE_TOKEN_RE.exec(rest);
+  if (sc) {
+    scope = sc[1];
+    rest = sc[2];
+  }
+  return { level, scope, message: rest };
+}
 
 /**
  * Locate a system Node.js binary. Required for `next dev` because Tailwind v4
@@ -49,6 +84,9 @@ export interface ServerStatus {
 export interface ServerLog {
   ts: number;
   level: "info" | "warn" | "err";
+  /** Subsystem that emitted the line (obs, boot, press-dispatcher, launcher,
+   *  next, …). Its own column in the CSV so logs sort/filter by source. */
+  scope: string;
   message: string;
 }
 
@@ -145,6 +183,7 @@ function findServerEntry(): ServerEntry {
 export class ServerManager extends EventEmitter {
   private proc: ChildProcess | null = null;
   private ring: ServerLog[] = [];
+  private fileLogger = new FileLogger(getDataDir());
   private hostname = "0.0.0.0";
   private status: ServerStatus = {
     phase: "stopped",
@@ -174,11 +213,23 @@ export class ServerManager extends EventEmitter {
     return this.ring.slice();
   }
 
-  private log(level: ServerLog["level"], message: string) {
-    const entry: ServerLog = { ts: Date.now(), level, message };
+  private log(level: ServerLog["level"], message: string, scope = "launcher") {
+    const entry: ServerLog = { ts: Date.now(), level, scope, message };
     this.ring.push(entry);
     if (this.ring.length > RING) this.ring.shift();
+    this.fileLogger.write(entry);
     this.emit("log", entry);
+  }
+
+  /** Absolute path of the on-disk logs folder (for the "open logs" UI). */
+  logsDirectory(): string {
+    return this.fileLogger.directory();
+  }
+
+  /** Record a launcher-side line (e.g. a main-process crash) into the same
+   *  activity stream + log file as the server output. */
+  note(level: ServerLog["level"], message: string): void {
+    this.log(level, message, "launcher");
   }
 
   private updateStatus(partial: Partial<ServerStatus>) {
@@ -202,6 +253,7 @@ export class ServerManager extends EventEmitter {
     if (this.proc) return;
     this.stopping = false;
     this.updateStatus({ phase: "starting", error: null });
+    this.log("info", `Logging to ${this.fileLogger.directory()}`);
 
     const dataDir = getDataDir();
     if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
@@ -237,6 +289,8 @@ export class ServerManager extends EventEmitter {
           NODE_ENV: "production",
         },
         stdio: ["ignore", "pipe", "pipe"],
+        // Never flash a console window for the spawned server on Windows.
+        windowsHide: true,
       });
     } else {
       const systemNode = findSystemNode();
@@ -259,6 +313,8 @@ export class ServerManager extends EventEmitter {
           cwd: entry.cwd,
           env: { ...baseEnv, NODE_ENV: "development" },
           stdio: ["ignore", "pipe", "pipe"],
+          // node.exe is a console app — hide its window on Windows.
+          windowsHide: true,
         }
       );
     }
@@ -267,7 +323,8 @@ export class ServerManager extends EventEmitter {
       const text = buf.toString().trim();
       if (!text) return;
       for (const line of text.split(/\r?\n/)) {
-        this.log("info", line);
+        const { level, scope, message } = parseLine(line, "info", "next");
+        this.log(level, message, scope);
         if (/ready|started|listening/i.test(line) && this.status.phase !== "running") {
           this.updateStatus({ phase: "running" });
         }
@@ -277,7 +334,13 @@ export class ServerManager extends EventEmitter {
     this.proc.stderr?.on("data", (buf: Buffer) => {
       const text = buf.toString().trim();
       if (!text) return;
-      for (const line of text.split(/\r?\n/)) this.log("warn", line);
+      // Default stderr to "warn" (not "err"): Next.js prints lots of benign
+      // notices to stderr. The app's logger marks genuine errors with an
+      // ERROR token, which parseLine promotes to "err".
+      for (const line of text.split(/\r?\n/)) {
+        const { level, scope, message } = parseLine(line, "warn", "next");
+        this.log(level, message, scope);
+      }
     });
 
     // Capture THIS spawn so the exit handler reads a per-process "was this

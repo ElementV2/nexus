@@ -21,6 +21,7 @@ const api = {
     ipcRenderer.invoke("launcher:get-status"),
   getLogs: (): Promise<ServerLog[]> =>
     ipcRenderer.invoke("launcher:get-logs"),
+  openLogs: (): Promise<void> => ipcRenderer.invoke("launcher:open-logs"),
   getSettings: (): Promise<LauncherSettings> =>
     ipcRenderer.invoke("launcher:get-settings"),
   getInterfaces: (): Promise<InterfaceOption[]> =>

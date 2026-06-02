@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { spawn, type ChildProcess } from "child_process";
 import ffmpegStaticImport from "ffmpeg-static";
 import { defaultConnectionConfig } from "@/lib/db/preferences";
+import { createLogger } from "@/lib/core/logger";
 
 export const dynamic = "force-dynamic";
+
+const log = createLogger("stream");
 
 /**
  * FFmpeg binary path. The `ffmpeg-static` package exports the absolute
@@ -83,7 +86,11 @@ function ensureRelay(host: string, port: string): Relay {
       "mpegts",
       "pipe:1",
     ],
-    { stdio: ["ignore", "pipe", "pipe"] }
+    // windowsHide: ffmpeg is a console-subsystem .exe; without this,
+    // spawning it from the (GUI) Electron app pops a visible cmd window
+    // each time the relay (re)starts — and it restarts on every
+    // live-preview (re)connect / 30 s idle-kill. stdio is already piped.
+    { stdio: ["ignore", "pipe", "pipe"], windowsHide: true }
   );
 
   const r: Relay = {
@@ -115,7 +122,7 @@ function ensureRelay(host: string, port: string): Relay {
     // Surface in the launcher's server-activity logs so a relay failure
     // (missing ffmpeg, vMix SRT output disabled, wrong host/port) is
     // diagnosable instead of just a 502 in the browser.
-    console.warn(`[stream] ffmpeg srt://${key} failed: ${r.error}`);
+    log.warn(`ffmpeg srt://${key} failed: ${r.error}`);
     for (const fn of r.onEnd) fn();
     r.listeners.clear();
     r.onEnd.clear();
@@ -128,8 +135,8 @@ function ensureRelay(host: string, port: string): Relay {
       r.error = `FFmpeg exited with code ${code}`;
     }
     if (code !== 0) {
-      console.warn(
-        `[stream] ffmpeg srt://${key} exited code=${code}: ${r.error ?? "(no stderr)"}`
+      log.warn(
+        `ffmpeg srt://${key} exited code=${code}: ${r.error ?? "(no stderr)"}`
       );
     }
     for (const fn of r.onEnd) fn();

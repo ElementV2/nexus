@@ -1,4 +1,5 @@
 import type { BrokerImpl, ConnectionStatus, KindEvent } from "./types";
+import { createLogger } from "./logger";
 
 /**
  * A per-instance broker: owns one connection's socket + state. The OSC
@@ -35,7 +36,7 @@ export function makeBrokerAdapter<C>(
     updateConfig: (raw) => {
       const parsed = parseConfig(raw);
       if (!parsed.ok) {
-        console.warn(`[${tag}] updateConfig rejected: ${parsed.error}`);
+        createLogger(tag).warn(`updateConfig rejected: ${parsed.error}`);
         return;
       }
       broker.updateConfig(parsed.config);

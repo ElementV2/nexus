@@ -1,5 +1,6 @@
 import { createSocket, type Socket } from "node:dgram";
 import { encodeMessage, decodePacket, type OscArg } from "@/lib/ableton/osc-codec";
+import { createLogger } from "@/lib/core/logger";
 
 /**
  * Per-instance UDP-OSC broker shared by every OSC-over-UDP device
@@ -83,11 +84,14 @@ export class OscUdpBroker {
    *  state-based toggles and lets feedback read current console state
    *  without each consumer tracking it. */
   private lastValues = new Map<string, OscArg>();
+  private readonly log: ReturnType<typeof createLogger>;
 
   constructor(
     public config: OscUdpConfig,
     private spec: OscUdpSpec
-  ) {}
+  ) {
+    this.log = createLogger(spec.tag);
+  }
 
   // ─────────────────────────── pub/sub ──────────────────────────────────
 
@@ -283,7 +287,7 @@ export class OscUdpBroker {
       const sock = createSocket({ type: "udp4", reuseAddr: true });
       sock.on("message", (msg) => this.onMessage(msg));
       sock.on("error", (err) => {
-        console.warn(`[${this.spec.tag}] socket error:`, err.message);
+        this.log.warn(`socket error: ${err.message}`);
         // Drop the dead socket so it actually gets rebuilt. `ensureSocket`
         // (and the next heartbeat's `sendOsc`) both early-out while
         // `this.socket` is still set — so a socket left in place after an
@@ -302,9 +306,8 @@ export class OscUdpBroker {
       sock.bind(0);
       this.socket = sock;
     } catch (err) {
-      console.warn(
-        `[${this.spec.tag}] failed to create socket:`,
-        err instanceof Error ? err.message : err
+      this.log.warn(
+        `failed to create socket: ${err instanceof Error ? err.message : String(err)}`
       );
       this.scheduleSocketRetry();
     }
@@ -340,6 +343,13 @@ export class OscUdpBroker {
   }
 
   private setConnected(value: boolean, error?: string): void {
+    // Log only real transitions (setConnected is called every stale-check
+    // tick with the same value otherwise).
+    if (value !== this.connected) {
+      const where = `${this.config.host}:${this.config.port}`;
+      if (value) this.log.info(`connected to ${where}`);
+      else this.log.warn(`disconnected from ${where}${error ? ` — ${error}` : ""}`);
+    }
     this.connected = value;
     const event: OscBrokerEvent = {
       type: "status",

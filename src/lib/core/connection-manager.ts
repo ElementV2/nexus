@@ -2,7 +2,10 @@ import { getKind } from "./registry";
 import { attachBridge } from "./variable-bridges";
 import { variableBus } from "./variable-bus";
 import { hmrSingleton } from "@/lib/utils/hmr-singleton";
+import { createLogger } from "./logger";
 import type { BrokerImpl, Connection, ConnectionConfig } from "./types";
+
+const log = createLogger("connection-manager");
 
 /**
  * Owns the live broker instances. One per `ConnectionConfig` entry in
@@ -35,6 +38,63 @@ class ConnectionManagerImpl {
    *  live broker, and an OBS/Ableton broker that can't prove the config
    *  is unchanged tears down + reconnects its socket. */
   private lastConfig = new Map<string, string>();
+  /** Last status we logged per connection id, so the status watcher only
+   *  emits a line on an actual transition (connect → drop, etc.) rather
+   *  than every poll tick. */
+  private lastStatus = new Map<string, string>();
+  /** Periodic sweep that turns each broker's `getStatus()` into a logged
+   *  connect/disconnect timeline. One watcher covers EVERY kind (current
+   *  and future) because `getStatus()` is part of the broker contract —
+   *  no per-transport instrumentation needed. */
+  private statusWatch: ReturnType<typeof setInterval> | null = null;
+
+  /** Poll cadence for the status watcher. 2 s is fine for a human-read
+   *  diagnostic log — a flap that resolves faster than this isn't worth a
+   *  line, and a real outage stays logged the moment it's first seen. */
+  private static readonly STATUS_POLL_MS = 2_000;
+
+  /** Sweep every live broker's status and log transitions. Skips the
+   *  benign initial "connecting"/"offline" baseline so a freshly-created
+   *  connection doesn't log a spurious line before it's even tried. */
+  private sweepStatuses(): void {
+    for (const [id, conn] of this.connections) {
+      let status: string;
+      try {
+        status = conn.broker.getStatus();
+      } catch {
+        continue; // a broker that can't report status shouldn't break the sweep
+      }
+      const prev = this.lastStatus.get(id);
+      if (status === prev) continue;
+      this.lastStatus.set(id, status);
+      // First observation: only worth a line if it's already a notable
+      // state (up, or hard error). connecting/offline baselines are noise.
+      if (prev === undefined && status !== "connected" && status !== "error") {
+        continue;
+      }
+      const label = `${conn.kind} "${conn.label}"`;
+      if (status === "connected") log.info(`${label} → connected`);
+      else if (status === "error") log.warn(`${label} → error`);
+      else if (status === "offline") log.warn(`${label} → offline`);
+      else log.info(`${label} → ${status}`);
+    }
+  }
+
+  /** Start/stop the status watcher to match whether any brokers exist. */
+  private syncStatusWatch(): void {
+    const want = this.connections.size > 0;
+    if (want && !this.statusWatch) {
+      this.statusWatch = setInterval(
+        () => this.sweepStatuses(),
+        ConnectionManagerImpl.STATUS_POLL_MS
+      );
+      // Don't keep the event loop alive just for the log sweep.
+      this.statusWatch.unref?.();
+    } else if (!want && this.statusWatch) {
+      clearInterval(this.statusWatch);
+      this.statusWatch = null;
+    }
+  }
 
   /**
    * Ensure a broker exists for every enabled config and that disabled /
@@ -78,8 +138,8 @@ class ConnectionManagerImpl {
       }
       const kind = getKind(cfg.kind);
       if (!kind) {
-        console.warn(
-          `[connection-manager] skipping connection ${cfg.id}: unknown kind "${cfg.kind}"`
+        log.warn(
+          `skipping connection ${cfg.id}: unknown kind "${cfg.kind}"`
         );
         continue;
       }
@@ -101,12 +161,13 @@ class ConnectionManagerImpl {
           config: cfg.config,
         });
       } catch (err) {
-        console.warn(
-          `[connection-manager] skipping connection ${cfg.id} (${cfg.kind}): ` +
+        log.warn(
+          `skipping connection ${cfg.id} (${cfg.kind}): ` +
             `make() failed — ${err instanceof Error ? err.message : String(err)}`
         );
         continue;
       }
+      log.info(`created ${cfg.kind} connection "${cfg.label}" (${cfg.id})`);
       this.connections.set(cfg.id, {
         id: cfg.id,
         kind: cfg.kind,
@@ -122,8 +183,8 @@ class ConnectionManagerImpl {
       try {
         unattach = attachBridge(cfg.kind, cfg.id, broker);
       } catch (err) {
-        console.warn(
-          `[connection-manager] bridge attach failed for ${cfg.id}: ` +
+        log.warn(
+          `bridge attach failed for ${cfg.id}: ` +
             `${err instanceof Error ? err.message : String(err)}`
         );
         unattach = () => {};
@@ -133,6 +194,7 @@ class ConnectionManagerImpl {
     // Dispose anything no longer in the desired set.
     for (const [id, conn] of this.connections) {
       if (!desiredIds.has(id)) {
+        log.info(`disposing ${conn.kind} connection "${conn.label}" (${id})`);
         const teardown = this.bridgeTeardowns.get(id);
         try {
           teardown?.();
@@ -144,8 +206,10 @@ class ConnectionManagerImpl {
         conn.broker.dispose();
         this.connections.delete(id);
         this.lastConfig.delete(id);
+        this.lastStatus.delete(id);
       }
     }
+    this.syncStatusWatch();
   }
 
   get(id: string): Connection | undefined {
@@ -182,6 +246,11 @@ class ConnectionManagerImpl {
     }
     this.connections.clear();
     this.lastConfig.clear();
+    this.lastStatus.clear();
+    if (this.statusWatch) {
+      clearInterval(this.statusWatch);
+      this.statusWatch = null;
+    }
   }
 }
 

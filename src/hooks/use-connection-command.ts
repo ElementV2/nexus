@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback } from "react";
+import { createClientLogger } from "@/lib/client-log";
+
+const log = createClientLogger("command");
 
 /**
  * Result envelope shared by every kind. Mirrors the legacy
@@ -12,6 +15,33 @@ export type CommandResult<T = unknown> =
   | { ok: false; error: string };
 
 /**
+ * High-frequency / read-only commands that would flood the client log if
+ * logged at INFO — fader drags, T-bar scrubs, and `get-*` reads fire many
+ * times per gesture. They're still captured, just at DEBUG so the INFO
+ * stream stays a readable record of discrete operator actions.
+ */
+const NOISY = /volume|fader|t-?bar|balance|sync-?offset|position|cursor|meters-enabled|^get-|^ensure-|-list$/i;
+
+/** Pull a readable name + compact detail from a kind command body. OBS uses
+ *  `action`, vMix uses `Function`; anything else falls back to JSON. */
+function describe(body: unknown): { name: string; detail: string; noisy: boolean } {
+  if (body && typeof body === "object") {
+    const obj = body as Record<string, unknown>;
+    const nameKey = "action" in obj ? "action" : "Function" in obj ? "Function" : null;
+    if (nameKey) {
+      const name = String(obj[nameKey]);
+      const rest: Record<string, unknown> = { ...obj };
+      delete rest[nameKey];
+      let detail = Object.keys(rest).length ? JSON.stringify(rest) : "";
+      if (detail.length > 160) detail = detail.slice(0, 157) + "…";
+      return { name, detail, noisy: NOISY.test(name) };
+    }
+  }
+  const detail = typeof body === "string" ? body : JSON.stringify(body);
+  return { name: "command", detail, noisy: false };
+}
+
+/**
  * POST a kind-specific command body to a registered connection.
  * `id` may be null while the caller is still resolving the target —
  * commands sent in that state resolve with `{ ok: false, error }` so
@@ -20,7 +50,10 @@ export type CommandResult<T = unknown> =
 export function useConnectionCommand(id: string | null) {
   return useCallback(
     async <T = unknown>(body: unknown): Promise<CommandResult<T>> => {
+      const { name, detail, noisy } = describe(body);
+      const tag = detail ? `${name} ${detail}` : name;
       if (!id) {
+        log.warn(`${tag} — no connection selected`);
         return { ok: false, error: "No connection selected" };
       }
       try {
@@ -37,14 +70,17 @@ export function useConnectionCommand(id: string | null) {
           | { ok: false; error: string };
         if (!res.ok || !json.ok) {
           const msg = "error" in json ? json.error : `HTTP ${res.status}`;
+          log.warn(`${tag} ✗ ${msg}`);
           return { ok: false, error: msg };
         }
+        // Discrete actions at INFO; fader/scrub/read spam at DEBUG.
+        if (noisy) log.debug(`${tag} ✓`);
+        else log.info(`${tag} ✓`);
         return { ok: true, data: json.data };
       } catch (err) {
-        return {
-          ok: false,
-          error: err instanceof Error ? err.message : "Network error",
-        };
+        const msg = err instanceof Error ? err.message : "Network error";
+        log.warn(`${tag} ✗ ${msg}`);
+        return { ok: false, error: msg };
       }
     },
     [id]

@@ -454,6 +454,11 @@ body.is-error .cta:hover { background: #df5a6c; }
 .topbar-link:hover { color: var(--amber); }
 .topbar-link--right { color: var(--muted); }
 .topbar-link--right:hover { color: var(--pgm); }
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
 
 .logs-body {
   flex: 1;
@@ -479,6 +484,11 @@ body.is-error .cta:hover { background: #df5a6c; }
 .log-ts {
   color: var(--sub);
   flex-shrink: 0;
+}
+.log-scope {
+  color: var(--muted);
+  flex-shrink: 0;
+  min-width: 92px;
 }
 .log-msg.info { color: var(--ink); }
 .log-msg.warn { color: var(--amber); }

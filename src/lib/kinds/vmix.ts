@@ -7,6 +7,7 @@ import {
   Palette,
 } from "lucide-react";
 import { registerDeviceKind } from "@/lib/core/registry";
+import { createLogger } from "@/lib/core/logger";
 import { VmixStateBroker } from "@/lib/vmix/state-broker";
 import {
   COMMAND_FETCH_TIMEOUT_MS,
@@ -230,7 +231,7 @@ class VmixAdapter implements BrokerImpl {
   updateConfig(raw: unknown): void {
     const parsed = parseVmixConfig(raw);
     if (!parsed.ok) {
-      console.warn(`[vmix] updateConfig rejected: ${parsed.error}`);
+      createLogger("vmix").warn(`updateConfig rejected: ${parsed.error}`);
       return;
     }
     // Per-instance: update our config + the poller's so commands AND

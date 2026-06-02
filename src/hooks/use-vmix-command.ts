@@ -43,9 +43,7 @@ export function useVmixCommand() {
           res = await sendOnce(command);
         }
       }
-      if (!res.ok) {
-        console.error("vMix command error:", res.error);
-      }
+      // Logging (success + failure) is centralized in useConnectionCommand.
     },
     [connected, sendOnce]
   );

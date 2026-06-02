@@ -1,5 +1,6 @@
 import { Music2 } from "lucide-react";
 import { registerDeviceKind } from "@/lib/core/registry";
+import { createLogger } from "@/lib/core/logger";
 import { AbletonBroker } from "@/lib/ableton/osc-broker";
 import type {
   ActionDefinition,
@@ -155,7 +156,7 @@ class AbletonAdapter implements BrokerImpl {
   updateConfig(raw: unknown): void {
     const parsed = parseAbletonConfig(raw);
     if (!parsed.ok) {
-      console.warn(`[ableton] updateConfig rejected: ${parsed.error}`);
+      createLogger("ableton").warn(`updateConfig rejected: ${parsed.error}`);
       return;
     }
     this.broker.updateConfig({

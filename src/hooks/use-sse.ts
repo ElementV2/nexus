@@ -1,6 +1,18 @@
 "use client";
 
 import { useEffect } from "react";
+import { createClientLogger } from "@/lib/client-log";
+
+const log = createClientLogger("sse");
+
+/** Compact a stream URL to its path for the log line. */
+function shortUrl(url: string): string {
+  try {
+    return new URL(url, window.location.origin).pathname;
+  } catch {
+    return url;
+  }
+}
 
 /** How long we wait before tearing down the SSE connection when the
  *  tab goes hidden. Short flips (200 ms tab-switch to copy something)
@@ -57,6 +69,8 @@ export function useSSE(
 
       es = new EventSource(url);
       es.onopen = () => {
+        if (attempt > 0) log.info(`reconnected ${shortUrl(url)}`);
+        else log.debug(`connected ${shortUrl(url)}`);
         attempt = 0; // healthy again → reset backoff
       };
       es.onmessage = onMessage;
@@ -77,6 +91,9 @@ export function useSSE(
           if (retry) clearTimeout(retry);
           const delay = Math.min(15_000, 1_000 * 2 ** attempt) + Math.random() * 1_000;
           attempt++;
+          log.warn(
+            `${shortUrl(url)} dropped — retrying in ${Math.round(delay / 1000)}s (attempt ${attempt})`
+          );
           retry = setTimeout(() => {
             retry = null;
             open();

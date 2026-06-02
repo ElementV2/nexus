@@ -1,5 +1,6 @@
 import { Video } from "lucide-react";
 import { registerDeviceKind } from "@/lib/core/registry";
+import { createLogger } from "@/lib/core/logger";
 import { ObsBroker } from "@/lib/obs/ws-broker";
 import type {
   BrokerImpl,
@@ -383,7 +384,7 @@ class ObsAdapter implements BrokerImpl {
     if (!parsed.ok) {
       // Don't throw — the manager called this from reconcile() and we
       // shouldn't take the boot down. Log and keep the old config.
-      console.warn(`[obs] updateConfig rejected: ${parsed.error}`);
+      createLogger("obs").warn(`updateConfig rejected: ${parsed.error}`);
       return;
     }
     this.broker.updateConfig({

@@ -1,5 +1,8 @@
 import { variableBus, type VariableValue } from "./variable-bus";
+import { createLogger } from "./logger";
 import type { BrokerImpl, KindEvent } from "./types";
+
+const log = createLogger("variable-bridges");
 
 /**
  * Bridge a kind's broker events into the global VariableBus. Each
@@ -37,7 +40,7 @@ export function attachBridge(
   try {
     return factory(connectionId, broker);
   } catch (err) {
-    console.warn(`[variable-bridges] failed to attach ${kind}:`, err);
+    log.warn(`failed to attach ${kind}: ${err instanceof Error ? err.message : String(err)}`);
     return () => {};
   }
 }

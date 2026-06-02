@@ -30,6 +30,7 @@ const els = {
   // logs
   logsBody: $("logsBody"),
   clearLogs: $("clearLogs"),
+  openLogs: $("openLogs"),
   // update
   updateRow: $("updateRow"),
   updateTitle: $("updateTitle"),
@@ -238,17 +239,30 @@ document.addEventListener("keydown", (e) => {
 });
 
 /* ── Logs ──────────────────────────────────────────── */
+function pad(n, width = 2) {
+  return String(n).padStart(width, "0");
+}
+
 function appendLog(entry) {
   const div = document.createElement("div");
   div.className = "log-line";
-  const ts = new Date(entry.ts).toISOString().slice(11, 19);
+  // LOCAL wall-clock time — `toISOString()` is UTC, which read 2 h behind
+  // the operator's clock (CEST). Build HH:MM:SS.mmm from local getters.
+  const d = new Date(entry.ts);
+  const ts =
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` +
+    `.${pad(d.getMilliseconds(), 3)}`;
   const tsSpan = document.createElement("span");
   tsSpan.className = "log-ts";
   tsSpan.textContent = ts;
+  const scopeSpan = document.createElement("span");
+  scopeSpan.className = "log-scope";
+  scopeSpan.textContent = entry.scope ? `[${entry.scope}]` : "";
   const msg = document.createElement("span");
   msg.className = `log-msg ${entry.level}`;
   msg.textContent = entry.message;
   div.appendChild(tsSpan);
+  div.appendChild(scopeSpan);
   div.appendChild(msg);
   els.logsBody.appendChild(div);
 
@@ -261,6 +275,9 @@ function appendLog(entry) {
 }
 els.clearLogs.addEventListener("click", () => {
   els.logsBody.innerHTML = "";
+});
+els.openLogs.addEventListener("click", () => {
+  window.launcher.openLogs();
 });
 
 /* ── Update banner ─────────────────────────────────── */
