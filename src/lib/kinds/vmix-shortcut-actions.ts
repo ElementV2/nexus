@@ -41,6 +41,12 @@ const EXTRA_TRANSITIONS: VmixShortcut[] = [
   { fn: "CrossZoom", category: "Transition", description: "Cross Zoom transition. Duration = milliseconds", params: ["input", "duration", "mix"] },
   { fn: "Cube", category: "Transition", description: "Cube transition. Duration = milliseconds", params: ["input", "duration", "mix"] },
   { fn: "CubeZoom", category: "Transition", description: "Cube Zoom transition. Duration = milliseconds", params: ["input", "duration", "mix"] },
+  { fn: "VerticalWipe", category: "Transition", description: "Vertical Wipe transition. Duration = milliseconds", params: ["input", "duration", "mix"] },
+  { fn: "VerticalSlide", category: "Transition", description: "Vertical Slide transition. Duration = milliseconds", params: ["input", "duration", "mix"] },
+  { fn: "WipeReverse", category: "Transition", description: "Wipe Reverse transition. Duration = milliseconds", params: ["input", "duration", "mix"] },
+  { fn: "SlideReverse", category: "Transition", description: "Slide Reverse transition. Duration = milliseconds", params: ["input", "duration", "mix"] },
+  { fn: "VerticalWipeReverse", category: "Transition", description: "Vertical Wipe Reverse transition. Duration = milliseconds", params: ["input", "duration", "mix"] },
+  { fn: "VerticalSlideReverse", category: "Transition", description: "Vertical Slide Reverse transition. Duration = milliseconds", params: ["input", "duration", "mix"] },
   { fn: "AlphaFade", category: "Transition", description: "Alpha (key) fade transition. Duration = milliseconds", params: ["input", "duration", "mix"] },
 ];
 
@@ -313,6 +319,7 @@ const CATEGORY_COLOR: Record<VmixCategory, Color> = {
   Scripting: { bgcolor: "#8e8e93", fgcolor: "#ffffff" },
   Replay: { bgcolor: "#c75ae0", fgcolor: "#ffffff" },
   NDI: { bgcolor: "#bf5af2", fgcolor: "#ffffff" },
+  OMT: { bgcolor: "#bf5af2", fgcolor: "#ffffff" },
   PTZ: { bgcolor: "#64d2ff", fgcolor: "#000000" },
   Preset: { bgcolor: "#636366", fgcolor: "#ffffff" },
   DataSources: { bgcolor: "#636366", fgcolor: "#ffffff" },
