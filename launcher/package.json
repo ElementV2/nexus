@@ -1,6 +1,6 @@
 {
   "name": "nexus-launcher",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "private": true,
   "description": "Local launcher that runs the Nexus Next.js server on the LAN.",
   "author": "ElementV2 <death0factory@gmail.com>",

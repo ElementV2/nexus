@@ -16,6 +16,32 @@ updater compares against the version embedded in its own installer asset
 name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
 shared release tag.
 
+## 0.1.18 — main app · 0.1.6 — Nexus Cross
+
+On-screen virtual decks, plus a real diagnostics trail.
+
+### Stream Deck
+- **On-screen virtual decks.** Nexus now runs the Companion Satellite
+  server, so software decks (ScreenDeck and other Satellite clients)
+  connect in over the network and register a virtual surface that behaves
+  exactly like a physical deck — same key faces, pairing, feedback, and
+  presses. Enabled by default; the listener port is configurable (set it
+  if Bitfocus Companion runs on the same machine and already uses 16622).
+- **Correct keys on a smaller deck.** A layout designed on a wide deck and
+  shown on a narrower one keeps every button in the same position; a press
+  fires the binding the operator actually sees there (fixes the "6th
+  button jumps to the start of row 2" mis-fire).
+
+### Diagnostics
+- **Real logs.** A new **Logs** page in the app and the launcher's Server
+  Activity panel now show tagged, level-aware lines (which subsystem,
+  what happened) instead of noise, and every line is written to a daily
+  log file on disk — open the folder straight from the launcher for a bug
+  report. Server and launcher crashes are captured with a full stack
+  instead of dying silently.
+- Fewer spurious window flashes: the bundled server and the stream relay
+  no longer pop a console window on Windows.
+
 ## 0.1.17 — main app · 0.1.6 — Nexus Cross
 
 Audit pass (V3) — correctness, performance, and connection handling.
