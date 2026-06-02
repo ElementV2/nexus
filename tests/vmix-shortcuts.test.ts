@@ -143,3 +143,62 @@ describe("family placeholders become one parameterized action", () => {
     expect(cmd("sc-audio", { input: "" })).toEqual({ Function: "Audio" });
   });
 });
+
+// Guards the vMix v29 catalog additions so they can't silently regress.
+// Every NEW standalone function must surface as its own action button, and
+// the families that GREW (replay channels C/D, stinger 1→8) must reach the
+// new members through their option pickers.
+describe("vMix v29 additions are present in the action list", () => {
+  it("exposes each new standalone function as its own action button", () => {
+    for (const id of [
+      // OMT source select (new protocol + category)
+      "sc-omtselectsourcebyindex",
+      "sc-omtselectsourcebyname",
+      // Quad replay mode
+      "sc-replayquadmodeoff",
+      "sc-replayquadmodeon",
+      "sc-replaytogglequadmode",
+      // Append-to-event-text
+      "sc-replayappendlasteventtext",
+      "sc-replayappendlasteventtextcamera",
+      "sc-replayappendselectedeventtext",
+      "sc-replayappendselectedeventtextcamera",
+      // Named transitions the reference adds in v29
+      "sc-wipereverse",
+      "sc-slidereverse",
+      "sc-verticalwipe",
+      "sc-verticalwipereverse",
+      "sc-verticalslide",
+      "sc-verticalslidereverse",
+    ]) {
+      expect(byId.has(id), id).toBe(true);
+    }
+  });
+
+  it("replay camera channels now reach C and D (was A/B only)", () => {
+    // The chn placeholder is a dropdown on the single 'Replay Camera' action.
+    const cam = vmixShortcutActions.find((a) =>
+      a.options?.some((o) => o.id === "chn")
+    );
+    expect(cam, "an action with a 'chn' family option").toBeTruthy();
+    const chn = cam!.options!.find((o) => o.id === "chn")!;
+    const choices = chn.type === "dropdown" ? chn.choices.map((c) => c.id) : [];
+    expect(choices).toEqual(["A", "B", "C", "D"]);
+    expect(
+      (cam!.toCommand({ chn: "D", cam: 8 }) as Record<string, unknown>).Function
+    ).toBe("ReplayDCamera8");
+  });
+
+  it("stinger families extend to slot 8", () => {
+    expect(cmd("sc-stinger", { slot: 8, input: "1" }).Function).toBe("Stinger8");
+    expect(
+      cmd("sc-setstingergtinput", { slot: 8, input: "1" }).Function
+    ).toBe("SetStingerGTInput8");
+    const slot = byId.get("sc-stinger")?.options?.find((o) => o.id === "slot");
+    expect(slot).toMatchObject({ min: 1, max: 8 });
+  });
+
+  it("BtoA timecode casing matches the official reference", () => {
+    expect(byId.has("sc-replaysetchannelbtoatimecode")).toBe(true);
+  });
+});

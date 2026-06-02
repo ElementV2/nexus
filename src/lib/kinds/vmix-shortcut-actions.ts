@@ -11,16 +11,20 @@ import {
  *
  * `src/lib/vmix/shortcuts.ts` is the scraped source of truth for every
  * documented vMix Function (numbered/lettered families already condensed
- * into one templated entry, e.g. `OverlayInput{ch}` covers 1..4,
+ * into one templated entry, e.g. `OverlayInput{ch}` covers 1..8,
  * `SetBus{bus}Volume` covers A..G). Here we turn each entry into ONE
  * ActionDefinition + ONE PresetDefinition so the operator gets every vMix
- * command in the preset browser WITHOUT 700 near-duplicate tiles: a family
- * becomes a single preset whose placeholder (overlay #, bus, …) is an
- * option picker alongside Input / Value / etc.
+ * command as a single button WITHOUT ~790 near-duplicate tiles: a family
+ * becomes one action whose placeholder (overlay #, bus, …) is an option
+ * picker alongside Input / Value / etc.
  *
- * These augment the hand-curated `vmixActions` / `vmixPresets` (the
- * common, nicely-styled tiles). Generated ids are namespaced `sc-…` so
- * they never collide with the curated ones.
+ * This generated catalog is the ONLY vMix action/preset source — the kind
+ * (`src/lib/kinds/vmix.ts`) wires `vmixShortcutActions`/`vmixShortcutPresets`
+ * straight in; there is no separate hand-curated tile list. (The legacy
+ * operator pages build their own commands via `src/lib/vmix/commands.ts`,
+ * a typed-builder convenience layer; both ultimately emit the same
+ * `VmixCommand` and go through the same dispatch.) Generated ids are
+ * namespaced `sc-…`.
  */
 
 // vMix's NAMED transition functions (Cut, Fade, Wipe, …) are NOT in the
