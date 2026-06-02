@@ -5,6 +5,7 @@ import { variableBus } from "@/lib/core/variable-bus";
 import { makeBrokerAdapter } from "@/lib/core/broker-adapter";
 import { X32Broker } from "@/lib/x32/osc-broker";
 import { x32Actions } from "./x32-actions";
+import { withCategoryColors } from "./category-colors";
 import type {
   BrokerImpl,
   DeviceKind,
@@ -283,9 +284,12 @@ const x32Kind: DeviceKind = {
   // No dedicated page — X32 is controlled from the Stream Deck editor
   // (actions / presets / feedback). Connections are managed in the
   // connections panel.
-  actions: x32Actions,
+  actions: withCategoryColors(x32Actions),
   variables: x32Variables,
-  presets: x32Presets,
+  // Single-action presets were redundant mirrors of an action; the browser
+  // now synthesizes those tiles from the coloured actions. Only multi-step
+  // compound buttons (none yet for X32) would survive this filter.
+  presets: x32Presets.filter((p) => p.steps.length > 1),
   make({ config }): BrokerImpl {
     const parsed = parseX32Config(config);
     if (!parsed.ok) {

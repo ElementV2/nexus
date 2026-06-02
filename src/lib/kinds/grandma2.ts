@@ -7,6 +7,7 @@ import { variableBus } from "@/lib/core/variable-bus";
 // dedicated telnet broker — NOT the MA3 OSC broker.
 import { GrandMA2TelnetBroker } from "@/lib/grandma2/telnet-broker";
 import { grandma2Actions } from "./grandma2-actions";
+import { withCategoryColors } from "./category-colors";
 import type {
   BrokerImpl,
   DeviceKind,
@@ -236,9 +237,12 @@ const grandma2Kind: DeviceKind = {
     password: "",
   }),
   // No dedicated page — controlled from the Stream Deck editor.
-  actions: grandma2Actions,
+  actions: withCategoryColors(grandma2Actions),
   variables: grandma2Variables,
-  presets: grandma2Presets,
+  // Single-action presets were redundant mirrors; the browser synthesizes
+  // those tiles from the coloured actions. Only multi-step compound
+  // buttons survive this filter.
+  presets: grandma2Presets.filter((p) => p.steps.length > 1),
   make({ config }): BrokerImpl {
     const parsed = parseMA2Config(config);
     if (!parsed.ok) {

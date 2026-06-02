@@ -1,6 +1,7 @@
 import { Music2 } from "lucide-react";
 import { registerDeviceKind } from "@/lib/core/registry";
 import { createLogger } from "@/lib/core/logger";
+import { withCategoryColors } from "./category-colors";
 import { AbletonBroker } from "@/lib/ableton/osc-broker";
 import type {
   ActionDefinition,
@@ -1439,9 +1440,12 @@ const abletonKind: DeviceKind = {
     recvPort: 11001,
   }),
   pages: [{ href: "/ableton", label: "Ableton", icon: Music2 }],
-  actions: abletonActions,
+  actions: withCategoryColors(abletonActions),
   variables: abletonVariables,
-  presets: abletonPresets,
+  // Single-action presets were redundant mirrors; the browser synthesizes
+  // those tiles from the coloured actions. Only multi-step compound
+  // buttons survive this filter.
+  presets: abletonPresets.filter((p) => p.steps.length > 1),
   make({ config }): BrokerImpl {
     const parsed = parseAbletonConfig(config);
     if (!parsed.ok) {

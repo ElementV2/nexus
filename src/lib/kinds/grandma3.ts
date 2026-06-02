@@ -5,6 +5,7 @@ import { variableBus } from "@/lib/core/variable-bus";
 import { makeBrokerAdapter } from "@/lib/core/broker-adapter";
 import { GrandMA3Broker } from "@/lib/grandma3/osc-broker";
 import { grandma3Actions } from "./grandma3-actions";
+import { withCategoryColors } from "./category-colors";
 import type {
   BrokerImpl,
   DeviceKind,
@@ -339,9 +340,12 @@ const grandma3Kind: DeviceKind = {
   parseConfig: parseMAConfig,
   defaultConfig: (): MAConfig => ({ host: "192.168.1.50", port: 9000, prefix: "" }),
   // No dedicated page — controlled from the Stream Deck editor.
-  actions: grandma3Actions,
+  actions: withCategoryColors(grandma3Actions),
   variables: grandma3Variables,
-  presets: grandma3Presets,
+  // Single-action presets were redundant mirrors; the browser synthesizes
+  // those tiles from the coloured actions. Only multi-step compound
+  // buttons survive this filter.
+  presets: grandma3Presets.filter((p) => p.steps.length > 1),
   make({ config }): BrokerImpl {
     const parsed = parseMAConfig(config);
     if (!parsed.ok) {

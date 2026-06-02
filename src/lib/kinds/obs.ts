@@ -11,6 +11,7 @@ import type {
   VariableDefinition,
 } from "@/lib/core/types";
 import { obsActions } from "./obs-actions";
+import { withCategoryColors } from "./category-colors";
 import type { ObsConnectionStatus } from "@/lib/obs/types";
 
 /**
@@ -610,9 +611,13 @@ const obsKind: DeviceKind = {
     password: "",
   }),
   pages: [{ href: "/obs", label: "OBS", icon: Video }],
-  actions: obsActions,
+  actions: withCategoryColors(obsActions),
   variables: obsVariables,
-  presets: obsPresets,
+  // Only genuine MULTI-step compound buttons stay as presets (e.g.
+  // "Stream + record"). Single-action presets were redundant mirrors of
+  // an action — the browser now synthesizes those tiles from the coloured
+  // actions, so they're filtered out here.
+  presets: obsPresets.filter((p) => p.steps.length > 1),
   make({ config }): BrokerImpl {
     const parsed = parseObsConfig(config);
     if (!parsed.ok) {
