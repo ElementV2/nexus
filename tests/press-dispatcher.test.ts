@@ -25,10 +25,17 @@ vi.mock("@/lib/streamdeck/driver", () => ({
     },
   },
 }));
-vi.mock("@/lib/db/streamdeck", () => ({
-  // The dispatcher reads via the no-clone hot-path accessor.
-  peekStreamdeckStore: () => ({ layouts: m.layouts }),
-}));
+vi.mock("@/lib/db/streamdeck", async (importOriginal) => {
+  // Stub only the store accessor (the dispatcher's no-clone hot path);
+  // keep the real pure geometry helpers (`geometryForModel`,
+  // `remapKeyIndex`) so the press→binding cell mapping is exercised for
+  // real instead of re-stubbed.
+  const actual = await importOriginal<typeof import("@/lib/db/streamdeck")>();
+  return {
+    ...actual,
+    peekStreamdeckStore: () => ({ layouts: m.layouts }),
+  };
+});
 vi.mock("@/lib/core/catalog", () => ({
   runSteps: (...args: unknown[]) => {
     m.runStepsCalls.push(args);

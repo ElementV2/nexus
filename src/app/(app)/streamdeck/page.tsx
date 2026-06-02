@@ -29,6 +29,9 @@ import { DeckKey } from "./_components/DeckKey";
 import { PagesRail } from "./_components/PagesRail";
 import { ImportModal, LoadToDeckModal } from "./_components/modals";
 import { KeyInspector } from "./_components/KeyInspector";
+import { createClientLogger } from "@/lib/client-log";
+
+const deckLog = createClientLogger("deck-ui");
 import { EditorToolbar } from "./_components/EditorToolbar";
 
 export default function StreamdeckPage() {
@@ -268,6 +271,7 @@ export default function StreamdeckPage() {
         try {
           const ev = JSON.parse(e.data) as { type: string };
           if (ev.type === "devices-changed") {
+            deckLog.debug("devices-changed — refreshing hardware list");
             void refreshHardware();
           }
         } catch {
@@ -275,10 +279,14 @@ export default function StreamdeckPage() {
         }
       };
       es.onerror = () => {
-        // Browser auto-reconnects; nothing to do here.
+        // Browser auto-reconnects; log so a flapping deck-events stream is
+        // visible in a bug report.
+        if (es?.readyState === EventSource.CLOSED) {
+          deckLog.warn("deck events stream closed — browser will retry");
+        }
       };
-    } catch {
-      /* no SSE — UI will refetch on user action */
+    } catch (err) {
+      deckLog.warn(`could not open deck events stream — ${String(err)}`);
     }
     return () => {
       es?.close();

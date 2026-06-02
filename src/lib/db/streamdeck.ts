@@ -37,6 +37,59 @@ export const DECK_GEOMETRIES: Record<DeckModel, DeckGeometry> = {
   studio: { rows: 1, cols: 6, label: "Stream Deck Studio" },
 };
 
+/** Resolve a model's grid. Falls back to XL for an unknown id so a
+ *  never-seen model still maps to a sane grid instead of throwing. */
+export function geometryForModel(model: string): DeckGeometry {
+  return DECK_GEOMETRIES[model as DeckModel] ?? DECK_GEOMETRIES.xl;
+}
+
+/**
+ * Pick the known model whose grid matches a (rows, cols) pair exactly,
+ * else "xl". Lets a virtual surface (ScreenDeck etc.) that announces an
+ * arbitrary grid still adopt a real model id when it mirrors a standard
+ * deck size — so pairing it as a layout's first device sets the editor
+ * to the right geometry. Non-standard grids fall back to xl and rely on
+ * the (row,col) render mapping, which keys off the device's real dims.
+ */
+export function modelForGrid(rows: number, cols: number): DeckModel {
+  for (const [model, g] of Object.entries(DECK_GEOMETRIES)) {
+    if (g.rows === rows && g.cols === cols) return model as DeckModel;
+  }
+  return "xl";
+}
+
+/**
+ * Remap a flat key index between two grids of differing widths,
+ * PRESERVING the visual (row, col) cell — the "pinned top-left overlay"
+ * rule. A layout designed on a wide deck (XL, 8 cols) shown on a
+ * narrower one (MK.2, 5 cols) keeps every key in the SAME position: the
+ * smaller deck shows the layout's top-left sub-rectangle. Cells that
+ * fall outside the destination grid return `undefined` — there's
+ * nothing to draw there (and no binding to fire on press).
+ *
+ * Symmetric: use it layout→device (`fromCols = layoutCols`,
+ * `toCols/toRows = deviceCols/deviceRows`) when rendering, and
+ * device→layout when resolving a physical press back to its binding.
+ *
+ * Without this, indices were compared by their FLAT value: key 5 on an
+ * 8-col layout (row 0, col 5) landed on physical key 5 of a 5-col deck
+ * (row 1, col 0) — the "6th button jumps to the start of row 2" bug.
+ */
+export function remapKeyIndex(
+  index: number,
+  fromCols: number,
+  toCols: number,
+  toRows: number
+): number | undefined {
+  if (!Number.isFinite(index) || fromCols <= 0 || toCols <= 0 || toRows <= 0) {
+    return undefined;
+  }
+  const row = Math.floor(index / fromCols);
+  const col = index % fromCols;
+  if (col >= toCols || row >= toRows) return undefined;
+  return row * toCols + col;
+}
+
 /**
  * One action fired when the key is pressed. A button holds an ordered
  * list of these — so a single key can trigger several things, and each

@@ -23,9 +23,19 @@ import type { Canvas } from "@napi-rs/canvas";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { DeckBinding } from "@/lib/db/streamdeck";
+import {
+  DECK_GEOMETRIES,
+  modelForGrid,
+  remapKeyIndex,
+  type DeckModel,
+} from "@/lib/db/streamdeck";
+import { screendeckServer } from "./screendeck-server";
 import { hmrSingleton } from "@/lib/utils/hmr-singleton";
 import { satelliteRegistry } from "./satellite-registry";
 import { drawKeyFace, KEY_FONT_FAMILY, type FaceCtx } from "./key-face";
+import { createLogger } from "@/lib/core/logger";
+
+const log = createLogger("streamdeck");
 
 // The @elgato-stream-deck/node v7 type surface is rich; we only need
 // the slices the driver actually touches. Importing as types keeps
@@ -116,6 +126,12 @@ export interface DriverEvent {
    *  through the device list. */
   serialNumber?: string;
   keyIndex?: number;
+  /** Physical grid of the device this event came from — set on key
+   *  events so the press dispatcher can remap the physical key back to
+   *  the layout's (row,col) cell when the paired layout was designed on
+   *  a different-width deck. */
+  cols?: number;
+  rows?: number;
   state?: DriverState;
   reason?: string;
 }
@@ -178,6 +194,29 @@ const RENDER_DEBOUNCE_MS = 60;
 
 /** TTL for the cached `listDevices()` enumeration (see usage). */
 const LIST_TTL_MS = 1000;
+
+/**
+ * Load JUST the canvas engine, independent of the HID stack. ScreenDeck
+ * (and any Companion-Satellite client) renders server-composed bitmaps,
+ * so it needs `@napi-rs/canvas` but NOT `@elgato-stream-deck/node` —
+ * a machine with no physical decks (HID deps absent) must still drive
+ * on-screen virtual decks. `loadModules` would fail the whole load if the
+ * Elgato package is missing; this path doesn't depend on it.
+ */
+let canvasPromise: Promise<LoadedModules["canvas"] | null> | null = null;
+async function loadCanvas(): Promise<LoadedModules["canvas"] | null> {
+  if (canvasPromise) return canvasPromise;
+  canvasPromise = (async () => {
+    try {
+      const canvas = await import("@napi-rs/canvas");
+      registerKeyFont(canvas);
+      return canvas;
+    } catch {
+      return null;
+    }
+  })();
+  return canvasPromise;
+}
 
 async function loadModules(): Promise<LoadedModules | null> {
   if (loadPromise) return loadPromise;
@@ -259,6 +298,14 @@ class DriverImpl {
    *  drag the registry into a stale singleton state.  */
   private satelliteUnsub: (() => void) | null = null;
 
+  /** Connections to the ScreenDeck (Companion-Satellite) server — its
+   *  presses are normalized into the same key-down/up stream, and a
+   *  surface (dis)connect re-emits devices-changed so the coordinator
+   *  paints / drops it. Wired once on first subscribe, dropped on
+   *  dispose. */
+  private screendeckUnsub: (() => void) | null = null;
+  private screendeckChangeUnsub: (() => void) | null = null;
+
   /** Last resolved face signature per `devicePath:keyIndex`. The
    *  feedback coordinator re-pushes EVERY bound key on EVERY variable
    *  change; without change-detection a single tally tick recomposes +
@@ -281,15 +328,41 @@ class DriverImpl {
     // dispatcher doesn't have to special-case them.
     if (!this.satelliteUnsub) {
       this.satelliteUnsub = satelliteRegistry.subscribePresses((event) => {
+        const devicePath = `satellite:${event.serial}`;
+        const dims = this.resolveDims(devicePath);
         this.emit({
           type: event.type === "down" ? "key-down" : "key-up",
           // Remote decks have no device path on this side — set a
           // synthetic marker prefixed with `satellite:` so any
           // downstream logic that wants to differentiate still can.
-          devicePath: `satellite:${event.serial}`,
+          devicePath,
           serialNumber: event.serial,
           keyIndex: event.keyIndex,
+          cols: dims?.cols,
+          rows: dims?.rows,
         });
+      });
+    }
+    // Same bridge for ScreenDeck / Companion-Satellite virtual decks.
+    if (!this.screendeckUnsub) {
+      this.screendeckUnsub = screendeckServer.subscribePresses((event) => {
+        const devicePath = `screendeck:${event.serial}`;
+        const dims = this.resolveDims(devicePath);
+        this.emit({
+          type: event.type === "down" ? "key-down" : "key-up",
+          devicePath,
+          serialNumber: event.serial,
+          keyIndex: event.keyIndex,
+          cols: dims?.cols,
+          rows: dims?.rows,
+        });
+      });
+    }
+    if (!this.screendeckChangeUnsub) {
+      // A virtual surface (dis)appeared — same signal as USB hotplug /
+      // a satellite (re)announce, so reuse the debounced broadcast.
+      this.screendeckChangeUnsub = screendeckServer.onChange(() => {
+        this.notifyDevicesChanged();
       });
     }
     return () => this.listeners.delete(cb);
@@ -313,12 +386,15 @@ class DriverImpl {
       // them for `satellite:` paths. Report "ready" when at least
       // one satellite is connected so the UI doesn't grey out
       // controls that DO work.
-      let satelliteCount = 0;
+      let remoteCount = 0;
       satelliteRegistry.forEachDevice(() => {
-        satelliteCount += 1;
+        remoteCount += 1;
       });
-      if (satelliteCount > 0) {
-        return { state: "ready", devicesKnown: satelliteCount };
+      screendeckServer.forEachDevice(() => {
+        remoteCount += 1;
+      });
+      if (remoteCount > 0) {
+        return { state: "ready", devicesKnown: remoteCount };
       }
       return {
         state: "deps-missing",
@@ -358,6 +434,7 @@ class DriverImpl {
           satelliteLabel: satelliteLabel ?? satelliteId,
         });
       });
+      this.appendScreendeckDevices(out);
       this.devicesCache = { ts: Date.now(), list: out };
       return out;
     }
@@ -369,10 +446,9 @@ class DriverImpl {
       // node-hid native binary). Do NOT bail with an empty list — fall
       // through so the REMOTE satellite decks below still surface. A broken
       // local HID must never hide working remote decks in "Load to deck".
-      this.emit({
-        type: "error",
-        reason: err instanceof Error ? err.message : String(err),
-      });
+      const reason = err instanceof Error ? err.message : String(err);
+      log.warn(`local HID enumeration failed: ${reason}`);
+      this.emit({ type: "error", reason });
       infos = [];
     }
     // Bind hotplug now that we've shown the modules load — the first
@@ -444,6 +520,7 @@ class DriverImpl {
         satelliteLabel: satelliteLabel ?? satelliteId,
       });
     });
+    this.appendScreendeckDevices(out);
     this.devicesCache = { ts: Date.now(), list: out };
     return out;
   }
@@ -496,6 +573,16 @@ class DriverImpl {
         const deck = (await mods.streamdeck.openStreamDeck(
           devicePath
         )) as unknown as StreamDeck;
+        // The control carries its own (row, column); forward the grid
+        // width/height so the press dispatcher can remap to the paired
+        // layout's cell when the layout was designed on a different deck.
+        const buttons = deck.CONTROLS.filter((c) => c.type === "button");
+        let cols = 0;
+        let rows = 0;
+        for (const c of buttons) {
+          if (c.column + 1 > cols) cols = c.column + 1;
+          if (c.row + 1 > rows) rows = c.row + 1;
+        }
         deck.on("down", (control) => {
           if (control.type !== "button") return;
           this.emit({
@@ -503,6 +590,8 @@ class DriverImpl {
             devicePath,
             serialNumber: this.deviceInfo.get(devicePath)?.serialNumber,
             keyIndex: control.index,
+            cols,
+            rows,
           });
         });
         deck.on("up", (control) => {
@@ -512,19 +601,25 @@ class DriverImpl {
             devicePath,
             serialNumber: this.deviceInfo.get(devicePath)?.serialNumber,
             keyIndex: control.index,
+            cols,
+            rows,
           });
         });
         deck.on("error", (err: Error) => {
+          log.warn(`deck ${devicePath} runtime error: ${err.message}`);
           this.emit({ type: "error", devicePath, reason: err.message });
         });
         this.openHandles.set(devicePath, deck);
+        const info = this.deviceInfo.get(devicePath);
+        log.info(
+          `deck connected: ${info?.serialNumber ?? devicePath}` +
+            ` (${cols}×${rows} keys)`
+        );
         return deck;
       } catch (err) {
-        this.emit({
-          type: "error",
-          devicePath,
-          reason: err instanceof Error ? err.message : String(err),
-        });
+        const reason = err instanceof Error ? err.message : String(err);
+        log.warn(`failed to open deck ${devicePath}: ${reason}`);
+        this.emit({ type: "error", devicePath, reason });
         return null;
       }
     })();
@@ -545,6 +640,7 @@ class DriverImpl {
     this.invalidateFaceCache(devicePath);
     const handle = this.openHandles.get(devicePath);
     if (!handle) return;
+    const info = this.deviceInfo.get(devicePath);
     try {
       handle.removeAllListeners();
       await handle.close();
@@ -552,6 +648,90 @@ class DriverImpl {
       /* ignore — device may already be unplugged */
     }
     this.openHandles.delete(devicePath);
+    log.info(`deck disconnected: ${info?.serialNumber ?? devicePath}`);
+  }
+
+  /**
+   * Append connected ScreenDeck / Companion-Satellite virtual surfaces to
+   * a device list. They surface exactly like satellite decks (remote +
+   * labelled) so the pairing UI and "Load to deck" treat them uniformly.
+   * The model is inferred from the announced grid so pairing one as a
+   * layout's first device adopts the right editor geometry.
+   */
+  private appendScreendeckDevices(out: DeviceSummary[]): void {
+    screendeckServer.forEachDevice((d) => {
+      out.push({
+        path: `screendeck:${d.deviceId}`,
+        serialNumber: d.deviceId,
+        model: modelForGrid(d.rows, d.cols),
+        opened: true,
+        rows: d.rows,
+        cols: d.cols,
+        iconSize: d.bitmapSize > 0 ? d.bitmapSize : 72,
+        remote: true,
+        satelliteLabel: d.productName,
+      });
+    });
+  }
+
+  /**
+   * Best-effort physical grid of a device by path. Authoritative when
+   * the deck is open (derived from its CONTROLS); falls back to the
+   * satellite registry for remote decks, then to the model's published
+   * geometry for a known-but-not-yet-open local deck. Null when nothing
+   * knows the device yet (pre-enumeration) — callers treat that as
+   * "assume the layout's own grid" (identity), which is correct when
+   * the deck matches the layout and only momentarily off otherwise.
+   */
+  private resolveDims(devicePath: string): { rows: number; cols: number } | null {
+    const open = this.openHandles.get(devicePath);
+    if (open) {
+      const d = deriveDims(open);
+      return { rows: d.rows, cols: d.cols };
+    }
+    if (devicePath.startsWith("satellite:")) {
+      const serial = devicePath.slice("satellite:".length);
+      let dims: { rows: number; cols: number } | null = null;
+      satelliteRegistry.forEachDevice((_id, d) => {
+        if (d.serial === serial) dims = { rows: d.rows, cols: d.cols };
+      });
+      return dims;
+    }
+    if (devicePath.startsWith("screendeck:")) {
+      const id = devicePath.slice("screendeck:".length);
+      const d = screendeckServer.dims(id);
+      return d ? { rows: d.rows, cols: d.cols } : null;
+    }
+    const info = this.deviceInfo.get(devicePath);
+    const g = info ? DECK_GEOMETRIES[info.model as DeckModel] : undefined;
+    return g ? { rows: g.rows, cols: g.cols } : null;
+  }
+
+  /**
+   * Render a LAYOUT-space key onto a device, mapping it to the physical
+   * key for the same (row,col) cell. This is the entry point every
+   * caller that holds a layout (the editor live-push, the feedback
+   * coordinator) should use: it honors the pinned-top-left overlay rule
+   * so a layout designed on a wide deck shows correctly on a narrower
+   * one. A binding whose cell is off this (smaller) device is silently
+   * skipped — there's no physical key to draw it on.
+   */
+  renderLayoutKey(
+    devicePath: string,
+    layoutIndex: number,
+    layout: { cols: number; rows: number },
+    binding: DeckBinding | undefined,
+    override?: Parameters<DriverImpl["renderKey"]>[3]
+  ): void {
+    const dims = this.resolveDims(devicePath);
+    // Identity fallback when dims are unknown (device not yet enumerated):
+    // correct for a matching deck, and self-corrects on the next render
+    // once the handle opens.
+    const cols = dims?.cols ?? layout.cols;
+    const rows = dims?.rows ?? layout.rows;
+    const physical = remapKeyIndex(layoutIndex, layout.cols, cols, rows);
+    if (physical === undefined) return; // cell is off this device
+    this.renderKey(devicePath, physical, binding, override);
   }
 
   /**
@@ -647,6 +827,27 @@ class DriverImpl {
     const ck = `${devicePath}:${keyIndex}`;
     const sig = faceSignature(binding, override);
     if (this.lastFace.get(ck) === sig) return;
+
+    // ScreenDeck / Companion-Satellite virtual decks: compose the SAME face
+    // and ship it over the protocol as a bitmap. This path uses canvas only
+    // (no HID), so it works on a machine with no physical decks.
+    if (devicePath.startsWith("screendeck:")) {
+      const id = devicePath.slice("screendeck:".length);
+      const dims = screendeckServer.dims(id);
+      if (!dims) return; // surface disconnected mid-debounce
+      if (!binding) {
+        screendeckServer.clearKey(id, keyIndex);
+        this.lastFace.set(ck, sig);
+        return;
+      }
+      const canvas = await loadCanvas();
+      if (!canvas) return;
+      const rgb = composeKeyImage(canvas, dims.iconSize, binding, override);
+      screendeckServer.renderKey(id, keyIndex, rgb);
+      this.lastFace.set(ck, sig);
+      return;
+    }
+
     const mods = await loadModules();
     if (!mods) return;
     const deck = await this.open(devicePath);
@@ -693,6 +894,10 @@ class DriverImpl {
       satelliteRegistry.send({ type: "clear-panel", serial });
       return;
     }
+    if (devicePath.startsWith("screendeck:")) {
+      screendeckServer.clearPanel(devicePath.slice("screendeck:".length));
+      return;
+    }
     const deck = await this.open(devicePath);
     if (!deck) return;
     try {
@@ -735,6 +940,13 @@ class DriverImpl {
 
     // Tell every satellite to reset its own decks to the logo as well.
     satelliteRegistry.resetAllDecks();
+
+    // Blank every connected virtual deck too — there's no "logo" for a
+    // ScreenDeck, so clearing all keys is the closest idle state.
+    screendeckServer.forEachDevice((d) => {
+      this.invalidateFaceCache(`screendeck:${d.deviceId}`);
+      screendeckServer.clearPanel(d.deviceId);
+    });
   }
 
   async setBrightness(devicePath: string, percent: number): Promise<void> {
@@ -745,6 +957,13 @@ class DriverImpl {
         serial,
         percent: Math.max(0, Math.min(100, percent | 0)),
       });
+      return;
+    }
+    if (devicePath.startsWith("screendeck:")) {
+      screendeckServer.setBrightness(
+        devicePath.slice("screendeck:".length),
+        percent
+      );
       return;
     }
     const deck = await this.open(devicePath);
@@ -799,7 +1018,8 @@ class DriverImpl {
 
   async pushLayout(
     devicePath: string,
-    bindings: Record<number, DeckBinding>
+    bindings: Record<number, DeckBinding>,
+    layout: { cols: number; rows: number }
   ): Promise<void> {
     // A "Load to deck" must repaint EVERY key unconditionally. Clear the
     // per-key face cache first: change-detection (`lastFace`) otherwise
@@ -818,13 +1038,45 @@ class DriverImpl {
     // forward a render per key. The satellite agent applies them.
     if (devicePath.startsWith("satellite:")) {
       const serial = devicePath.slice("satellite:".length);
-      let total = 0;
+      let satCols = 0;
+      let satRows = 0;
       satelliteRegistry.forEachDevice((_id, d) => {
-        if (d.serial === serial) total = d.rows * d.cols;
+        if (d.serial === serial) {
+          satCols = d.cols;
+          satRows = d.rows;
+        }
       });
+      const total = satCols * satRows;
       if (total === 0) return;
+      // Iterate the satellite's PHYSICAL keys; pull each one's binding from
+      // the layout cell at the same (row,col). Physical keys with no layout
+      // cell (deck wider/taller than the layout) get `undefined` → cleared.
       for (let i = 0; i < total; i++) {
-        this.renderKey(devicePath, i, bindings[i]);
+        const layoutIndex = remapKeyIndex(i, satCols, layout.cols, layout.rows);
+        this.renderKey(
+          devicePath,
+          i,
+          layoutIndex === undefined ? undefined : bindings[layoutIndex]
+        );
+      }
+      return;
+    }
+
+    // Virtual-deck path: same shape as satellite — no HID handle, the grid
+    // comes from the surface the client registered. renderKey routes the
+    // composed bitmap over the Satellite protocol.
+    if (devicePath.startsWith("screendeck:")) {
+      const id = devicePath.slice("screendeck:".length);
+      const d = screendeckServer.dims(id);
+      if (!d) return;
+      const total = d.cols * d.rows;
+      for (let i = 0; i < total; i++) {
+        const layoutIndex = remapKeyIndex(i, d.cols, layout.cols, layout.rows);
+        this.renderKey(
+          devicePath,
+          i,
+          layoutIndex === undefined ? undefined : bindings[layoutIndex]
+        );
       }
       return;
     }
@@ -850,9 +1102,24 @@ class DriverImpl {
     // a debounced HID write internally. All 32 keys land within the
     // debounce window, then the SDK's own queue serialises the
     // actual writes. No need to await per-key.
+    const dims = deriveDims(deck);
     const buttons = deck.CONTROLS.filter((c) => c.type === "button");
     for (const ctrl of buttons) {
-      this.renderKey(devicePath, ctrl.index, bindings[ctrl.index]);
+      // Map the PHYSICAL key to the layout cell at the same (row,col).
+      // A physical key with no layout cell (deck bigger than the layout)
+      // resolves to `undefined` → renderKey clears it, so stale faces
+      // from a previous, larger layout don't linger.
+      const layoutIndex = remapKeyIndex(
+        ctrl.index,
+        dims.cols,
+        layout.cols,
+        layout.rows
+      );
+      this.renderKey(
+        devicePath,
+        ctrl.index,
+        layoutIndex === undefined ? undefined : bindings[layoutIndex]
+      );
     }
   }
 
@@ -862,6 +1129,10 @@ class DriverImpl {
     this.hotplugBound = false;
     this.satelliteUnsub?.();
     this.satelliteUnsub = null;
+    this.screendeckUnsub?.();
+    this.screendeckUnsub = null;
+    this.screendeckChangeUnsub?.();
+    this.screendeckChangeUnsub = null;
     for (const { timer } of this.pendingRenders.values()) {
       clearTimeout(timer);
     }

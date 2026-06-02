@@ -29,6 +29,17 @@ export interface AppPreferences {
   defaultConnections: Record<string, string>;
 
   /**
+   * On-screen virtual deck support (ScreenDeck & other Companion
+   * Satellite clients). Nexus runs the Satellite-API server side: the
+   * client connects in over TCP and registers a virtual surface, which
+   * then behaves like any other (remote) deck. `enabled` defaults true
+   * so it works out of the box; `port` is configurable to avoid a clash
+   * when Bitfocus Companion runs on the same machine (it also uses
+   * 16622). See `screendeck-server.ts`.
+   */
+  screendeck: { enabled: boolean; port: number };
+
+  /**
    * One-time migration latch. The legacy auto-seed
    * (`synthesizeLegacyConnections`) only runs while this is false AND
    * the list is empty. The first connection write (add / edit /
@@ -146,11 +157,32 @@ export function defaultConnectionConfig(
  */
 let prefsCache: { mtime: number | null; value: AppPreferences } | null = null;
 
+/** Companion Satellite API default TCP port (Bitfocus standard). */
+export const SCREENDECK_DEFAULT_PORT = 16622;
+
 export const DEFAULT_PREFERENCES: AppPreferences = {
   connections: [],
   defaultConnections: {},
+  screendeck: { enabled: true, port: SCREENDECK_DEFAULT_PORT },
   connectionsSeeded: false,
 };
+
+/** Coerce a raw persisted/posted screendeck blob to the typed shape,
+ *  clamping the port to a valid range and defaulting missing fields. */
+function sanitizeScreendeck(raw: unknown): { enabled: boolean; port: number } {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<
+    string,
+    unknown
+  >;
+  const port = Number(r.port);
+  return {
+    enabled: r.enabled !== false, // default ON
+    port:
+      Number.isInteger(port) && port >= 1 && port <= 65535
+        ? port
+        : SCREENDECK_DEFAULT_PORT,
+  };
+}
 
 function computePreferences(): AppPreferences {
   // Fast path: file unchanged since we last computed → return the cache.
@@ -166,6 +198,7 @@ function computePreferences(): AppPreferences {
     ...DEFAULT_PREFERENCES,
     ...(typeof raw.pin === "string" ? { pin: raw.pin } : {}),
     connections: sanitizeConnections(raw.connections),
+    screendeck: sanitizeScreendeck(raw.screendeck),
     connectionsSeeded: raw.connectionsSeeded === true,
   };
   // Auto-seed `connections[]` for a fresh install, or migrate a pre-registry
@@ -336,6 +369,12 @@ export function setPreferences(
   // malformed we still write a clean array (instead of corrupting the file).
   if (partial.connections !== undefined) {
     next.connections = sanitizeConnections(partial.connections);
+  }
+
+  // Keep the screendeck blob well-formed (valid port, boolean enabled)
+  // whether it came from the editor or an external launcher write.
+  if (partial.screendeck !== undefined) {
+    next.screendeck = sanitizeScreendeck(partial.screendeck);
   }
 
   // Keep the defaults map honest against the (possibly new) connection list.

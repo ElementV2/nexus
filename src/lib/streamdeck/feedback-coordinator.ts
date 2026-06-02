@@ -1,6 +1,6 @@
 import { variableBus } from "@/lib/core/variable-bus";
 import { connectionManager } from "@/lib/core/connection-manager";
-import { peekStreamdeckStore } from "@/lib/db/streamdeck";
+import { geometryForModel, peekStreamdeckStore } from "@/lib/db/streamdeck";
 import { hmrSingleton } from "@/lib/utils/hmr-singleton";
 import { streamdeckDriver } from "./driver";
 import { evaluateFeedback, type VarsByConnection } from "./feedback";
@@ -155,6 +155,10 @@ class CoordinatorImpl {
         .map((serial) => devices.find((d) => d.serialNumber === serial)?.path)
         .filter((p): p is string => !!p);
       if (paths.length === 0) continue;
+      // Bindings are keyed in the layout's own grid; renderLayoutKey maps
+      // each to the physical key of the same (row,col) on each device,
+      // so a layout shows correctly on a narrower/shorter deck.
+      const geom = geometryForModel(layout.model);
       for (const [keyStr, binding] of Object.entries(layout.bindings)) {
         const keyIndex = Number(keyStr);
         if (!Number.isFinite(keyIndex)) continue;
@@ -167,7 +171,13 @@ class CoordinatorImpl {
         }
         const override = evaluateFeedback(binding, vars, kinds, connected);
         for (const path of paths) {
-          streamdeckDriver.renderKey(path, keyIndex, binding, override ?? undefined);
+          streamdeckDriver.renderLayoutKey(
+            path,
+            keyIndex,
+            geom,
+            binding,
+            override ?? undefined
+          );
         }
       }
     }

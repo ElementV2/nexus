@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { streamdeckDriver } from "@/lib/streamdeck/driver";
-import { getStreamdeckStore } from "@/lib/db/streamdeck";
+import { geometryForModel, getStreamdeckStore } from "@/lib/db/streamdeck";
 
 export const dynamic = "force-dynamic";
 
@@ -109,9 +109,20 @@ export async function POST(req: NextRequest) {
         : body.binding && typeof body.binding === "object"
           ? (body.binding as Parameters<typeof streamdeckDriver.renderKey>[2])
           : layout?.bindings[keyIndex];
+    // `keyIndex` is a LAYOUT-grid index (the editor's grid). When a layout
+    // is in play, render through renderLayoutKey so it lands on the correct
+    // physical key of a differently-sized deck. An explicit devicePath with
+    // no layout (rare internal caller) has no layout grid → render directly.
     await Promise.all(
       devicePaths.map((p) =>
-        streamdeckDriver.renderKey(p, keyIndex, liveBinding)
+        layout
+          ? streamdeckDriver.renderLayoutKey(
+              p,
+              keyIndex,
+              geometryForModel(layout.model),
+              liveBinding
+            )
+          : streamdeckDriver.renderKey(p, keyIndex, liveBinding)
       )
     );
     return NextResponse.json({ ok: true });
@@ -125,7 +136,13 @@ export async function POST(req: NextRequest) {
     );
   }
   await Promise.all(
-    devicePaths.map((p) => streamdeckDriver.pushLayout(p, layout.bindings))
+    devicePaths.map((p) =>
+      streamdeckDriver.pushLayout(
+        p,
+        layout.bindings,
+        geometryForModel(layout.model)
+      )
+    )
   );
   return NextResponse.json({ ok: true });
 }

@@ -6,7 +6,11 @@ import {
   restoreConfigSecrets,
   type AppPreferences,
 } from "@/lib/db/preferences";
-import { ensureBooted, reconcileFromPreferences } from "@/lib/core/boot";
+import {
+  applyScreendeckPreferences,
+  ensureBooted,
+  reconcileFromPreferences,
+} from "@/lib/core/boot";
 
 export const dynamic = "force-dynamic";
 
@@ -53,5 +57,8 @@ export async function PUT(request: NextRequest) {
   // A `connections` write changes the broker set → reconcile so the live
   // brokers match the just-persisted list immediately (no stale-config window).
   if (Array.isArray(body.connections)) reconcileFromPreferences();
+  // A `screendeck` write changes the Satellite listener (toggle / port) →
+  // rebind it immediately so the change takes effect without a restart.
+  if (body.screendeck !== undefined) applyScreendeckPreferences();
   return NextResponse.json(redactPreferences(updated));
 }

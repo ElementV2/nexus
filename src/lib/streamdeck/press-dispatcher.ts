@@ -1,7 +1,14 @@
 import { streamdeckDriver } from "./driver";
-import { peekStreamdeckStore } from "@/lib/db/streamdeck";
+import {
+  geometryForModel,
+  peekStreamdeckStore,
+  remapKeyIndex,
+} from "@/lib/db/streamdeck";
 import { runSteps } from "@/lib/core/catalog";
 import { hmrSingleton } from "@/lib/utils/hmr-singleton";
+import { createLogger } from "@/lib/core/logger";
+
+const log = createLogger("press-dispatcher");
 
 /**
  * Single server-side subscriber that turns physical Stream Deck key
@@ -40,7 +47,22 @@ class PressDispatcherImpl {
       const layout = store.layouts.find((l) =>
         l.deviceSerials.includes(serial)
       );
-      const binding = layout?.bindings[event.keyIndex];
+      if (!layout) return;
+      // The hardware reports the PHYSICAL key index. Map it back to the
+      // layout cell at the same (row,col) — the inverse of the render
+      // path — so a press on a narrower deck fires the binding the
+      // operator sees there, not a flat-index-shifted neighbour. When the
+      // event lacks a grid (older driver), `event.cols ?? layoutCols`
+      // makes it an identity map (correct when deck and layout match).
+      const geom = geometryForModel(layout.model);
+      const layoutIndex = remapKeyIndex(
+        event.keyIndex,
+        event.cols ?? geom.cols,
+        geom.cols,
+        geom.rows
+      );
+      const binding =
+        layoutIndex === undefined ? undefined : layout.bindings[layoutIndex];
       if (!binding) return;
       // Pass the binding's connection pin so the press fires against
       // the operator-chosen instance (e.g. vMix #2). Each step may
@@ -50,6 +72,10 @@ class PressDispatcherImpl {
       // never follow the per-kind "default" — that's display-only, and a
       // deck must not silently re-target when the operator changes it.
       const keyIndex = event.keyIndex;
+      log.debug(
+        `key ${serial}#${keyIndex} → ${binding.preset.kind} ` +
+          `(${binding.preset.steps.length} step(s))`
+      );
       void runSteps(
         binding.preset.steps,
         binding.preset.kind,
@@ -66,8 +92,8 @@ class PressDispatcherImpl {
           // the server logs instead of vanishing.
           const failed = results.filter((r) => !r.ok);
           if (failed.length > 0) {
-            console.warn(
-              `[press-dispatcher] key ${serial}#${keyIndex}: ` +
+            log.warn(
+              `key ${serial}#${keyIndex}: ` +
                 `${failed.length}/${results.length} step(s) failed — ` +
                 failed.map((r) => r.error ?? "unknown").join("; ")
             );
@@ -78,8 +104,8 @@ class PressDispatcherImpl {
           }
         })
         .catch((err) => {
-          console.warn(
-            `[press-dispatcher] key ${serial}#${keyIndex}: run threw — ` +
+          log.warn(
+            `key ${serial}#${keyIndex}: run threw — ` +
               (err instanceof Error ? err.message : String(err))
           );
         });
