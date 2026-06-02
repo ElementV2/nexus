@@ -12,7 +12,6 @@ import type {
   BrokerImpl,
   DeviceKind,
   KindEvent,
-  PresetDefinition,
   VariableDefinition,
 } from "@/lib/core/types";
 
@@ -53,7 +52,6 @@ function parseMA2Config(
   return { ok: true, config: { host, port, user, password } };
 }
 
-
 const grandma2Variables: VariableDefinition[] = [
   { id: "connected", label: "Connected", hint: "boolean" },
 ];
@@ -65,164 +63,6 @@ registerBridge("grandma2", (connectionId, broker) =>
     variableBus.set(connectionId, "connected", Boolean(ev.connected));
   })
 );
-
-const grandma2Presets: PresetDefinition[] = [
-  // Sequences 1-8 — Go (not Go+).
-  ...[1, 2, 3, 4, 5, 6, 7, 8].map(
-    (n): PresetDefinition => ({
-      id: `seq-${n}-go`,
-      label: `Sequence ${n} Go`,
-      category: "Sequences",
-      text: `▶ ${n}`,
-      bgcolor: "#34c759",
-      fgcolor: "#000000",
-      steps: [{ actionId: "seq-go", options: { sequence: n } }],
-    })
-  ),
-  ...[1, 2, 3, 4, 5, 6, 7, 8].map(
-    (n): PresetDefinition => ({
-      id: `seq-${n}-off`,
-      label: `Sequence ${n} off`,
-      category: "Sequences",
-      text: `OFF ${n}`,
-      bgcolor: "#1c1c1e",
-      fgcolor: "#ff3b30",
-      steps: [{ actionId: "seq-off", options: { sequence: n } }],
-    })
-  ),
-  // Cue navigation
-  {
-    id: "cue-next",
-    label: "Cue · Next",
-    category: "Cues",
-    text: "CUE →",
-    bgcolor: "#34c759",
-    fgcolor: "#000000",
-    steps: [{ actionId: "cue-next", options: { sequence: 1 } }],
-  },
-  {
-    id: "cue-prev",
-    label: "Cue · Previous",
-    category: "Cues",
-    text: "CUE ←",
-    bgcolor: "#ff9500",
-    fgcolor: "#000000",
-    steps: [{ actionId: "cue-prev", options: { sequence: 1 } }],
-  },
-  // Pages
-  {
-    id: "page-next",
-    label: "Page +",
-    category: "Pages",
-    text: "PG +",
-    bgcolor: "#5ac8fa",
-    fgcolor: "#000000",
-    steps: [{ actionId: "page-next" }],
-  },
-  {
-    id: "page-prev",
-    label: "Page −",
-    category: "Pages",
-    text: "PG −",
-    bgcolor: "#5ac8fa",
-    fgcolor: "#000000",
-    steps: [{ actionId: "page-prev" }],
-  },
-  // Selection
-  {
-    id: "select-fixture",
-    label: "Select fixture",
-    category: "Selection",
-    text: "FIX",
-    bgcolor: "#5ac8fa",
-    fgcolor: "#000000",
-    steps: [{ actionId: "select-fixture", options: { fixture: 1 } }],
-  },
-  {
-    id: "select-group",
-    label: "Select group",
-    category: "Selection",
-    text: "GRP",
-    bgcolor: "#5ac8fa",
-    fgcolor: "#000000",
-    steps: [{ actionId: "select-group", options: { group: 1 } }],
-  },
-  {
-    id: "selection-clear",
-    label: "Clear selection",
-    category: "Selection",
-    text: "CLR\nSEL",
-    bgcolor: "#1c1c1e",
-    fgcolor: "#ff3b30",
-    steps: [{ actionId: "selection-clear" }],
-  },
-  // Programmer
-  {
-    id: "programmer-clear",
-    label: "Programmer · Clear",
-    category: "Programmer",
-    text: "CLEAR",
-    bgcolor: "#1c1c1e",
-    fgcolor: "#ff3b30",
-    steps: [{ actionId: "programmer-clear" }],
-  },
-  {
-    id: "programmer-highlight",
-    label: "Programmer · Highlight",
-    category: "Programmer",
-    text: "HILT",
-    bgcolor: "#ff9500",
-    fgcolor: "#000000",
-    steps: [{ actionId: "programmer-highlight" }],
-  },
-  // Macros
-  {
-    id: "macro-go",
-    label: "Run macro",
-    category: "Macros",
-    text: "MACRO",
-    bgcolor: "#af52de",
-    fgcolor: "#ffffff",
-    steps: [{ actionId: "macro-go", options: { macro: 1 } }],
-  },
-  // Globals
-  {
-    id: "blackout",
-    label: "Blackout",
-    category: "Global",
-    text: "BLACK\nOUT",
-    bgcolor: "#000000",
-    fgcolor: "#ffffff",
-    steps: [{ actionId: "blackout" }],
-  },
-  {
-    id: "full",
-    label: "Grandmaster 100%",
-    category: "Global",
-    text: "FULL",
-    bgcolor: "#ff9500",
-    fgcolor: "#000000",
-    steps: [{ actionId: "full" }],
-  },
-  {
-    id: "off-all",
-    label: "Off everything",
-    category: "Global",
-    text: "OFF\nTHRU",
-    bgcolor: "#1c1c1e",
-    fgcolor: "#ff3b30",
-    steps: [{ actionId: "off-all" }],
-  },
-  {
-    id: "save-show",
-    label: "Save show",
-    category: "Global",
-    text: "SAVE",
-    bgcolor: "#34c759",
-    fgcolor: "#000000",
-    steps: [{ actionId: "save-show" }],
-  },
-];
 
 const grandma2Kind: DeviceKind = {
   kind: "grandma2",
@@ -239,10 +79,6 @@ const grandma2Kind: DeviceKind = {
   // No dedicated page — controlled from the Stream Deck editor.
   actions: withCategoryColors(grandma2Actions),
   variables: grandma2Variables,
-  // Single-action presets were redundant mirrors; the browser synthesizes
-  // those tiles from the coloured actions. Only multi-step compound
-  // buttons survive this filter.
-  presets: grandma2Presets.filter((p) => p.steps.length > 1),
   make({ config }): BrokerImpl {
     const parsed = parseMA2Config(config);
     if (!parsed.ok) {

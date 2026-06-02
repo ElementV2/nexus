@@ -422,52 +422,10 @@ const obsVariables: VariableDefinition[] = [
 
 // ─────────────────────────── Presets ──────────────────────────────────
 
+// Multi-step compound buttons are the ONLY presets kept — a single
+// action can't chain several commands. Every other OBS operation is a
+// coloured action tile the unified browser synthesizes from the actions.
 const obsPresets: PresetDefinition[] = [
-  {
-    id: "toggle-stream",
-    label: "Toggle stream",
-    category: "Stream",
-    text: "STREAM",
-    bgcolor: "#ff3b30",
-    fgcolor: "#ffffff",
-    steps: [{ actionId: "toggle-stream" }],
-  },
-  {
-    id: "toggle-record",
-    label: "Toggle record",
-    category: "Record",
-    text: "REC",
-    bgcolor: "#8e44ad",
-    fgcolor: "#ffffff",
-    steps: [{ actionId: "toggle-record" }],
-  },
-  {
-    id: "save-replay-buffer",
-    label: "Save replay buffer",
-    category: "Replay",
-    text: "REPLAY",
-    bgcolor: "#ff9500",
-    fgcolor: "#000000",
-    steps: [{ actionId: "save-replay-buffer" }],
-  },
-  {
-    id: "toggle-virtual-cam",
-    label: "Toggle virtual cam",
-    category: "Replay",
-    text: "V-CAM",
-    bgcolor: "#34c759",
-    fgcolor: "#000000",
-    steps: [{ actionId: "toggle-virtual-cam" }],
-  },
-  {
-    id: "studio-take",
-    label: "Studio take",
-    category: "Scenes",
-    text: "TAKE",
-    bgcolor: "#ff3b30",
-    fgcolor: "#ffffff",
-    steps: [{ actionId: "trigger-studio-transition" }],
-  },
   {
     id: "go-live-record",
     label: "Stream + record",
@@ -475,10 +433,7 @@ const obsPresets: PresetDefinition[] = [
     text: "GO LIVE",
     bgcolor: "#ff3b30",
     fgcolor: "#ffffff",
-    steps: [
-      { actionId: "start-stream" },
-      { actionId: "start-record" },
-    ],
+    steps: [{ actionId: "start-stream" }, { actionId: "start-record" }],
   },
   {
     id: "end-show",
@@ -487,113 +442,7 @@ const obsPresets: PresetDefinition[] = [
     text: "STOP",
     bgcolor: "#1c1c1e",
     fgcolor: "#ff3b30",
-    steps: [
-      { actionId: "stop-stream" },
-      { actionId: "stop-record" },
-    ],
-  },
-
-  // ── Extras matching the expanded action catalog ─────────────────────
-  {
-    id: "toggle-record-pause",
-    label: "Toggle record pause",
-    category: "Record",
-    text: "REC\nPAUSE",
-    bgcolor: "#ff9500",
-    fgcolor: "#000000",
-    steps: [{ actionId: "toggle-record-pause" }],
-  },
-  {
-    id: "start-virtual-cam",
-    label: "Virtual cam start",
-    category: "Replay",
-    text: "VCAM\n▶",
-    bgcolor: "#34c759",
-    fgcolor: "#000000",
-    steps: [{ actionId: "start-virtual-cam" }],
-  },
-  {
-    id: "stop-virtual-cam",
-    label: "Virtual cam stop",
-    category: "Replay",
-    text: "VCAM\n■",
-    bgcolor: "#1c1c1e",
-    fgcolor: "#ff3b30",
-    steps: [{ actionId: "stop-virtual-cam" }],
-  },
-  {
-    id: "start-replay-buffer",
-    label: "Replay buffer start",
-    category: "Replay",
-    text: "RB ▶",
-    bgcolor: "#ff9500",
-    fgcolor: "#000000",
-    steps: [{ actionId: "start-replay-buffer" }],
-  },
-  {
-    id: "stop-replay-buffer",
-    label: "Replay buffer stop",
-    category: "Replay",
-    text: "RB ■",
-    bgcolor: "#1c1c1e",
-    fgcolor: "#ff3b30",
-    steps: [{ actionId: "stop-replay-buffer" }],
-  },
-  {
-    id: "filter-toggle",
-    label: "Filter enable/disable",
-    category: "Filters",
-    text: "FILTER",
-    bgcolor: "#5856d6",
-    fgcolor: "#ffffff",
-    steps: [
-      {
-        actionId: "set-filter-enabled",
-        options: { sourceName: "", filterName: "", filterEnabled: true },
-      },
-    ],
-  },
-  {
-    id: "save-screenshot",
-    label: "Save source screenshot",
-    category: "Misc",
-    text: "📸",
-    bgcolor: "#5ac8fa",
-    fgcolor: "#000000",
-    steps: [
-      {
-        actionId: "save-source-screenshot",
-        options: { sourceName: "", imageFormat: "png", imageFilePath: "" },
-      },
-    ],
-  },
-  {
-    id: "show-scene-item",
-    label: "Show scene item",
-    category: "Scene items",
-    text: "SHOW",
-    bgcolor: "#34c759",
-    fgcolor: "#000000",
-    steps: [
-      {
-        actionId: "show-scene-item",
-        options: { sceneName: "", sceneItemId: 0 },
-      },
-    ],
-  },
-  {
-    id: "hide-scene-item",
-    label: "Hide scene item",
-    category: "Scene items",
-    text: "HIDE",
-    bgcolor: "#1c1c1e",
-    fgcolor: "#ff3b30",
-    steps: [
-      {
-        actionId: "hide-scene-item",
-        options: { sceneName: "", sceneItemId: 0 },
-      },
-    ],
+    steps: [{ actionId: "stop-stream" }, { actionId: "stop-record" }],
   },
 ];
 
@@ -613,11 +462,7 @@ const obsKind: DeviceKind = {
   pages: [{ href: "/obs", label: "OBS", icon: Video }],
   actions: withCategoryColors(obsActions),
   variables: obsVariables,
-  // Only genuine MULTI-step compound buttons stay as presets (e.g.
-  // "Stream + record"). Single-action presets were redundant mirrors of
-  // an action — the browser now synthesizes those tiles from the coloured
-  // actions, so they're filtered out here.
-  presets: obsPresets.filter((p) => p.steps.length > 1),
+  presets: obsPresets,
   make({ config }): BrokerImpl {
     const parsed = parseObsConfig(config);
     if (!parsed.ok) {
