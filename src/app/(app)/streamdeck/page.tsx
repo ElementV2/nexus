@@ -490,9 +490,16 @@ export default function StreamdeckPage() {
   }, [dirty, draft]);
 
   const geometry = useMemo(() => {
-    if (!data || !draft) return null;
-    return data.geometries[draft.model];
-  }, [data, draft]);
+    if (!data) return null;
+    // The app editor ALWAYS authors at the LARGEST deck geometry (Stream
+    // Deck XL, 8×4) — it never shrinks to mirror the paired hardware. A
+    // smaller physical deck just shows the top-left sub-rectangle (handled
+    // by remapKeyIndex at render/press time). Picking the max by key count
+    // keeps this correct if a bigger model is ever added.
+    const geos = Object.values(data.geometries);
+    if (geos.length === 0) return null;
+    return geos.reduce((m, g) => (g.rows * g.cols > m.rows * m.cols ? g : m));
+  }, [data]);
 
   const handleDrop = useCallback(
     (targetIndex: number, e: React.DragEvent) => {
@@ -1262,14 +1269,11 @@ export default function StreamdeckPage() {
             // serial from any other page (one deck shows one page).
             const target = data.layouts.find((l) => l.id === layoutId);
             if (!target) return;
-            const firstPairing = target.deviceSerials.length === 0;
-            // Only the FIRST deck sets the page's geometry; later decks
-            // just join (mixing models under one layout isn't supported).
-            const dev = hw?.devices.find((d) => d.serialNumber === serial);
-            const detectedModel =
-              firstPairing && dev && data.geometries[dev.model]
-                ? (dev.model as DeckModel)
-                : target.model;
+            // Layouts are ALWAYS authored at the max (XL) canvas — pairing
+            // a deck of ANY size never downsizes the layout or the app
+            // display. A smaller deck shows the top-left sub-rectangle.
+            // (This also heals layouts a previous build had shrunk.)
+            const detectedModel: DeckModel = "xl";
             const deviceSerials = target.deviceSerials.includes(serial)
               ? target.deviceSerials
               : [...target.deviceSerials, serial];
