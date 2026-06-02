@@ -309,6 +309,7 @@ class ScreendeckServerImpl {
     // enough that the client completes the connection right after BEGIN
     // without waiting on CAPS.
     this.write(conn, "BEGIN CompanionVersion=nexus ApiVersion=1.9.0\n");
+    log.info(`→ sent BEGIN (ApiVersion 1.9.0) to ${conn.remoteAddr ?? "?"}`);
   }
 
   private dropConn(conn: Conn): void {
@@ -321,7 +322,16 @@ class ScreendeckServerImpl {
     }
     let removed = false;
     for (const id of conn.deviceIds) {
-      if (this.devices.delete(id)) removed = true;
+      // Only drop the device if it's STILL owned by THIS connection. On a
+      // fast client reconnect the new socket can re-register the same
+      // deviceId before the old socket's close fires; without this guard the
+      // late close would delete the freshly re-registered surface — the deck
+      // would vanish until a full server restart. (Matches the reported bug.)
+      const entry = this.devices.get(id);
+      if (entry && entry.conn === conn) {
+        this.devices.delete(id);
+        removed = true;
+      }
     }
     conn.deviceIds.clear();
     if (removed) {
@@ -357,6 +367,13 @@ class ScreendeckServerImpl {
 
   private handleLine(conn: Conn, line: string): void {
     const { cmd, args } = parseLine(line);
+    // Trace the handshake/registration exchange at a visible level (skip the
+    // high-frequency PING/PONG/KEY-PRESS chatter). This is how we tell apart
+    // "client never sent ADD-DEVICE" from "ADD-DEVICE arrived but we rejected
+    // it" when a deck won't register.
+    if (cmd !== "PING" && cmd !== "PONG" && cmd !== "KEY-PRESS") {
+      log.info(`← ${line} from ${conn.remoteAddr ?? "?"}`);
+    }
     switch (cmd) {
       case "ADD-DEVICE":
         this.handleAddDevice(conn, args);
