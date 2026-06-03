@@ -267,9 +267,10 @@ class ScreendeckServerImpl {
     const entry = this.devices.get(deviceId);
     if (!entry) return;
     const b64 = rgb.toString("base64");
+    const key = keyToCoord(keyIndex, entry.dev.cols);
     this.write(
       entry.conn,
-      `KEY-STATE DEVICEID=${deviceId} KEY=${keyIndex} BITMAP=${b64}\n`
+      `KEY-STATE DEVICEID=${deviceId} KEY=${key} BITMAP=${b64}\n`
     );
   }
 
@@ -278,17 +279,18 @@ class ScreendeckServerImpl {
   clearKey(deviceId: string, keyIndex: number): void {
     const entry = this.devices.get(deviceId);
     if (!entry) return;
+    const key = keyToCoord(keyIndex, entry.dev.cols);
     const size = entry.dev.bitmapSize;
     if (size > 0) {
       const black = Buffer.alloc(size * size * 3).toString("base64");
       this.write(
         entry.conn,
-        `KEY-STATE DEVICEID=${deviceId} KEY=${keyIndex} BITMAP=${black}\n`
+        `KEY-STATE DEVICEID=${deviceId} KEY=${key} BITMAP=${black}\n`
       );
     } else {
       this.write(
         entry.conn,
-        `KEY-STATE DEVICEID=${deviceId} KEY=${keyIndex} COLOR=#000000\n`
+        `KEY-STATE DEVICEID=${deviceId} KEY=${key} COLOR=#000000\n`
       );
     }
   }
@@ -512,11 +514,14 @@ class ScreendeckServerImpl {
 
   private handleKeyPress(args: Record<string, string>): void {
     const deviceId = args.DEVICEID;
-    const key = Number(args.KEY);
-    if (!deviceId || !this.devices.has(deviceId) || !Number.isFinite(key)) {
+    const entry = deviceId ? this.devices.get(deviceId) : undefined;
+    // KEY arrives as "row/col" (satellite manifest protocol) — convert to a
+    // flat index using THIS device's column count.
+    const key = entry ? coordToKey(args.KEY, entry.dev.cols) : NaN;
+    if (!deviceId || !entry || !Number.isFinite(key)) {
       log.warn(
         `KEY-PRESS dropped: id=${deviceId ?? "?"} ` +
-          `known=${deviceId ? this.devices.has(deviceId) : false} key=${args.KEY ?? "?"}`
+          `known=${!!entry} key=${args.KEY ?? "?"}`
       );
       return;
     }
@@ -573,6 +578,30 @@ class ScreendeckServerImpl {
  * Parse a protocol line into a command + arg map. Values may be bare
  * (`KEY=0`) or double-quoted with spaces (`PRODUCT_NAME="Stream Deck"`).
  */
+/**
+ * The satellite protocol references a key as `row/col` (e.g. "0/0", "1/3")
+ * since the surface-manifest era — which is what ScreenDeck sends/expects.
+ * Our driver works in FLAT key indices, so convert at the protocol edge.
+ */
+function keyToCoord(keyIndex: number, cols: number): string {
+  const c = cols > 0 ? cols : 1;
+  return `${Math.floor(keyIndex / c)}/${keyIndex % c}`;
+}
+
+/** Parse a protocol KEY value ("row/col" or a legacy flat index) to a flat
+ *  index using the device's column count. Returns NaN if unparseable. */
+function coordToKey(raw: string | undefined, cols: number): number {
+  if (!raw) return NaN;
+  if (raw.includes("/")) {
+    const [r, c] = raw.split("/");
+    const rn = Number(r);
+    const cn = Number(c);
+    if (!Number.isFinite(rn) || !Number.isFinite(cn)) return NaN;
+    return rn * (cols > 0 ? cols : 1) + cn;
+  }
+  return Number(raw);
+}
+
 function parseLine(line: string): { cmd: string; args: Record<string, string> } {
   const args: Record<string, string> = {};
   // First token = command; remainder = KEY=VALUE pairs.
