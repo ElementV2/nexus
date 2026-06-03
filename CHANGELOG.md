@@ -16,6 +16,17 @@ updater compares against the version embedded in its own installer asset
 name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
 shared release tag.
 
+## 0.1.21 — main app · 0.1.7 — Nexus Cross
+
+### Stream Deck — on-screen / satellite decks
+- **Multiple ScreenDecks now coexist.** Connecting a second ScreenDeck (e.g.
+  one on the server PC and one on another machine) no longer knocked the first
+  offline. The dormant-client watchdog used to recover by *bouncing the whole
+  listener* — which tore down every connected deck — so two decks fought over
+  reconnects and only one survived. Recovery is now **per-connection** (only
+  the stuck socket is dropped; it reconnects on its own), and the grace window
+  is more forgiving, so any number of ScreenDecks stay up together.
+
 ## 0.1.20 — main app · 0.1.7 — Nexus Cross
 
 Real-time vMix over the TCP API, plus Ableton clip feedback and log/UX fixes.
