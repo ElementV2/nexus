@@ -103,11 +103,16 @@ export function evaluateFeedback(
   // below via the vars-based resolution):
   //   • UNPINNED / "None" — the button isn't assigned to any device, so it's
   //     "not plugged in" → offline (and the press does nothing, see catalog).
-  //   • Pinned but the connection reports not-connected → offline (stale
-  //     tally would otherwise mislead).
+  //   • Pinned but the connection is NOT actively connected → offline (stale
+  //     tally would otherwise mislead). Anything other than an explicit
+  //     `true` counts as offline — false, "connecting", OR absent from the
+  //     map. The server's map only carries LIVE brokers, so a pinned-to-a-
+  //     disabled/missing connection is `undefined` there; treating that as
+  //     offline makes the physical deck match the web preview (whose map
+  //     includes every persisted connection as not-connected).
   if (connectedByConnection) {
     if (!pinned) return OFFLINE_OVERRIDE;
-    if (connectedByConnection[pinned] === false) return OFFLINE_OVERRIDE;
+    if (connectedByConnection[pinned] !== true) return OFFLINE_OVERRIDE;
   }
 
   const rule = feedbackFor(kind);
