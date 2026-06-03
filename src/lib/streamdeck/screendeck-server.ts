@@ -55,9 +55,6 @@ interface Conn {
   lastSeenTs: number;
   /** device ids registered over THIS socket — cleaned up on close. */
   deviceIds: Set<string>;
-  /** Diagnostic: how many raw inbound chunks we've logged for this conn.
-   *  Bounded so a normal session (100 ms pings) doesn't flood the log. */
-  rawLogged: number;
   /** Per-connection handshake watchdog — fires HANDSHAKE_GRACE_MS after
    *  connect; if this conn registered nothing, triggers auto-recovery.
    *  Cleared on first ADD-DEVICE or when the conn drops. */
@@ -317,7 +314,6 @@ class ScreendeckServerImpl {
       remoteAddr: socket.remoteAddress ?? undefined,
       lastSeenTs: Date.now(),
       deviceIds: new Set(),
-      rawLogged: 0,
       handshakeTimer: null,
     };
     this.conns.add(conn);
@@ -342,7 +338,6 @@ class ScreendeckServerImpl {
     // and an all-false CAPS still completes the client's handshake.
     this.write(conn, "BEGIN CompanionVersion=nexus ApiVersion=1.10.0\n");
     this.write(conn, "CAPS SUBSCRIPTIONS=0 NONSQUARE=0\n");
-    log.info(`→ sent BEGIN 1.10.0 + CAPS to ${conn.remoteAddr ?? "?"}`);
     // Arm the handshake watchdog: if this client doesn't register a surface
     // shortly, it's the dormant-reconnect quirk → auto-recover.
     conn.handshakeTimer = setTimeout(
@@ -412,18 +407,6 @@ class ScreendeckServerImpl {
 
   private onData(conn: Conn, chunk: Buffer): void {
     conn.lastSeenTs = Date.now();
-    // Diagnostic: dump the first few raw inbound chunks verbatim (incl.
-    // PINGs and any non-newline-terminated data) so we can see EXACTLY what
-    // the client sends right after connecting — the decisive question is
-    // whether a reconnecting client sends ADD-DEVICE at all.
-    if (conn.rawLogged < 6) {
-      conn.rawLogged++;
-      // Debug-only (opt-in via NEXUS_LOG_DEBUG): raw inbound chunks for
-      // diagnosing handshake issues without flooding the normal log.
-      log.debug(
-        `raw ← ${JSON.stringify(chunk.toString("utf8")).slice(0, 400)} from ${conn.remoteAddr ?? "?"}`
-      );
-    }
     conn.buffer += chunk.toString("utf8");
     let nl: number;
     // Guard against an abusive client flooding without newlines.
@@ -437,12 +420,6 @@ class ScreendeckServerImpl {
 
   private handleLine(conn: Conn, line: string): void {
     const { cmd, args } = parseLine(line);
-    // Trace inbound commands at a visible level (skip only the high-rate
-    // PING/PONG keepalive chatter). KEY-PRESS is logged so a "presses don't
-    // trigger anything" report shows the exact line the client sends.
-    if (cmd !== "PING" && cmd !== "PONG") {
-      log.info(`← ${line} from ${conn.remoteAddr ?? "?"}`);
-    }
     switch (cmd) {
       case "ADD-DEVICE":
         this.handleAddDevice(conn, args);
@@ -525,15 +502,6 @@ class ScreendeckServerImpl {
       return;
     }
     const type = args.PRESSED === "true" || args.PRESSED === "1" ? "down" : "up";
-    if (type === "down") {
-      // Visible so a "presses do nothing" report shows the press reached us
-      // and how many bridges (driver) it was dispatched to. 0 listeners =
-      // the driver press bridge isn't wired; >0 = look downstream
-      // (press-dispatcher: layout pairing / binding / key remap).
-      log.info(
-        `key-down ${deviceId}#${key} → ${this.pressListeners.size} listener(s)`
-      );
-    }
     for (const cb of this.pressListeners) {
       try {
         cb({ serial: deviceId, keyIndex: key, type });
