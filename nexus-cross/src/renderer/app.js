@@ -12,6 +12,7 @@ const ipEl = $("ip");
 const portEl = $("port");
 const labelEl = $("label");
 const saveEl = $("save");
+const launchEl = $("launch");
 const hintEl = $("hint");
 const devicesEl = $("devices");
 const conflictEl = $("conflict");
@@ -50,6 +51,8 @@ function composeServer(ip, port) {
 function renderLink() {
   const link = composeServer(ipEl.value, portEl.value);
   linkSubEl.textContent = link || "—";
+  // "Open GUI" only makes sense once there's a server to open.
+  launchEl.disabled = !ipEl.value.trim();
 }
 
 const STATES = {
@@ -96,13 +99,23 @@ function renderState(status) {
     "is-blocked"
   );
   document.body.classList.add(s.cls);
-  // Surface a live link error only while disconnected — but not the
-  // local-server block, which the conflict banner explains in full.
-  if (status && status.lastError && !status.connected && !status.localServer) {
-    hintEl.textContent = status.lastError;
-  } else if (status && status.localServer) {
-    hintEl.textContent = "";
+  // Keep the inline line above the button clean: a concise error ONLY while
+  // genuinely offline, "Connecting…" while linking, and nothing once connected
+  // or when the conflict banner already explains a local-server block. Without
+  // the explicit clear, a past error (with the server IP) lingered above the
+  // button even after a successful connect — the "old ugly message".
+  let hint = "";
+  if (status && status.running && !status.connected && !status.localServer) {
+    hint = "Connecting…";
+  } else if (
+    status &&
+    !status.running &&
+    !status.localServer &&
+    status.lastError
+  ) {
+    hint = status.lastError;
   }
+  hintEl.textContent = hint;
 }
 
 function renderDevices(status) {
@@ -232,6 +245,14 @@ saveEl.addEventListener("click", async () => {
     portEl.value = port;
   }
   renderLink();
+});
+
+// Open the server's web interface in the default browser. Works whenever an
+// IP is set (no need to be connected) — handy from the satellite machine.
+launchEl.addEventListener("click", () => {
+  const server = composeServer(ipEl.value, portEl.value);
+  if (!server) return;
+  api.openExternal(`http://${server}`);
 });
 
 for (const el of [ipEl, portEl, labelEl]) {

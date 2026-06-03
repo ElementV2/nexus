@@ -94,11 +94,21 @@
     <!-- Inline status line (Connecting… / Saved. / last error) -->
     <div id="hint" class="hint"></div>
 
-    <!-- Primary action -->
-    <button class="cta" id="save">
-      <span class="cta-label">Connect</span>
-      <span class="arrow cta-arrow">↗</span>
-    </button>
+    <!-- Primary action + open the server's web GUI in a browser -->
+    <div class="action-row">
+      <button class="cta" id="save">
+        <span class="cta-label">Connect</span>
+        <span class="arrow cta-arrow">↗</span>
+      </button>
+      <button
+        class="cta cta--secondary"
+        id="launch"
+        title="Open the Nexus interface in your browser"
+      >
+        <span class="cta-label">Open GUI</span>
+        <span class="arrow cta-arrow">↗</span>
+      </button>
+    </div>
 
     <div class="secondary-actions">
       <button class="ghost" id="hide">Hide</button>

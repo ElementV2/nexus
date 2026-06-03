@@ -310,6 +310,40 @@ body.has-conflict .cell--grow { display: none; }
 }
 
 /* ── CTA + secondary actions ────────────────────────── */
+/* Connect/Disconnect sits beside "Open GUI" (opens the server's web UI). */
+.action-row {
+  display: flex;
+  flex-shrink: 0;
+}
+.action-row .cta {
+  width: auto;
+  border-top: 1px solid var(--line);
+}
+.action-row #save {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cta--secondary {
+  flex: 0 0 auto;
+  padding: 0 16px;
+  background: var(--card);
+  color: var(--mid);
+  border-left: 1px solid var(--line);
+  gap: 8px;
+}
+.cta--secondary:hover {
+  background: var(--card-hi);
+  color: var(--ink);
+}
+.cta--secondary:disabled {
+  background: var(--card);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.cta--secondary:disabled:hover {
+  background: var(--card);
+  color: var(--muted);
+}
 .cta {
   display: flex;
   align-items: center;
