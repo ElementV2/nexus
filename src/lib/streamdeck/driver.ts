@@ -852,10 +852,10 @@ class DriverImpl {
       const canvas = await loadCanvas();
       if (!canvas) return;
       const rgb = composeKeyImage(canvas, dims.iconSize, binding, override);
-      // Diagnostic (top row only): which binding goes to which device key.
+      // Diagnostic (top row only): which surface + which binding per key.
       if (keyIndex < dims.cols) {
         log.info(
-          `SD render flat=${keyIndex} → ${Math.floor(keyIndex / dims.cols)}/${keyIndex % dims.cols} "${binding.preset.label}"`
+          `SD render dev=…${id.slice(-5)} ${dims.cols}x${dims.rows} flat=${keyIndex} "${binding.preset.label}"`
         );
       }
       screendeckServer.renderKey(id, keyIndex, rgb);
