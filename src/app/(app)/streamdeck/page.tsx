@@ -45,6 +45,9 @@ import { createClientLogger } from "@/lib/client-log";
 const deckLog = createClientLogger("deck-ui");
 import { EditorToolbar } from "./_components/EditorToolbar";
 
+/** localStorage key: the page selected last, restored across route changes. */
+const LAST_LAYOUT_KEY = "nexus.deck.layout";
+
 export default function StreamdeckPage() {
   const [data, setData] = useState<LayoutsResponse | null>(null);
   const [selectedId, setSelectedId] = useState<string>("default");
@@ -230,12 +233,21 @@ export default function StreamdeckPage() {
       .then((json) => {
         if (cancelled) return;
         setData(json);
+        // Restore the page selected last session (persisted on switch) so
+        // navigating away to /timeline and back keeps your page.
+        const saved =
+          typeof window !== "undefined"
+            ? window.localStorage.getItem(LAST_LAYOUT_KEY)
+            : null;
         const first =
-          json.layouts.find((l) => l.id === selectedId) ?? json.layouts[0];
+          json.layouts.find((l) => l.id === saved) ??
+          json.layouts.find((l) => l.id === selectedId) ??
+          json.layouts[0];
         if (first) {
           setSelectedId(first.id);
           setDraft(first);
         }
+        didRestore.current = true;
       })
       .catch(() => {
         /* leave null → loading UI */
@@ -245,6 +257,19 @@ export default function StreamdeckPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Persist the selected page (after the initial restore) so it survives a
+  // route change / remount.
+  const didRestore = useRef(false);
+  useEffect(() => {
+    if (didRestore.current && typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(LAST_LAYOUT_KEY, selectedId);
+      } catch {
+        /* private mode / quota — selection just won't persist */
+      }
+    }
+  }, [selectedId]);
 
   // Track the most recently-applied layout id so we can tell apart:
   //   • A real user-initiated layout switch (selectedId changes) →
@@ -393,7 +418,14 @@ export default function StreamdeckPage() {
             store: { layouts: DeckLayout[] };
           };
           setData((cur) =>
-            cur ? { ...cur, layouts: json.store.layouts } : cur
+            cur
+              ? {
+                  ...cur,
+                  layouts: json.store.layouts.filter(
+                    (l) => !deletedLayoutIds.current.has(l.id)
+                  ),
+                }
+              : cur
           );
           // After re-pairing, render the layout to the new device so
           // the operator sees their bindings immediately.
@@ -460,6 +492,11 @@ export default function StreamdeckPage() {
   // the effect never re-ran — failed saves silently stopped retrying.
   // A real state change in the dep array fixes that.
   const [retryNonce, setRetryNonce] = useState(0);
+  // Pages deleted this session — guards against a pending/in-flight autosave
+  // PUT resurrecting the just-deleted layout (the PUT response returns the
+  // full layout list, which would otherwise re-add it). Filtered out of every
+  // autosave-echo setData and skipped by the save effect.
+  const deletedLayoutIds = useRef<Set<string>>(new Set());
 
   // Debounced auto-save with auto-retry. Failures bump `retryNonce`
   // (and `saveAttempt` for backoff), which re-runs this effect and
@@ -468,6 +505,8 @@ export default function StreamdeckPage() {
   // error chip.
   useEffect(() => {
     if (!draft || !dirty) return;
+    // Never save a page that's being deleted (it'd re-create it server-side).
+    if (deletedLayoutIds.current.has(draft.id)) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     // Exponential backoff on retry. First attempt fires after 400 ms
     // (debounce window). Retry 1 after 800 ms. Retry 2 after 1600 ms.
@@ -486,7 +525,14 @@ export default function StreamdeckPage() {
             store: { layouts: DeckLayout[] };
           };
           setData((cur) =>
-            cur ? { ...cur, layouts: json.store.layouts } : cur
+            cur
+              ? {
+                  ...cur,
+                  layouts: json.store.layouts.filter(
+                    (l) => !deletedLayoutIds.current.has(l.id)
+                  ),
+                }
+              : cur
           );
           syncDraftPairing(json.store.layouts);
           setDirty(false);
@@ -939,6 +985,14 @@ export default function StreamdeckPage() {
         confirmLabel: "Delete",
       });
       if (!ok) return;
+      // Suppress autosave for this page so a pending/in-flight save doesn't
+      // re-create it (the save echo returns the full layout list).
+      deletedLayoutIds.current.add(id);
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      setDirty(false);
       try {
         const res = await fetch(
           `/api/streamdeck/layouts?id=${encodeURIComponent(id)}`,
@@ -946,8 +1000,10 @@ export default function StreamdeckPage() {
         );
         if (!res.ok) return;
         const remaining = data.layouts.filter((l) => l.id !== id);
-        setData({ ...data, layouts: remaining });
-        if (selectedId === id) {
+        setData((cur) =>
+          cur ? { ...cur, layouts: cur.layouts.filter((l) => l.id !== id) } : cur
+        );
+        if (selectedId === id && remaining[0]) {
           setSelectedId(remaining[0].id);
           setDraft(remaining[0]);
           setDirty(false);
@@ -982,7 +1038,14 @@ export default function StreamdeckPage() {
             store: { layouts: DeckLayout[] };
           };
           setData((cur) =>
-            cur ? { ...cur, layouts: json.store.layouts } : cur
+            cur
+              ? {
+                  ...cur,
+                  layouts: json.store.layouts.filter(
+                    (l) => !deletedLayoutIds.current.has(l.id)
+                  ),
+                }
+              : cur
           );
           syncDraftPairing(json.store.layouts);
         }

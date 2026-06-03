@@ -104,9 +104,17 @@ class TimelineEngineImpl extends EventEmitter {
     return this.getState();
   }
 
-  /** Resume a paused (or waiting) show without restarting. */
+  /** Resume a paused (or cued) show from the current playhead. Reloads the
+   *  scenario first so edits made while paused/cued — new WAIT markers, clips,
+   *  retimes — take effect (the head/arming is re-derived from the position). */
   resume(): TimelineEngineState {
     if (this.#state === "paused" && this.#scenario) {
+      const fresh = getScenario(this.#scenario.id);
+      if (fresh) {
+        this.#scenario = fresh;
+        this.#playheadMs = Math.min(this.#playheadMs, fresh.durationMs);
+        this.#rebuildArmingFrom(this.#playheadMs);
+      }
       this.#state = "playing";
       this.#startTimer();
       this.#emit();

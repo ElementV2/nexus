@@ -318,6 +318,33 @@ describe('"Play scenario" feedback — red while its scenario runs', () => {
   });
 });
 
+describe('"Show GO" feedback — amber while a show waits', () => {
+  const goKey: DeckBinding = {
+    preset: {
+      globalId: "internal:go-scenario",
+      kind: "internal",
+      id: "go-scenario",
+      label: "Show GO",
+      steps: [{ actionId: "internal:go-scenario", options: {} }],
+    },
+  };
+
+  it("is AMBER while a show is parked at a WAIT", () => {
+    expect(
+      evaluateFeedback(goKey, {}, {}, undefined, {
+        id: "show1",
+        waiting: true,
+      })?.bgcolor
+    ).toBe("#ff9f0a");
+  });
+
+  it("is null while a show plays without waiting", () => {
+    expect(
+      evaluateFeedback(goKey, {}, {}, undefined, { id: "show1", waiting: false })
+    ).toBeNull();
+  });
+});
+
 describe("feedback tolerates a FULL global step id (show↔deck round-trip)", () => {
   it("matches the rule by bare id even when the step stores <kind>:<id>", () => {
     const binding: DeckBinding = {

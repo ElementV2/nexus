@@ -334,6 +334,12 @@ async function runInternalAction(
     cmdLog.info("internal stop-scenario");
     return { ok: true, data: { stopped: true } };
   }
+  if (id === "go-scenario") {
+    const { timelineEngine } = await import("@/lib/timeline/engine");
+    timelineEngine.go();
+    cmdLog.info("internal go-scenario");
+    return { ok: true, data: { go: true } };
+  }
   return { ok: false, error: `Unknown internal action "${id}"` };
 }
 

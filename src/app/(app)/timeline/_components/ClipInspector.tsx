@@ -291,12 +291,38 @@ export function ClipInspector({
                 >
                   {entry?.label ?? step.actionId}
                 </span>
-                <StepIconButton
-                  title={active ? "Disable" : "Enable"}
+                {/* Enable/disable — the same orange switch as the deck. */}
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={active}
+                  title={active ? "Disable this action" : "Enable this action"}
                   onClick={() => updateStep(idx, { enabled: !active })}
+                  style={{
+                    width: 26,
+                    height: 14,
+                    borderRadius: 8,
+                    flexShrink: 0,
+                    background: active ? "var(--amber)" : "var(--panel-2)",
+                    border: "1px solid var(--line-hi)",
+                    position: "relative",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
                 >
-                  {active ? "‖" : "▶"}
-                </StepIconButton>
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: 1,
+                      left: active ? 13 : 1,
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      background: active ? "var(--bg)" : "var(--sub)",
+                      transition: "left 0.12s",
+                    }}
+                  />
+                </button>
                 <StepIconButton
                   title="Duplicate this action"
                   onClick={() => duplicateStep(idx)}

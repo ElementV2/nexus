@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { TopBar } from "@/components/sw";
+import { TopBar, useConfirm } from "@/components/sw";
 import { ZoomIn, ZoomOut } from "lucide-react";
 import { useConnections } from "@/hooks/use-connections";
 import { useActionCatalog } from "@/app/(app)/streamdeck/_components/action-catalog";
@@ -32,6 +32,9 @@ function newId(prefix: string): string {
       : Math.random().toString(36).slice(2, 10);
   return `${prefix}-${rnd}`;
 }
+
+/** localStorage key: the show selected last, restored across route changes. */
+const LAST_SHOW_KEY = "nexus.show.scenario";
 
 const ZOOMS = [0.02, 0.04, 0.08, 0.14, 0.24];
 const IDLE_TRANSPORT: TransportSnapshot = {
@@ -66,6 +69,7 @@ export default function TimelinePage() {
 
   const pxPerMs = ZOOMS[zoomIdx];
   const selected = scenarios?.find((s) => s.id === selectedId) ?? null;
+  const confirm = useConfirm();
 
   // ── Initial load ──
   useEffect(() => {
@@ -75,9 +79,19 @@ export default function TimelinePage() {
       .then((j) => {
         if (cancelled) return;
         setScenarios(j.scenarios);
-        if (j.scenarios.length && !j.scenarios.some((s) => s.id === selectedId)) {
-          setSelectedId(j.scenarios[0].id);
-        }
+        // Restore the show selected last session so navigating to /streamdeck
+        // and back keeps your show.
+        const saved =
+          typeof window !== "undefined"
+            ? window.localStorage.getItem(LAST_SHOW_KEY)
+            : null;
+        const pick =
+          j.scenarios.find((s) => s.id === saved)?.id ??
+          (j.scenarios.some((s) => s.id === selectedId)
+            ? selectedId
+            : j.scenarios[0]?.id);
+        if (pick) setSelectedId(pick);
+        didRestore.current = true;
       })
       .catch(() => {
         if (!cancelled) setScenarios([]);
@@ -87,6 +101,18 @@ export default function TimelinePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Persist the selected show (after restore) so it survives a route change.
+  const didRestore = useRef(false);
+  useEffect(() => {
+    if (didRestore.current && typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(LAST_SHOW_KEY, selectedId);
+      } catch {
+        /* private mode / quota — selection just won't persist */
+      }
+    }
+  }, [selectedId]);
 
   // ── Transport SSE ──
   useEffect(() => {
@@ -198,19 +224,42 @@ export default function TimelinePage() {
   );
 
   const deleteScenario = useCallback(
-    (id: string) => {
-      if ((scenarios?.length ?? 0) <= 1) return;
+    async (id: string) => {
+      if ((scenarios?.length ?? 0) <= 1) {
+        await confirm({
+          title: "Can't delete the last show",
+          message:
+            "There's only one show left. Create a second one first, then delete this.",
+          confirmLabel: "OK",
+          infoOnly: true,
+        });
+        return;
+      }
+      const target = scenarios?.find((s) => s.id === id);
+      const ok = await confirm({
+        title: `Delete show "${target?.label ?? id}"?`,
+        message: "All its tracks, cues and WAIT markers will be lost.",
+        dangerous: true,
+        confirmLabel: "Delete",
+      });
+      if (!ok) return;
+      // Cancel any pending autosave for this show so it isn't re-created.
+      const t = saveTimers.current.get(id);
+      if (t) {
+        clearTimeout(t);
+        saveTimers.current.delete(id);
+      }
       void fetch(`/api/timeline/scenarios?id=${encodeURIComponent(id)}`, {
         method: "DELETE",
       }).catch(() => {});
       setScenarios((prev) => {
         const next = (prev ?? []).filter((s) => s.id !== id);
-        if (id === selectedId && next.length) setSelectedId(next[0].id);
+        if (id === selectedId && next[0]) setSelectedId(next[0].id);
         return next;
       });
       setSelection(null);
     },
-    [scenarios, selectedId]
+    [scenarios, selectedId, confirm]
   );
 
   // ── Clip / track / wait mutations ──
@@ -345,6 +394,18 @@ export default function TimelinePage() {
       return s;
     });
   }, [mutate]);
+
+  const renameTrack = useCallback(
+    (trackId: string, label: string) => {
+      mutate((s) => {
+        s.tracks = s.tracks.map((t) =>
+          t.id === trackId ? { ...t, label } : t
+        );
+        return s;
+      });
+    },
+    [mutate]
+  );
 
   const addWait = useCallback(() => {
     const at = isActive ? Math.round(viewPlayhead) : 0;
@@ -597,6 +658,7 @@ export default function TimelinePage() {
             onMoveClip={moveClip}
             onSeek={(ms) => post({ action: "seek", ms, scenarioId: selectedId })}
             onAddTrack={addTrack}
+            onRenameTrack={renameTrack}
           />
         ) : (
           <div style={{ flex: 1 }} />

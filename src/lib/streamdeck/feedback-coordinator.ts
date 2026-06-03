@@ -7,19 +7,31 @@ import { timelineEngine } from "@/lib/timeline/engine";
 import { streamdeckDriver } from "./driver";
 import { evaluateFeedback, type VarsByConnection } from "./feedback";
 
-/** Scenario id the timeline is actively running (playing or parked at a
- *  WAIT) — drives the red "Play scenario" key feedback. Paused/idle = null. */
-function activeScenarioId(): string | null {
+/** The active scenario as {id, label, waiting} for feedback (name match +
+ *  amber "Show GO" glow), or null when nothing is running. */
+function activePlayingScenario():
+  | { id: string; label?: string; waiting: boolean }
+  | null {
   const st = timelineEngine.getState();
-  return st.state === "playing" || st.state === "waiting" ? st.scenarioId : null;
+  if ((st.state !== "playing" && st.state !== "waiting") || !st.scenarioId) {
+    return null;
+  }
+  return {
+    id: st.scenarioId,
+    label: peekScenario(st.scenarioId)?.label,
+    waiting: st.state === "waiting",
+  };
 }
 
-/** The active scenario as {id, label} for feedback (so a key stored by name
- *  matches too), or null when nothing is running. */
-function activePlayingScenario(): { id: string; label?: string } | null {
-  const id = activeScenarioId();
-  if (!id) return null;
-  return { id, label: peekScenario(id)?.label };
+/** Composite key for change-detection: the running scenario id + whether it's
+ *  parked at a WAIT — so a play↔wait transition (same id) still repaints the
+ *  GO/Play keys. */
+function activeFeedbackKey(): string | null {
+  const st = timelineEngine.getState();
+  if ((st.state !== "playing" && st.state !== "waiting") || !st.scenarioId) {
+    return null;
+  }
+  return `${st.scenarioId}:${st.state}`;
 }
 
 /**
@@ -93,14 +105,15 @@ class CoordinatorImpl {
     this.unsubDevices = streamdeckDriver.subscribe((ev) => {
       if (ev.type === "devices-changed") this.refresh();
     });
-    // Repaint when the running scenario starts/stops/switches so a "Play
-    // scenario" key flips red ↔ default. The engine emits on every playhead
-    // tick, so only act on a change of the ACTIVE id (cheap comparison).
-    this.lastActiveScenario = activeScenarioId();
+    // Repaint when the running scenario starts/stops/switches OR enters/leaves
+    // a WAIT, so a "Play scenario" key flips red and a "Show GO" key flips
+    // amber at the right moments. The engine emits on every playhead tick, so
+    // only act on a change of the composite key (cheap string compare).
+    this.lastActiveScenario = activeFeedbackKey();
     this.unsubTimeline = timelineEngine.subscribe(() => {
-      const active = activeScenarioId();
-      if (active !== this.lastActiveScenario) {
-        this.lastActiveScenario = active;
+      const key = activeFeedbackKey();
+      if (key !== this.lastActiveScenario) {
+        this.lastActiveScenario = key;
         this.refresh();
       }
     });

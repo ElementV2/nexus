@@ -36,6 +36,13 @@ const SCENARIO_PLAYING_OVERRIDE: FeedbackOverride = {
   fgcolor: "#ffffff",
 };
 
+/** Amber glow for a "Show GO" key while a show is parked at a WAIT — tells the
+ *  operator a GO is pending (same amber as the timeline's WAIT marker). */
+const SCENARIO_WAITING_OVERRIDE: FeedbackOverride = {
+  bgcolor: "#ff9f0a",
+  fgcolor: "#000000",
+};
+
 /** Variables snapshot keyed by `<connectionId>` → `<varId>` → value. The
  *  bus's flat list is reshaped before calling so lookups stay O(1). */
 export type VarsByConnection = Record<string, Record<string, unknown>>;
@@ -93,11 +100,11 @@ export function evaluateFeedback(
   vars: VarsByConnection,
   connectionIdsByKind: Record<string, string[]>,
   connectedByConnection?: ConnectedByConnection,
-  /** The scenario the timeline engine is currently running — id AND label, so
-   *  a "Play scenario" key stored by name (the runner resolves id-or-name) is
-   *  matched too. Server coordinator passes it; the editor preview omits it.
-   *  Drives the red "Play scenario" feedback. */
-  playingScenario?: { id: string; label?: string } | null
+  /** The scenario the timeline engine is currently running — id AND label (so
+   *  a "Play scenario" key stored by name matches too) plus `waiting` (parked
+   *  at a WAIT). Server coordinator passes it; the editor preview omits it.
+   *  Drives the red "Play scenario" + amber "Show GO" feedback. */
+  playingScenario?: { id: string; label?: string; waiting?: boolean } | null
 ): FeedbackOverride | null {
   const kind = binding.preset.kind;
   const steps = binding.preset.steps;
@@ -124,6 +131,9 @@ export function evaluateFeedback(
           ) {
             return SCENARIO_PLAYING_OVERRIDE;
           }
+        } else if (id === "go-scenario" && playingScenario.waiting) {
+          // A GO key glows while ANY show is parked at a WAIT (GO is global).
+          return SCENARIO_WAITING_OVERRIDE;
         }
       }
     }

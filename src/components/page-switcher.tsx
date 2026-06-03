@@ -94,19 +94,6 @@ export function PageSwitcher({
 
   return (
     <div className="flex items-center" style={{ gap: 4 }}>
-      {/* Status dot for the current item. */}
-      {cur?.dot && cur.dot !== "none" && (
-        <span
-          style={{
-            width: 7,
-            height: 7,
-            borderRadius: 4,
-            flexShrink: 0,
-            background: cur.dot === "filled" ? "var(--pvw)" : "transparent",
-            border: `1px solid ${cur.dot === "filled" ? "var(--pvw)" : "var(--line-hi)"}`,
-          }}
-        />
-      )}
       <select
         value={selectedId}
         onChange={(e) => onSelect(e.target.value)}

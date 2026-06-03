@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import type { ActionCatalogEntry, Scenario, Selection } from "./types";
 import { ACTION_DND_MIME, clipColor, clipLabel } from "./types";
@@ -25,6 +25,7 @@ export function TimelineCanvas({
   onMoveClip,
   onSeek,
   onAddTrack,
+  onRenameTrack,
 }: {
   scenario: Scenario;
   pxPerMs: number;
@@ -41,9 +42,13 @@ export function TimelineCanvas({
   ) => void;
   onSeek: (ms: number) => void;
   onAddTrack: () => void;
+  onRenameTrack: (trackId: string, label: string) => void;
 }) {
   const lanesRef = useRef<HTMLDivElement | null>(null);
   const tracksRef = useRef<HTMLDivElement | null>(null);
+  // Inline track rename (double-click the header).
+  const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
+  const [trackDraft, setTrackDraft] = useState("");
   // Active clip drag: which clip, its current track, and where inside the
   // clip the pointer grabbed (lane-relative px).
   const drag = useRef<{
@@ -250,7 +255,7 @@ export function TimelineCanvas({
               style={{ height: TRACK_H, borderBottom: "1px solid var(--line)" }}
             >
               {/* Track header — pinned left so it stays visible while the
-                  timeline scrolls horizontally. */}
+                  timeline scrolls horizontally. Double-click to rename. */}
               <div
                 className="flex items-center font-mono"
                 style={{
@@ -266,8 +271,52 @@ export function TimelineCanvas({
                   left: 0,
                   zIndex: 5,
                 }}
+                onDoubleClick={() => {
+                  setEditingTrackId(track.id);
+                  setTrackDraft(track.label);
+                }}
+                title="Double-click to rename"
               >
-                {track.label}
+                {editingTrackId === track.id ? (
+                  <input
+                    autoFocus
+                    value={trackDraft}
+                    onChange={(e) => setTrackDraft(e.target.value)}
+                    onBlur={() => {
+                      if (trackDraft.trim()) onRenameTrack(track.id, trackDraft.trim());
+                      setEditingTrackId(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        if (trackDraft.trim()) onRenameTrack(track.id, trackDraft.trim());
+                        setEditingTrackId(null);
+                      } else if (e.key === "Escape") {
+                        setEditingTrackId(null);
+                      }
+                    }}
+                    className="font-mono"
+                    style={{
+                      width: "100%",
+                      padding: "2px 4px",
+                      fontSize: 10,
+                      background: "var(--panel-2)",
+                      border: "1px solid var(--amber)",
+                      color: "var(--ink)",
+                      outline: "none",
+                    }}
+                  />
+                ) : (
+                  <span
+                    style={{
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      cursor: "text",
+                    }}
+                  >
+                    {track.label}
+                  </span>
+                )}
               </div>
               {/* Lane */}
               <div
@@ -427,7 +476,7 @@ export function TimelineCanvas({
                   whiteSpace: "nowrap",
                 }}
               >
-                WAIT
+                {w.label?.trim() || "WAIT"}
               </span>
             </div>
           );

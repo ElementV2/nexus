@@ -14,6 +14,7 @@ import type { ActionDefinition } from "./types";
  *   • goto-page       — switch the deck the press came from to another page.
  *   • play-scenario   — start a Live Show timeline (from a deck button etc.).
  *   • stop-scenario   — stop the running timeline.
+ *   • go-scenario     — release the current WAIT (the show's GO).
  */
 export const INTERNAL_KIND = "internal";
 
@@ -99,6 +100,15 @@ export const INTERNAL_ACTIONS: ActionDefinition[] = [
     bgcolor: "#ff3b30",
     fgcolor: "#ffffff",
     toCommand: () => ({ internal: "stop-scenario" }),
+  },
+  {
+    id: "go-scenario",
+    label: "Show GO",
+    category: "Internal",
+    description: "Release the current WAIT and continue the running show.",
+    bgcolor: "#ff9f0a",
+    fgcolor: "#000000",
+    toCommand: () => ({ internal: "go-scenario" }),
   },
 ];
 
