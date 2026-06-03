@@ -323,6 +323,10 @@ export class ServerManager extends EventEmitter {
       const text = buf.toString().trim();
       if (!text) return;
       for (const line of text.split(/\r?\n/)) {
+        // The browser polls /api/health every ~1.5s for the server-down
+        // curtain; its request-log line carries no signal and would flood
+        // Server Activity. Drop it (the client's fetch capture skips it too).
+        if (line.includes("/api/health")) continue;
         const { level, scope, message } = parseLine(line, "info", "next");
         this.log(level, message, scope);
         if (/ready|started|listening/i.test(line) && this.status.phase !== "running") {
