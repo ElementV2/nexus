@@ -16,6 +16,30 @@ updater compares against the version embedded in its own installer asset
 name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
 shared release tag.
 
+## 0.1.23 — main app · 0.1.7 — Nexus Cross
+
+Live Show polish + deck/show parity fixes.
+
+### Live Show
+- **Resume picks up edits.** A WAIT marker (or clip) added while the show is
+  paused or cued now takes effect — playback stops on the waits again instead
+  of replaying a stale snapshot.
+- **Rename tracks** by double-clicking the track header.
+- **WAIT markers show their own label** on the timeline (instead of always
+  "WAIT").
+- New internal **Show GO** action: release the current WAIT from a deck key.
+  The key glows **amber** while a show is parked at a WAIT (the Play-scenario
+  key stays red while running).
+
+### Stream Deck ↔ Show
+- **Delete works as expected on both surfaces.** The Show now asks for
+  confirmation before deleting a scenario; the deck delete actually removes
+  the page (a pending auto-save was re-creating it).
+- **The selected page/show is remembered** across navigation — switching
+  between the Deck and Show pages no longer resets your selection.
+- The Show's enable/disable toggle is now the deck's orange switch, and the
+  toolbar page selector lost its status dot.
+
 ## 0.1.22 — main app · 0.1.7 — Nexus Cross
 
 ### Live Show — new timeline page
