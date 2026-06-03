@@ -1,6 +1,7 @@
 import { getKind, listKinds } from "./registry";
 import { connectionManager } from "./connection-manager";
 import { peekPreferences } from "@/lib/db/preferences";
+import { createLogger } from "./logger";
 import type {
   ActionDefinition,
   PresetDefinition,
@@ -161,6 +162,31 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
  * want to fire a "vmix:cut" preset without pinning a connection id
  * at config time.
  */
+const cmdLog = createLogger("command");
+
+/** Readable one-liner for a kind command body: vMix uses `Function`, OBS/
+ *  Ableton use `action`; fall back to the action label. */
+function commandSummary(command: unknown, fallback: string): string {
+  if (command && typeof command === "object") {
+    const o = command as Record<string, unknown>;
+    const key =
+      typeof o.Function === "string"
+        ? "Function"
+        : typeof o.action === "string"
+          ? "action"
+          : null;
+    if (key) {
+      const name = String(o[key]);
+      const rest: Record<string, unknown> = { ...o };
+      delete rest[key];
+      let detail = Object.keys(rest).length ? JSON.stringify(rest) : "";
+      if (detail.length > 120) detail = detail.slice(0, 117) + "…";
+      return detail ? `${name} ${detail}` : name;
+    }
+  }
+  return fallback;
+}
+
 export async function runAction(
   globalActionId: string,
   options: Record<string, unknown>,
@@ -194,18 +220,22 @@ export async function runAction(
       error: err instanceof Error ? err.message : "Option validation failed",
     };
   }
+  // Server-side command log: makes EVERY command that reaches a broker
+  // visible in Server Activity — including deck/preset presses, which fire
+  // here (runSteps → runAction) and otherwise left no trace on success.
+  const summary = commandSummary(command, entry.def.label);
   try {
     const data = await withTimeout(
       conn.broker.send(command),
       STEP_TIMEOUT_MS,
       `Action "${globalActionId}"`
     );
+    cmdLog.info(`${entry.kind} ${summary} → "${conn.label}"`);
     return { ok: true, data };
   } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : "Broker rejected command",
-    };
+    const msg = err instanceof Error ? err.message : "Broker rejected command";
+    cmdLog.warn(`${entry.kind} ${summary} → "${conn.label}" ✗ ${msg}`);
+    return { ok: false, error: msg };
   }
 }
 
