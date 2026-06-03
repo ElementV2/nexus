@@ -6,8 +6,9 @@ import { createClientLogger } from "@/lib/client-log";
 
 const log = createClientLogger("server");
 
-const PROBE_MS = 3000; // heartbeat cadence
-const PROBE_TIMEOUT_MS = 2500; // per-probe abort
+const PROBE_MS = 1500; // healthy heartbeat cadence
+const RETRY_MS = 400; // after a miss, re-probe fast to confirm an outage
+const PROBE_TIMEOUT_MS = 2000; // per-probe abort (hung, not-killed server)
 const FAIL_THRESHOLD = 2; // consecutive misses before we declare it down
 
 /**
@@ -51,7 +52,10 @@ export function ServerStatusOverlay() {
         }
       } finally {
         clearTimeout(to);
-        if (!stopped) timer = setTimeout(probe, PROBE_MS);
+        // After a miss, re-probe quickly to confirm — so the curtain drops
+        // within ~1s of a real outage instead of waiting a full slow cadence
+        // between each of the two confirming misses. Healthy → slow cadence.
+        if (!stopped) timer = setTimeout(probe, fails > 0 ? RETRY_MS : PROBE_MS);
       }
     };
     void probe();
