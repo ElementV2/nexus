@@ -16,6 +16,43 @@ updater compares against the version embedded in its own installer asset
 name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
 shared release tag.
 
+## 0.1.22 — main app · 0.1.7 — Nexus Cross
+
+### Live Show — new timeline page
+- **New "Show" page (timeline sequencer).** Drop actions onto a multi-track
+  timeline and press **Play**: a server-side playhead fires each cue as it
+  crosses it, so a whole show runs from one button — even with the browser
+  tab closed. **WAIT/GO** markers pause the playhead until you press GO (with
+  a **Skip waits** toggle to play straight through), plus scrub/seek by
+  dragging the green playhead anywhere along its length.
+- **A clip is a bundle of actions** — the timeline equivalent of a deck
+  button. It fires its whole action list (internal delays included) when the
+  playhead reaches it, through the same dispatch path a deck press uses.
+- **Launch a show from a deck key.** New internal **Play scenario** /
+  **Stop scenario** actions; the key glows **red** while its show is running.
+
+### Stream Deck ↔ Show — unified
+- **Copy/paste shortcuts between the deck and the show, both ways**
+  (Ctrl+C/V/X, Suppr). A multi-action shortcut maps to one multi-action clip
+  (no splitting); face, options and per-action connection are preserved.
+- **Connection is now chosen PER ACTION** on the deck (the global button-level
+  picker is gone) — a single button can drive different gear per action
+  without ambiguity. Drops and pastes pin each action to a concrete
+  connection of its kind.
+- **The page/scenario selector moved into the toolbar** (a compact dropdown
+  with add/rename/delete), freeing the editor width; the left rails are gone.
+- The show's action editor mirrors the deck's: per-action connection,
+  options (with the live vMix input picker), enable, duplicate, drag-reorder.
+
+### Fixes
+- **Feedback survives a deck↔show round-trip.** Rules now match by bare action
+  id, so a copied button keeps its tally/state feedback.
+- **Multi-action offline marker.** A button that drives several devices flags
+  offline if **any** of them is down (was: only the first action's device).
+- **Ableton:** removed three duplicate raw-OSC actions (Clip · Fire, Stop all
+  tracks, Track · Stop all clips) — use their feedback-backed twins (Fire
+  clip, Stop all clips, Stop track).
+
 ## 0.1.21 — main app · 0.1.7 — Nexus Cross
 
 ### Stream Deck — on-screen / satellite decks
