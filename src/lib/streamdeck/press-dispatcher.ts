@@ -1,6 +1,6 @@
 import { streamdeckDriver } from "./driver";
 import {
-  geometryForModel,
+  maxDeckGeometry,
   peekStreamdeckStore,
   remapKeyIndex,
 } from "@/lib/db/streamdeck";
@@ -69,7 +69,10 @@ class PressDispatcherImpl {
       // operator sees there, not a flat-index-shifted neighbour. When the
       // event lacks a grid (older driver), `event.cols ?? layoutCols`
       // makes it an identity map (correct when deck and layout match).
-      const geom = geometryForModel(layout.model);
+      // Layout grid = the MAX (8×4) authoring canvas (same as the editor),
+      // NOT the paired model's — bindings are flat indices in that space, so
+      // a smaller grid would mis-target the press.
+      const geom = maxDeckGeometry();
       const layoutIndex = remapKeyIndex(
         event.keyIndex,
         event.cols ?? geom.cols,

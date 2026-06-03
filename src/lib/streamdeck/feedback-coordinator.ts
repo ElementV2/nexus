@@ -1,6 +1,6 @@
 import { variableBus } from "@/lib/core/variable-bus";
 import { connectionManager } from "@/lib/core/connection-manager";
-import { geometryForModel, peekStreamdeckStore } from "@/lib/db/streamdeck";
+import { maxDeckGeometry, peekStreamdeckStore } from "@/lib/db/streamdeck";
 import { hmrSingleton } from "@/lib/utils/hmr-singleton";
 import { streamdeckDriver } from "./driver";
 import { evaluateFeedback, type VarsByConnection } from "./feedback";
@@ -155,10 +155,12 @@ class CoordinatorImpl {
         .map((serial) => devices.find((d) => d.serialNumber === serial)?.path)
         .filter((p): p is string => !!p);
       if (paths.length === 0) continue;
-      // Bindings are keyed in the layout's own grid; renderLayoutKey maps
-      // each to the physical key of the same (row,col) on each device,
-      // so a layout shows correctly on a narrower/shorter deck.
-      const geom = geometryForModel(layout.model);
+      // Bindings are authored on the MAX (8×4) canvas — same as the editor —
+      // so the layout grid is always the max geometry, NOT the paired model's
+      // (reading 8-col indices as a smaller grid only filled the left
+      // columns). renderLayoutKey remaps each cell to the physical key of the
+      // same (row,col) on each device, so a smaller deck shows the top-left.
+      const geom = maxDeckGeometry();
       for (const [keyStr, binding] of Object.entries(layout.bindings)) {
         const keyIndex = Number(keyStr);
         if (!Number.isFinite(keyIndex)) continue;

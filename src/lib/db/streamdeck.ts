@@ -44,6 +44,24 @@ export function geometryForModel(model: string): DeckGeometry {
 }
 
 /**
+ * The layout AUTHORING geometry — the largest deck grid (Stream Deck XL,
+ * 8×4). The editor lays bindings out on this canvas regardless of the
+ * paired hardware, so EVERY layout's bindings live in this coordinate
+ * space. The render path and the press path must therefore treat the
+ * layout as this size and remap FROM here to each physical device — using
+ * the (possibly smaller) per-model geometry would mis-read the flat indices
+ * the editor stored (e.g. an 8-col layout read as 4 cols only fills the
+ * left 4 columns). Single source of truth for "layout cols/rows".
+ */
+export function maxDeckGeometry(): DeckGeometry {
+  let best: DeckGeometry | null = null;
+  for (const g of Object.values(DECK_GEOMETRIES)) {
+    if (!best || g.rows * g.cols > best.rows * best.cols) best = g;
+  }
+  return best ?? DECK_GEOMETRIES.xl;
+}
+
+/**
  * Pick the known model whose grid matches a (rows, cols) pair exactly,
  * else "xl". Lets a virtual surface (ScreenDeck etc.) that announces an
  * arbitrary grid still adopt a real model id when it mirrors a standard
