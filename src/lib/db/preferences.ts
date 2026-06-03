@@ -40,6 +40,15 @@ export interface AppPreferences {
   screendeck: { enabled: boolean; port: number };
 
   /**
+   * Operator-assigned friendly names for decks, keyed by the device's
+   * stable identity: the HID/satellite SERIAL, or the ScreenDeck deviceId.
+   * Lets you tell apart 4 identical Stream Decks on one PC (whose serials
+   * are opaque) by a real name in the load picker + device manager. Empty
+   * = fall back to the satellite label / model / serial.
+   */
+  deviceNames: Record<string, string>;
+
+  /**
    * One-time migration latch. The legacy auto-seed
    * (`synthesizeLegacyConnections`) only runs while this is false AND
    * the list is empty. The first connection write (add / edit /
@@ -164,8 +173,24 @@ export const DEFAULT_PREFERENCES: AppPreferences = {
   connections: [],
   defaultConnections: {},
   screendeck: { enabled: true, port: SCREENDECK_DEFAULT_PORT },
+  deviceNames: {},
   connectionsSeeded: false,
 };
+
+/** Coerce a raw persisted/posted deviceNames blob: string→string map,
+ *  dropping blanks and over-long values so a malformed write can't bloat
+ *  prefs. Trims names; an empty name clears the entry. */
+function sanitizeDeviceNames(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof k !== "string" || !k) continue;
+    if (typeof v !== "string") continue;
+    const name = v.trim().slice(0, 64);
+    if (name) out[k] = name;
+  }
+  return out;
+}
 
 /** Coerce a raw persisted/posted screendeck blob to the typed shape,
  *  clamping the port to a valid range and defaulting missing fields. */
@@ -199,6 +224,7 @@ function computePreferences(): AppPreferences {
     ...(typeof raw.pin === "string" ? { pin: raw.pin } : {}),
     connections: sanitizeConnections(raw.connections),
     screendeck: sanitizeScreendeck(raw.screendeck),
+    deviceNames: sanitizeDeviceNames(raw.deviceNames),
     connectionsSeeded: raw.connectionsSeeded === true,
   };
   // Auto-seed `connections[]` for a fresh install, or migrate a pre-registry
@@ -375,6 +401,11 @@ export function setPreferences(
   // whether it came from the editor or an external launcher write.
   if (partial.screendeck !== undefined) {
     next.screendeck = sanitizeScreendeck(partial.screendeck);
+  }
+
+  // Operator-assigned deck names: full replace of the sanitized map.
+  if (partial.deviceNames !== undefined) {
+    next.deviceNames = sanitizeDeviceNames(partial.deviceNames);
   }
 
   // Keep the defaults map honest against the (possibly new) connection list.

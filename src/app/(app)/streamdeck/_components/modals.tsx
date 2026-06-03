@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import type { DeckLayout } from "@/lib/db/streamdeck";
 import { collectConnRefs, isDefaultBucket } from "./export-utils";
 import type {
   ConnectionLite,
   DeckExportFile,
+  DeviceSummary,
   DevicesResponse,
 } from "./types";
 
@@ -216,10 +217,11 @@ export function LoadToDeckModal({
                   value={d.serialNumber ?? ""}
                   disabled={!d.serialNumber}
                 >
-                  {/* Lead with the satellite's NAME (on network) so it's
-                      obvious which machine the deck is on — that already
-                      says where it is, so no misleading "(remote)" tag. */}
-                  {d.satelliteLabel ? `${d.satelliteLabel} · ` : ""}
+                  {/* Lead with the operator's friendly name if set, else the
+                      satellite's announced name, so it's obvious which deck
+                      this is — crucial with several identical decks whose
+                      serials are opaque. */}
+                  {d.name ? `${d.name} · ` : d.satelliteLabel ? `${d.satelliteLabel} · ` : ""}
                   {d.model}
                   {d.serialNumber ? ` · ${d.serialNumber}` : " · no serial"}
                 </option>
@@ -239,6 +241,220 @@ export function LoadToDeckModal({
         </ModalButton>
       </div>
     </ModalShell>
+  );
+}
+
+// ─────────────────────────── Device manager ───────────────────────────
+
+/**
+ * Name every deck (USB / remote satellite / ScreenDeck) so the load picker
+ * shows something readable instead of an opaque serial — essential with
+ * several identical Stream Decks on one PC. Names persist in preferences,
+ * keyed by serial (or ScreenDeck id), and survive reconnects. Also shows
+ * which page is currently loaded on each deck.
+ */
+export function DeviceManagerModal({
+  devices,
+  layouts,
+  onClose,
+  onSaved,
+}: {
+  devices: DeviceSummary[];
+  layouts: DeckLayout[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let off = false;
+    fetch("/api/preferences", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((p: { deviceNames?: Record<string, string> }) => {
+        if (!off) setNames(p.deviceNames ?? {});
+      })
+      .catch(() => {});
+    return () => {
+      off = true;
+    };
+  }, []);
+
+  const connected = new Set(
+    devices.map((d) => d.serialNumber).filter((s): s is string => !!s)
+  );
+  // Named-but-disconnected serials, so a stale name can still be cleared.
+  const offline = Object.keys(names).filter((s) => !connected.has(s));
+
+  const layoutFor = (serial: string) =>
+    serial ? layouts.find((l) => l.deviceSerials.includes(serial)) : undefined;
+
+  const kindOf = (path: string) =>
+    path.startsWith("screendeck:")
+      ? "ScreenDeck"
+      : path.startsWith("satellite:")
+        ? "Remote"
+        : "USB";
+
+  const setName = (serial: string, name: string) =>
+    setNames((m) => {
+      const next = { ...m };
+      if (name.trim()) next[serial] = name;
+      else delete next[serial];
+      return next;
+    });
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await fetch("/api/preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceNames: names }),
+      });
+      onSaved();
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="Decks" onClose={onClose}>
+      <div style={{ fontSize: 12, color: "var(--mid)", marginBottom: 12 }}>
+        Give each deck a name so the load picker is readable — names stick by
+        serial (ScreenDeck: by id) across reconnects.
+      </div>
+      {devices.length === 0 && offline.length === 0 ? (
+        <div style={{ fontSize: 12, color: "var(--muted)" }}>
+          No deck connected — plug one in, or start ScreenDeck / a satellite.
+        </div>
+      ) : (
+        <div className="space-y-2" style={{ marginBottom: 12 }}>
+          {devices.map((d) => {
+            const serial = d.serialNumber ?? "";
+            const loaded = serial ? layoutFor(serial) : undefined;
+            const geom =
+              d.cols && d.rows ? ` · ${d.cols}×${d.rows}` : "";
+            return (
+              <DeviceRow
+                key={d.path}
+                kind={kindOf(d.path)}
+                online
+                serial={serial}
+                placeholder={d.satelliteLabel || d.model}
+                meta={`${d.model}${geom} · ${loaded ? loaded.label : "no page loaded"}`}
+                value={serial ? names[serial] ?? "" : ""}
+                disabled={!serial}
+                onChange={(v) => serial && setName(serial, v)}
+              />
+            );
+          })}
+          {offline.map((serial) => {
+            const loaded = layoutFor(serial);
+            return (
+              <DeviceRow
+                key={serial}
+                kind="offline"
+                online={false}
+                serial={serial}
+                placeholder=""
+                meta={loaded ? `last page: ${loaded.label}` : "disconnected"}
+                value={names[serial] ?? ""}
+                onChange={(v) => setName(serial, v)}
+              />
+            );
+          })}
+        </div>
+      )}
+      <div className="flex items-center justify-end gap-2">
+        <ModalButton onClick={onClose}>Cancel</ModalButton>
+        <ModalButton primary disabled={saving} onClick={save}>
+          {saving ? "Saving…" : "Save"}
+        </ModalButton>
+      </div>
+    </ModalShell>
+  );
+}
+
+function DeviceRow({
+  kind,
+  online,
+  serial,
+  placeholder,
+  meta,
+  value,
+  disabled,
+  onChange,
+}: {
+  kind: string;
+  online: boolean;
+  serial: string;
+  placeholder: string;
+  meta: string;
+  value: string;
+  disabled?: boolean;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div
+      className="flex items-center gap-2"
+      style={{
+        padding: 8,
+        background: "var(--card)",
+        border: "1px solid var(--line)",
+        opacity: online ? 1 : 0.6,
+      }}
+    >
+      <span
+        className="font-mono uppercase"
+        style={{
+          fontSize: 8,
+          letterSpacing: "0.08em",
+          padding: "3px 5px",
+          border: "1px solid var(--line-hi)",
+          color: online ? "var(--mid)" : "var(--sub)",
+          flexShrink: 0,
+          width: 64,
+          textAlign: "center",
+        }}
+      >
+        {kind}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <input
+          type="text"
+          value={value}
+          placeholder={placeholder || "name this deck"}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          className="font-mono"
+          style={{
+            width: "100%",
+            padding: "4px 8px",
+            fontSize: 11,
+            background: "var(--panel-2)",
+            border: "1px solid var(--line)",
+            color: "var(--ink)",
+            outline: "none",
+          }}
+        />
+        <div
+          className="font-mono"
+          style={{
+            fontSize: 9,
+            color: "var(--sub)",
+            marginTop: 3,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+          title={`${serial || "no serial"} · ${meta}`}
+        >
+          {serial || "no serial"} · {meta}
+        </div>
+      </div>
+    </div>
   );
 }
 

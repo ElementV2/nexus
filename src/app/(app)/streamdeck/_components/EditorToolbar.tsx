@@ -1,8 +1,13 @@
 "use client";
 
 import type { RefObject } from "react";
-import { Eyebrow } from "@/components/sw";
-import { Usb, Download, PanelRightClose, PanelRightOpen } from "lucide-react";
+import {
+  Usb,
+  Download,
+  PanelRightClose,
+  PanelRightOpen,
+  Settings,
+} from "lucide-react";
 
 /**
  * The Stream Deck editor's top toolbar: page-wide actions (load to a
@@ -11,7 +16,6 @@ import { Usb, Download, PanelRightClose, PanelRightOpen } from "lucide-react";
  * live in the page; this component just wires them to controls.
  */
 export function EditorToolbar({
-  label,
   browserOpen,
   fileInputRef,
   onLoadToDeck,
@@ -19,10 +23,9 @@ export function EditorToolbar({
   onExportCurrent,
   onExportAll,
   onPickImportFile,
-  onLabelChange,
+  onOpenDevices,
   onToggleBrowser,
 }: {
-  label: string;
   browserOpen: boolean;
   fileInputRef: RefObject<HTMLInputElement | null>;
   onLoadToDeck: () => void;
@@ -30,7 +33,7 @@ export function EditorToolbar({
   onExportCurrent: () => void;
   onExportAll: () => void;
   onPickImportFile: (file: File) => void;
-  onLabelChange: (label: string) => void;
+  onOpenDevices: () => void;
   onToggleBrowser: () => void;
 }) {
   return (
@@ -120,25 +123,25 @@ export function EditorToolbar({
 
       <span style={{ width: 1, height: 18, background: "var(--line-hi)" }} />
 
-      {/* Model isn't a manual choice — it's auto-detected from the
-          deck the page is loaded onto. The grid
-          adapts to `draft.model`'s geometry automatically. */}
-      <Eyebrow tone="muted">Label</Eyebrow>
-      <input
-        type="text"
-        value={label}
-        onChange={(e) => onLabelChange(e.target.value)}
-        className="font-mono"
+      {/* Pages are renamed inline in the left rail (double-click). The
+          toolbar gear opens the Decks manager: name each deck + see which
+          page is loaded where. */}
+      <button
+        onClick={onOpenDevices}
+        title="Manage decks — name them, see what's loaded"
+        className="flex items-center gap-1 font-mono uppercase"
         style={{
-          padding: "4px 10px",
-          fontSize: 11,
-          background: "var(--card)",
+          padding: "5px 8px",
+          fontSize: 10,
+          letterSpacing: "1.4px",
+          background: "var(--panel-2)",
           border: "1px solid var(--line-hi)",
-          color: "var(--ink)",
-          outline: "none",
-          width: 200,
+          color: "var(--mid)",
+          cursor: "pointer",
         }}
-      />
+      >
+        <Settings size={11} /> Decks
+      </button>
 
       <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
         {/* No "saved" chip — autosave is implicit; a failed save still

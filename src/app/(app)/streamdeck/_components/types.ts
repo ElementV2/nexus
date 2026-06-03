@@ -22,6 +22,9 @@ export interface DeviceSummary {
    *  nexus-cross. Shown next to the deck so the operator can tell which
    *  machine it's on. */
   satelliteLabel?: string;
+  /** Operator-assigned friendly name (preferences.deviceNames, by serial).
+   *  Takes precedence over satelliteLabel/model in pickers. */
+  name?: string;
 }
 
 export interface DevicesResponse {

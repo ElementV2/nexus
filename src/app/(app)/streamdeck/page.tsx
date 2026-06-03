@@ -27,7 +27,11 @@ import {
 } from "./_components/export-utils";
 import { DeckKey } from "./_components/DeckKey";
 import { PagesRail } from "./_components/PagesRail";
-import { ImportModal, LoadToDeckModal } from "./_components/modals";
+import {
+  DeviceManagerModal,
+  ImportModal,
+  LoadToDeckModal,
+} from "./_components/modals";
 import { KeyInspector } from "./_components/KeyInspector";
 import { createClientLogger } from "@/lib/client-log";
 
@@ -996,6 +1000,8 @@ export default function StreamdeckPage() {
 
   // ── Load-to-device modal ──
   const [loadModalOpen, setLoadModalOpen] = useState(false);
+  // ── Deck manager modal (name decks, see what's loaded) ──
+  const [devicesModalOpen, setDevicesModalOpen] = useState(false);
 
   if (!data || !draft || !geometry) {
     return (
@@ -1039,7 +1045,6 @@ export default function StreamdeckPage() {
       />
 
       <EditorToolbar
-        label={draft.label}
         browserOpen={browserOpen}
         fileInputRef={fileInputRef}
         onLoadToDeck={() => setLoadModalOpen(true)}
@@ -1047,11 +1052,7 @@ export default function StreamdeckPage() {
         onExportCurrent={() => exportToFile("current")}
         onExportAll={() => exportToFile("all")}
         onPickImportFile={(f) => void onPickImportFile(f)}
-        onLabelChange={(label) => {
-          beginEdit();
-          setDraft({ ...draft, label });
-          setDirty(true);
-        }}
+        onOpenDevices={() => setDevicesModalOpen(true)}
         onToggleBrowser={toggleBrowser}
       />
 
@@ -1253,6 +1254,16 @@ export default function StreamdeckPage() {
           connections={connections}
           onCancel={() => setImportData(null)}
           onConfirm={(mapping) => void applyImport(importData, mapping)}
+        />
+      )}
+
+      {/* Deck manager modal — name decks + see which page is loaded */}
+      {devicesModalOpen && (
+        <DeviceManagerModal
+          devices={hw?.devices ?? []}
+          layouts={data.layouts}
+          onClose={() => setDevicesModalOpen(false)}
+          onSaved={() => void refreshHardware()}
         />
       )}
 
