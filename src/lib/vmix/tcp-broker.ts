@@ -236,6 +236,15 @@ export class VmixTcpBroker {
     return this.lastMessage.ok ? "connected" : "error";
   }
 
+  /** Which transport is currently carrying state — for the UI's live label.
+   *  TCP wins when its socket is delivering (the normal real-time case); HTTP
+   *  means we've fallen back; null = nothing connected yet. */
+  activeTransport(): "tcp" | "http" | null {
+    if (this.tcpHealthy) return "tcp";
+    if (this.httpHealthy) return "http";
+    return null;
+  }
+
   updateConfig(config: VmixBrokerConfig): void {
     const targetChanged =
       config.host !== this.config.host ||

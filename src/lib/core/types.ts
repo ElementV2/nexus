@@ -93,6 +93,15 @@ export interface BrokerImpl {
   getStatus(): ConnectionStatus;
 
   /**
+   * Optional short, LIVE label for how the connection is currently running
+   * (e.g. vMix "TCP (real-time)" vs "HTTP (fallback)"). Surfaced in the
+   * connections list so the operator sees the active transport at a glance.
+   * Return null (or omit the method) to fall back to the kind's static
+   * `tagline`.
+   */
+  statusLabel?(): string | null;
+
+  /**
    * Release everything (timers, sockets, file handles). Called when
    * the connection is removed from preferences or the dev-mode HMR
    * cycle replaces the host module.

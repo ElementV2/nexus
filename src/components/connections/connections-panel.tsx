@@ -628,7 +628,13 @@ function ConnectionCard({
         }}
       >
         {kind.displayName}
-        {kind.tagline ? ` · ${kind.tagline}` : ""}
+        {/* Prefer the broker's LIVE transport label (vMix: TCP vs HTTP) so the
+            operator sees how it's actually connected; else the static tagline. */}
+        {conn.statusLabel
+          ? ` · ${conn.statusLabel}`
+          : kind.tagline
+            ? ` · ${kind.tagline}`
+            : ""}
         <span style={{ marginLeft: 6, color: "var(--sub)" }}>{conn.id}</span>
       </div>
 

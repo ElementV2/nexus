@@ -14,6 +14,9 @@ export interface ConnectionRow {
   enabled: boolean;
   config: unknown;
   status: "offline" | "connecting" | "connected" | "error";
+  /** Live transport label from the broker (e.g. vMix "TCP (real-time)" /
+   *  "HTTP (fallback)"). Null → fall back to the kind's static tagline. */
+  statusLabel?: string | null;
 }
 
 export interface KindRow {

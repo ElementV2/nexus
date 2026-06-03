@@ -32,6 +32,9 @@ export async function GET() {
       // cross to the browser; the editor round-trips the sentinel on save.
       config: redactConfigSecrets(c.config),
       status: live?.broker.getStatus() ?? "offline",
+      // Optional LIVE transport label (vMix: "TCP (real-time)" / "HTTP
+      // (fallback)"); null → the card shows the kind's static tagline.
+      statusLabel: live?.broker.statusLabel?.() ?? null,
     };
   });
   // Surface the registered kinds too so the "Add connection" UI doesn't

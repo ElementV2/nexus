@@ -283,6 +283,20 @@ class VmixAdapter implements BrokerImpl {
     return this.broker.getStatus();
   }
 
+  /** Live transport label for the connections card — TCP when the real-time
+   *  socket is carrying state/commands, HTTP when we've fallen back. Null when
+   *  offline so the card shows the kind's static tagline. */
+  statusLabel(): string | null {
+    switch (this.broker.activeTransport()) {
+      case "tcp":
+        return "TCP (real-time)";
+      case "http":
+        return "HTTP (fallback)";
+      default:
+        return null;
+    }
+  }
+
   dispose(): void {
     this.broker.dispose();
   }
