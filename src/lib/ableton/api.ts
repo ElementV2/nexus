@@ -15,6 +15,11 @@
  * that explicitly picks an id.
  */
 
+import { createClientLogger } from "@/lib/client-log";
+import { describe } from "@/hooks/use-connection-command";
+
+const log = createClientLogger("command");
+
 export type AbletonCommand =
   | { action: "fire-clip"; track: number; scene: number }
   | { action: "stop-track"; track: number }
@@ -72,15 +77,37 @@ async function resolveId(): Promise<string | null> {
 }
 
 export async function sendAbletonCommand(body: AbletonCommand): Promise<void> {
+  // Log under the same "command" scope + format as every other page (vMix/OBS
+  // go through useConnectionCommand). This helper bypasses that hook, so
+  // without this Ableton commands were invisible in the client log — the fetch
+  // capture skips `/command`, expecting the hook to log it.
+  const { name, detail, noisy } = describe(body);
+  const tag = detail ? `${name} ${detail}` : name;
   const id = await resolveId();
-  if (!id) return;
+  if (!id) {
+    log.warn(`${tag} — no Ableton connection`);
+    return;
+  }
   try {
-    await fetch(`/api/connections/${encodeURIComponent(id)}/command`, {
+    const res = await fetch(`/api/connections/${encodeURIComponent(id)}/command`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-  } catch {
-    /* surfaced via SSE status */
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        const j = (await res.json()) as { error?: string };
+        if (j?.error) msg = j.error;
+      } catch {
+        /* keep status */
+      }
+      log.warn(`${tag} ✗ ${msg}`);
+      return;
+    }
+    if (noisy) log.debug(`${tag} ✓`);
+    else log.info(`${tag} ✓`);
+  } catch (err) {
+    log.warn(`${tag} ✗ ${err instanceof Error ? err.message : "Network error"}`);
   }
 }

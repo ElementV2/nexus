@@ -23,8 +23,9 @@ export type CommandResult<T = unknown> =
 const NOISY = /volume|fader|t-?bar|balance|sync-?offset|position|cursor|meters-enabled|^get-|^ensure-|-list$/i;
 
 /** Pull a readable name + compact detail from a kind command body. OBS uses
- *  `action`, vMix uses `Function`; anything else falls back to JSON. */
-function describe(body: unknown): { name: string; detail: string; noisy: boolean } {
+ *  `action`, vMix uses `Function`; anything else falls back to JSON. Exported
+ *  so non-hook senders (e.g. the Ableton API helper) log identically. */
+export function describe(body: unknown): { name: string; detail: string; noisy: boolean } {
   if (body && typeof body === "object") {
     const obj = body as Record<string, unknown>;
     const nameKey = "action" in obj ? "action" : "Function" in obj ? "Function" : null;
