@@ -55,6 +55,9 @@ interface Conn {
   lastSeenTs: number;
   /** device ids registered over THIS socket — cleaned up on close. */
   deviceIds: Set<string>;
+  /** Diagnostic: how many raw inbound chunks we've logged for this conn.
+   *  Bounded so a normal session (100 ms pings) doesn't flood the log. */
+  rawLogged: number;
 }
 
 // Keepalive: ping idle clients; reap a socket that's gone silent for
@@ -292,6 +295,7 @@ class ScreendeckServerImpl {
       remoteAddr: socket.remoteAddress ?? undefined,
       lastSeenTs: Date.now(),
       deviceIds: new Set(),
+      rawLogged: 0,
     };
     this.conns.add(conn);
     log.info(`client connected from ${conn.remoteAddr ?? "?"}`);
@@ -360,6 +364,16 @@ class ScreendeckServerImpl {
 
   private onData(conn: Conn, chunk: Buffer): void {
     conn.lastSeenTs = Date.now();
+    // Diagnostic: dump the first few raw inbound chunks verbatim (incl.
+    // PINGs and any non-newline-terminated data) so we can see EXACTLY what
+    // the client sends right after connecting — the decisive question is
+    // whether a reconnecting client sends ADD-DEVICE at all.
+    if (conn.rawLogged < 6) {
+      conn.rawLogged++;
+      log.info(
+        `raw ← ${JSON.stringify(chunk.toString("utf8")).slice(0, 400)} from ${conn.remoteAddr ?? "?"}`
+      );
+    }
     conn.buffer += chunk.toString("utf8");
     let nl: number;
     // Guard against an abusive client flooding without newlines.
