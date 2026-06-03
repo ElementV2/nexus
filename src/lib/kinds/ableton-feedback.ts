@@ -6,9 +6,22 @@ import { registerFeedback, type FeedbackOverride } from "@/lib/core/feedback";
  */
 function abletonFeedback(
   action: string,
-  _opts: Record<string, unknown>,
+  opts: Record<string, unknown>,
   vars: Record<string, unknown>
 ): FeedbackOverride | null {
+  // A clip-launch button lights green while ITS clip is the one playing on
+  // that track — Ableton pushes the track's playing scene index live, mirrored
+  // into `track_<track>_playing` by the variable bridge.
+  if (action === "fire-clip") {
+    const track = Number(opts.track);
+    const scene = Number(opts.scene);
+    if (!Number.isFinite(track) || !Number.isFinite(scene)) return null;
+    const playing = vars[`track_${track}_playing`];
+    if (typeof playing === "number" && playing === scene) {
+      return { bgcolor: "#ff3b30", fgcolor: "#ffffff" };
+    }
+    return null;
+  }
   if (action === "play" || action === "stop" || action === "continue") {
     if (vars.is_playing === true) {
       return { bgcolor: "#34c759", fgcolor: "#000000" };

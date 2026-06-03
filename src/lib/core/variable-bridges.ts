@@ -225,6 +225,8 @@ function bridgeObs(connectionId: string, broker: BrokerImpl): () => void {
 interface AbletonSnapshotShape {
   numTracks?: number;
   numScenes?: number;
+  /** Per-track playing scene index (-1 = none) — drives clip-launch feedback. */
+  tracks?: Array<{ index: number; playingSlotIndex: number }>;
   transport?: {
     tempo?: number;
     isPlaying?: boolean;
@@ -239,14 +241,35 @@ function bridgeAbleton(connectionId: string, broker: BrokerImpl): () => void {
     if (ev.type === "snapshot") {
       const s = ev.snapshot as AbletonSnapshotShape | undefined;
       if (!s) return;
-      variableBus.setBatch(connectionId, {
+      const batch: Record<string, number | boolean> = {
         track_count: s.numTracks ?? 0,
         scene_count: s.numScenes ?? 0,
         tempo: s.transport?.tempo ?? 0,
         is_playing: Boolean(s.transport?.isPlaying),
         metronome: Boolean(s.transport?.metronome),
         current_song_time: s.transport?.songBeat ?? 0,
-      });
+      };
+      // Per-track "which scene is playing" so a fire-clip deck button lights
+      // up while ITS clip is the one playing on that track.
+      for (const t of s.tracks ?? []) {
+        if (typeof t.index === "number") {
+          batch[`track_${t.index}_playing`] = t.playingSlotIndex ?? -1;
+        }
+      }
+      variableBus.setBatch(connectionId, batch);
+      return;
+    }
+    // Ableton pushes this the instant a track's playing clip changes (launch,
+    // stop, quantized start) — the real-time driver of clip feedback.
+    if (ev.type === "playing-slot") {
+      const trackIndex = ev.trackIndex as number;
+      if (typeof trackIndex === "number") {
+        variableBus.set(
+          connectionId,
+          `track_${trackIndex}_playing`,
+          (ev.playingSlotIndex as number) ?? -1
+        );
+      }
       return;
     }
     if (ev.type === "transport") {
