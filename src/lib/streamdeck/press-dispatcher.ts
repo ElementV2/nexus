@@ -47,7 +47,22 @@ class PressDispatcherImpl {
       const layout = store.layouts.find((l) =>
         l.deviceSerials.includes(serial)
       );
-      if (!layout) return;
+      const devicePath = (event as { devicePath?: string }).devicePath;
+      const isRemote =
+        !!devicePath &&
+        (devicePath.startsWith("screendeck:") ||
+          devicePath.startsWith("satellite:"));
+      if (!layout) {
+        // Visible for virtual/remote decks: a press that hits no paired
+        // layout is the #1 reason "ScreenDeck buttons do nothing" — the
+        // surface isn't paired to a layout (or its id changed on reconnect).
+        if (isRemote) {
+          log.info(
+            `press ${serial}#${event.keyIndex}: no layout paired to this surface`
+          );
+        }
+        return;
+      }
       // The hardware reports the PHYSICAL key index. Map it back to the
       // layout cell at the same (row,col) — the inverse of the render
       // path — so a press on a narrower deck fires the binding the
@@ -63,7 +78,16 @@ class PressDispatcherImpl {
       );
       const binding =
         layoutIndex === undefined ? undefined : layout.bindings[layoutIndex];
-      if (!binding) return;
+      if (!binding) {
+        if (isRemote) {
+          log.info(
+            `press ${serial}#${event.keyIndex} → layout "${layout.id}" has no ` +
+              `binding at cell ${layoutIndex} (event.cols=${event.cols ?? "?"}, ` +
+              `layout ${geom.cols}x${geom.rows})`
+          );
+        }
+        return;
+      }
       // Pass the binding's connection pin so the press fires against
       // the operator-chosen instance (e.g. vMix #2). Each step may
       // still override with its own connectionId inside runSteps.

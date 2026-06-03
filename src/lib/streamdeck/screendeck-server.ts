@@ -436,11 +436,10 @@ class ScreendeckServerImpl {
 
   private handleLine(conn: Conn, line: string): void {
     const { cmd, args } = parseLine(line);
-    // Trace the handshake/registration exchange at a visible level (skip the
-    // high-frequency PING/PONG/KEY-PRESS chatter). This is how we tell apart
-    // "client never sent ADD-DEVICE" from "ADD-DEVICE arrived but we rejected
-    // it" when a deck won't register.
-    if (cmd !== "PING" && cmd !== "PONG" && cmd !== "KEY-PRESS") {
+    // Trace inbound commands at a visible level (skip only the high-rate
+    // PING/PONG keepalive chatter). KEY-PRESS is logged so a "presses don't
+    // trigger anything" report shows the exact line the client sends.
+    if (cmd !== "PING" && cmd !== "PONG") {
       log.info(`← ${line} from ${conn.remoteAddr ?? "?"}`);
     }
     switch (cmd) {
@@ -515,9 +514,22 @@ class ScreendeckServerImpl {
     const deviceId = args.DEVICEID;
     const key = Number(args.KEY);
     if (!deviceId || !this.devices.has(deviceId) || !Number.isFinite(key)) {
+      log.warn(
+        `KEY-PRESS dropped: id=${deviceId ?? "?"} ` +
+          `known=${deviceId ? this.devices.has(deviceId) : false} key=${args.KEY ?? "?"}`
+      );
       return;
     }
     const type = args.PRESSED === "true" || args.PRESSED === "1" ? "down" : "up";
+    if (type === "down") {
+      // Visible so a "presses do nothing" report shows the press reached us
+      // and how many bridges (driver) it was dispatched to. 0 listeners =
+      // the driver press bridge isn't wired; >0 = look downstream
+      // (press-dispatcher: layout pairing / binding / key remap).
+      log.info(
+        `key-down ${deviceId}#${key} → ${this.pressListeners.size} listener(s)`
+      );
+    }
     for (const cb of this.pressListeners) {
       try {
         cb({ serial: deviceId, keyIndex: key, type });
