@@ -128,6 +128,9 @@ export interface DeckStep {
   /** Override the device kind for this step (a button mixing vMix +
    *  OBS actions). Undefined = the binding's preset kind. */
   kind?: string;
+  /** `false` = this step is disabled and skipped at run time (kept in the
+   *  sequence so it can be re-enabled). Undefined / true = active. */
+  enabled?: boolean;
 }
 
 export interface DeckBinding {

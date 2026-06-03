@@ -344,6 +344,7 @@ export async function runSteps(
     options?: Record<string, unknown>;
     connectionId?: string;
     kind?: string;
+    enabled?: boolean;
   }>,
   kind: string,
   connectionId?: string,
@@ -352,6 +353,8 @@ export async function runSteps(
 ): Promise<{ results: ActionRunResult[] }> {
   const results: ActionRunResult[] = [];
   for (const step of steps) {
+    // Disabled steps stay in the sequence but are skipped at run time.
+    if (step.enabled === false) continue;
     // Step's own kind > the global id's prefix > the binding kind.
     const stepKind =
       step.kind ??

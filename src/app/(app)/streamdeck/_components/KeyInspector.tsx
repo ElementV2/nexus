@@ -369,6 +369,7 @@ export function KeyInspector({
           const def = actions?.find((a) => a.globalId === globalId);
           const stepInstances = connections.filter((c) => c.kind === sKind);
           const multi = preset.steps.length > 1;
+          const stepActive = step.enabled !== false;
           return (
             <div
               key={idx}
@@ -387,7 +388,7 @@ export function KeyInspector({
                   dragStep !== null && dragStep !== idx
                     ? "1px dashed var(--amber)"
                     : "1px solid var(--line)",
-                opacity: dragStep === idx ? 0.5 : 1,
+                opacity: dragStep === idx ? 0.5 : stepActive ? 1 : 0.5,
               }}
               className="space-y-2"
             >
@@ -441,6 +442,39 @@ export function KeyInspector({
                   {sKind !== preset.kind ? `${sKind} · ` : ""}
                   {def?.label ?? step.actionId}
                 </span>
+                {/* Enable/disable this action — kept in the sequence, just
+                    skipped at run time when off. */}
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={stepActive}
+                  title={stepActive ? "Disable this action" : "Enable this action"}
+                  onClick={() => patchStep(idx, { enabled: !stepActive })}
+                  style={{
+                    width: 26,
+                    height: 14,
+                    borderRadius: 8,
+                    flexShrink: 0,
+                    background: stepActive ? "var(--amber)" : "var(--panel-2)",
+                    border: "1px solid var(--line-hi)",
+                    position: "relative",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: 1,
+                      left: stepActive ? 13 : 1,
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      background: stepActive ? "var(--bg)" : "var(--sub)",
+                      transition: "left 0.12s",
+                    }}
+                  />
+                </button>
                 {/* Reorder is via the drag handle (⠿). Per-step actions:
                     duplicate + remove. */}
                 <StepIconButton
