@@ -32,6 +32,7 @@ export function KeyInspector({
   canPaste,
   fire,
   pageChoices,
+  scenarioChoices = [],
 }: {
   keyIndex: number | null;
   binding: DeckBinding | undefined;
@@ -49,6 +50,9 @@ export function KeyInspector({
    *  `id` is the layout id (stored on the step → survives renames),
    *  `label` the page name shown. */
   pageChoices: Array<{ id: string; label: string }>;
+  /** Live scenario list for the internal "Play scenario" action's
+   *  dropdown. `id` is the scenario id; `label` the show name. */
+  scenarioChoices?: Array<{ id: string; label: string }>;
 }) {
   const actions = useActionCatalog();
   // Quick-pick suggestions for fields the operator typically picks
@@ -172,11 +176,6 @@ export function KeyInspector({
 
   const patchPreset = (patch: Partial<typeof preset>) => {
     onChange({ ...binding, preset: { ...preset, ...patch } });
-  };
-  // Mutate the binding's own fields (connectionId = the button's target
-  // connection). `undefined` = None → the key is unassigned (offline + inert).
-  const patchBinding = (patch: Partial<DeckBinding>) => {
-    onChange({ ...binding, ...patch });
   };
   const patchStepOptions = (
     stepIdx: number,
@@ -311,20 +310,9 @@ export function KeyInspector({
         </button>
       </div>
 
-      {/* Connection — which device this button targets. "None" leaves the key
-          unassigned: it shows the offline marker and a press does nothing. */}
-      {connections.some((c) => c.kind === preset.kind) && (
-        <section className="space-y-2">
-          <Eyebrow tone="muted">Connection</Eyebrow>
-          <ConnectionSelect
-            kind={preset.kind}
-            connections={connections}
-            value={binding.connectionId}
-            fallbackId={undefined}
-            onChange={(v) => patchBinding({ connectionId: v })}
-          />
-        </section>
-      )}
+      {/* Connection is chosen PER ACTION below (in the Actions list), not at
+          the button level — a button can drive different gear per action, so a
+          single global pin would be wrong. */}
 
       {/* Face customisation */}
       <section className="space-y-2">
@@ -496,16 +484,17 @@ export function KeyInspector({
                   ×
                 </StepIconButton>
               </div>
-              {/* Per-action connection override — only for MULTI-STEP buttons
-                  with a multi-instance kind (cross-device chains). A single
-                  step inherits the button's Connection (set above), so its
-                  own picker would be redundant. */}
-              {preset.steps.length > 1 &&
-                stepInstances.length > 1 &&
+              {/* Connection PER ACTION — every step picks the instance it
+                  targets, so one button can drive different gear (vMix #1 +
+                  OBS, etc.). Shown whenever the step's kind has a connection
+                  to pick. The legacy button-level pin only survives as an
+                  inherited fallback for old bindings. */}
+              {stepInstances.length > 0 &&
                 (() => {
-                  // What an UNPINNED step inherits: the button's pin if it's a
-                  // valid enabled instance of this kind, else None (decks have
-                  // no implicit "first-of-kind" fallback — unpinned = offline).
+                  // What an UNPINNED step inherits: the (legacy) button pin if
+                  // it's a valid enabled instance of this step's kind, else
+                  // None (decks have no implicit "first-of-kind" fallback —
+                  // unpinned = offline).
                   const bindingPinValid =
                     !!binding.connectionId &&
                     stepInstances.some(
@@ -540,7 +529,10 @@ export function KeyInspector({
                       const optDef =
                         globalId === "internal:goto-page" && opt.id === "page"
                           ? { ...opt, type: "dropdown" as const, choices: pageChoices }
-                          : opt;
+                          : globalId === "internal:play-scenario" &&
+                              opt.id === "scenarioId"
+                            ? { ...opt, type: "dropdown" as const, choices: scenarioChoices }
+                            : opt;
                       return (
                     <InspectorOptionField
                       key={opt.id}

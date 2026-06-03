@@ -9,9 +9,11 @@ import type { ActionDefinition } from "./types";
  * only a passthrough to keep the ActionDefinition shape — it never reaches a
  * broker.
  *
- *   • delay     — wait N ms before the next step in a multi-action button,
- *                 so you can sequence "do A, wait, do B" on one key.
- *   • goto-page — switch the deck the press came from to another page.
+ *   • delay          — wait N ms before the next step in a multi-action
+ *                      button, so you can sequence "do A, wait, do B".
+ *   • goto-page       — switch the deck the press came from to another page.
+ *   • play-scenario   — start a Live Show timeline (from a deck button etc.).
+ *   • stop-scenario   — stop the running timeline.
  */
 export const INTERNAL_KIND = "internal";
 
@@ -57,6 +59,46 @@ export const INTERNAL_ACTIONS: ActionDefinition[] = [
       },
     ],
     toCommand: (o) => ({ internal: "goto-page", page: String(o.page ?? "") }),
+  },
+  {
+    id: "play-scenario",
+    label: "Play scenario",
+    category: "Internal",
+    description: "Start a Live Show timeline.",
+    bgcolor: "#34c759",
+    fgcolor: "#ffffff",
+    options: [
+      {
+        // Dropdown of the operator's scenarios — the editor injects the live
+        // scenario list as `choices` (empty here since they aren't known at
+        // registration). The STORED value is the scenario id, so the link
+        // survives a rename; the runner also resolves id-or-name.
+        id: "scenarioId",
+        type: "dropdown",
+        label: "Scenario",
+        choices: [],
+      },
+      {
+        id: "skipWaits",
+        type: "boolean",
+        label: "Skip waits (play straight through)",
+        default: false,
+      },
+    ],
+    toCommand: (o) => ({
+      internal: "play-scenario",
+      scenarioId: String(o.scenarioId ?? ""),
+      skipWaits: Boolean(o.skipWaits),
+    }),
+  },
+  {
+    id: "stop-scenario",
+    label: "Stop scenario",
+    category: "Internal",
+    description: "Stop the running Live Show timeline.",
+    bgcolor: "#ff3b30",
+    fgcolor: "#ffffff",
+    toCommand: () => ({ internal: "stop-scenario" }),
   },
 ];
 

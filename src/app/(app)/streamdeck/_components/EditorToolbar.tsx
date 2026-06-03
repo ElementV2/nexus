@@ -1,6 +1,6 @@
 "use client";
 
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
 import {
   Usb,
   Download,
@@ -16,6 +16,7 @@ import {
  * live in the page; this component just wires them to controls.
  */
 export function EditorToolbar({
+  leading,
   browserOpen,
   fileInputRef,
   onLoadToDeck,
@@ -26,6 +27,9 @@ export function EditorToolbar({
   onOpenDevices,
   onToggleBrowser,
 }: {
+  /** Page selector (dropdown). Rendered first so switching pages lives in
+   *  the toolbar instead of a space-hungry left rail. */
+  leading?: ReactNode;
   browserOpen: boolean;
   fileInputRef: RefObject<HTMLInputElement | null>;
   onLoadToDeck: () => void;
@@ -41,9 +45,13 @@ export function EditorToolbar({
       className="flex items-center gap-3 px-[24px] py-[12px] sw-hairline-bottom flex-wrap"
       style={{ background: "var(--panel)" }}
     >
-      {/* Page selection lives in the left Pages rail now. The
-          toolbar keeps page-wide actions: load to a deck, and
-          import / export. */}
+      {leading && (
+        <>
+          {leading}
+          <span style={{ width: 1, height: 18, background: "var(--line-hi)" }} />
+        </>
+      )}
+      {/* Page-wide actions: load to a deck, and import / export. */}
       <button
         onClick={onLoadToDeck}
         title="Load a page onto a physical Stream Deck"
@@ -123,9 +131,9 @@ export function EditorToolbar({
 
       <span style={{ width: 1, height: 18, background: "var(--line-hi)" }} />
 
-      {/* Pages are renamed inline in the left rail (double-click). The
-          toolbar gear opens the Decks manager: name each deck + see which
-          page is loaded where. */}
+      {/* Pages are switched/renamed via the toolbar page selector (the
+          `leading` slot). The gear opens the Decks manager: name each deck +
+          see which page is loaded where. */}
       <button
         onClick={onOpenDevices}
         title="Manage decks — name them, see what's loaded"

@@ -1,9 +1,26 @@
 import { variableBus } from "@/lib/core/variable-bus";
 import { connectionManager } from "@/lib/core/connection-manager";
 import { maxDeckGeometry, peekStreamdeckStore } from "@/lib/db/streamdeck";
+import { peekScenario } from "@/lib/db/timeline";
 import { hmrSingleton } from "@/lib/utils/hmr-singleton";
+import { timelineEngine } from "@/lib/timeline/engine";
 import { streamdeckDriver } from "./driver";
 import { evaluateFeedback, type VarsByConnection } from "./feedback";
+
+/** Scenario id the timeline is actively running (playing or parked at a
+ *  WAIT) — drives the red "Play scenario" key feedback. Paused/idle = null. */
+function activeScenarioId(): string | null {
+  const st = timelineEngine.getState();
+  return st.state === "playing" || st.state === "waiting" ? st.scenarioId : null;
+}
+
+/** The active scenario as {id, label} for feedback (so a key stored by name
+ *  matches too), or null when nothing is running. */
+function activePlayingScenario(): { id: string; label?: string } | null {
+  const id = activeScenarioId();
+  if (!id) return null;
+  return { id, label: peekScenario(id)?.label };
+}
 
 /**
  * Bridge between the VariableBus and the Stream Deck driver. Subscribes
@@ -31,6 +48,10 @@ const STATUS_POLL_MS = 5_000;
 class CoordinatorImpl {
   private unsubVariables: (() => void) | null = null;
   private unsubDevices: (() => void) | null = null;
+  private unsubTimeline: (() => void) | null = null;
+  /** Last active scenario id seen, so we only repaint on a start/stop/switch
+   *  transition — NOT on every playhead tick (the engine emits ~20/s). */
+  private lastActiveScenario: string | null = null;
   private booted = false;
   /** Single-flight recompute flag: many `set()` calls in the same
    *  tick batch into one walk. Without this, a vMix poll that
@@ -71,6 +92,17 @@ class CoordinatorImpl {
     // logo until the first tally tick instead of showing its last page.
     this.unsubDevices = streamdeckDriver.subscribe((ev) => {
       if (ev.type === "devices-changed") this.refresh();
+    });
+    // Repaint when the running scenario starts/stops/switches so a "Play
+    // scenario" key flips red ↔ default. The engine emits on every playhead
+    // tick, so only act on a change of the ACTIVE id (cheap comparison).
+    this.lastActiveScenario = activeScenarioId();
+    this.unsubTimeline = timelineEngine.subscribe(() => {
+      const active = activeScenarioId();
+      if (active !== this.lastActiveScenario) {
+        this.lastActiveScenario = active;
+        this.refresh();
+      }
     });
     // Initial paint, RETRIED: push the persisted layouts onto whatever is
     // connected so launching the server restores each deck's last page
@@ -146,6 +178,7 @@ class CoordinatorImpl {
     const vars = buildVarsByConnection();
     const kinds = buildKindIndex();
     const connected = buildConnectedIndex();
+    const playing = activePlayingScenario();
 
     for (const layout of layouts) {
       if (layout.deviceSerials.length === 0) continue;
@@ -164,14 +197,19 @@ class CoordinatorImpl {
       for (const [keyStr, binding] of Object.entries(layout.bindings)) {
         const keyIndex = Number(keyStr);
         if (!Number.isFinite(keyIndex)) continue;
-        // Targeted pass: skip keys whose target connection didn't change.
+        // Targeted pass: skip keys none of whose action connections changed.
+        // A multi-action button can target several instances, so check EVERY
+        // step's pin — not just step[0] — else a tally change on the 2nd
+        // action's device wouldn't repaint the key until the 5 s full poll.
         // (Unpinned keys have no pin → only refreshed on a full pass.)
         if (!full) {
-          const pin =
-            binding.preset.steps[0]?.connectionId ?? binding.connectionId;
-          if (!pin || !dirty.has(pin)) continue;
+          const touched = binding.preset.steps.some((s) => {
+            const pin = s.connectionId ?? binding.connectionId;
+            return !!pin && dirty.has(pin);
+          });
+          if (!touched) continue;
         }
-        const override = evaluateFeedback(binding, vars, kinds, connected);
+        const override = evaluateFeedback(binding, vars, kinds, connected, playing);
         for (const path of paths) {
           streamdeckDriver.renderLayoutKey(
             path,
@@ -221,12 +259,13 @@ class CoordinatorImpl {
     const vars = buildVarsByConnection();
     const kinds = buildKindIndex();
     const connected = buildConnectedIndex();
+    const playing = activePlayingScenario();
     const geom = maxDeckGeometry();
     const total = geom.cols * geom.rows;
     for (let layoutIndex = 0; layoutIndex < total; layoutIndex++) {
       const binding = layout.bindings[layoutIndex];
       const override = binding
-        ? evaluateFeedback(binding, vars, kinds, connected) ?? undefined
+        ? evaluateFeedback(binding, vars, kinds, connected, playing) ?? undefined
         : undefined;
       for (const path of paths) {
         streamdeckDriver.renderLayoutKey(path, layoutIndex, geom, binding, override);
@@ -239,6 +278,8 @@ class CoordinatorImpl {
     this.unsubVariables = null;
     this.unsubDevices?.();
     this.unsubDevices = null;
+    this.unsubTimeline?.();
+    this.unsubTimeline = null;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
     if (this.statusTimer) clearInterval(this.statusTimer);

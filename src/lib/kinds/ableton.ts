@@ -651,17 +651,8 @@ const abletonActions: ActionDefinition[] = [
     }),
   },
 
-  // ════════════════════════ Stop everything ═══════════════════════════
-  {
-    id: "stop-all-tracks",
-    label: "Stop all tracks",
-    category: "Clips",
-    toCommand: () => ({
-      action: "raw",
-      address: "/live/song/stop_all_clips",
-      args: [],
-    }),
-  },
+  // NOTE: "Stop all tracks" (raw /live/song/stop_all_clips) was removed — it
+  // duplicated "Stop all clips" (the broker-backed `stop-all`). Use that.
 
   // ════════════════════════ Recording / capture ═══════════════════════
   {
@@ -820,19 +811,8 @@ const abletonActions: ActionDefinition[] = [
       args: [Number(o.track ?? 0), Number(o.state ?? 1)],
     }),
   },
-  {
-    id: "track-stop-all",
-    label: "Track · Stop all clips",
-    category: "Tracks",
-    options: [
-      { id: "track", type: "number", label: "Track #", default: 0, min: 0 },
-    ],
-    toCommand: (o) => ({
-      action: "raw",
-      address: "/live/track/stop_all_clips",
-      args: [Number(o.track ?? 0)],
-    }),
-  },
+  // NOTE: "Track · Stop all clips" (raw /live/track/stop_all_clips) was
+  // removed — it duplicated "Stop track" (the broker-backed `stop-track`).
   {
     id: "track-name",
     label: "Track · Set name",
@@ -849,20 +829,9 @@ const abletonActions: ActionDefinition[] = [
   },
 
   // ════════════════════════ Clip extras ═══════════════════════════════
-  {
-    id: "clip-fire",
-    label: "Clip · Fire",
-    category: "Clips",
-    options: [
-      { id: "track", type: "number", label: "Track #", default: 0, min: 0 },
-      { id: "clip", type: "number", label: "Clip slot #", default: 0, min: 0 },
-    ],
-    toCommand: (o) => ({
-      action: "raw",
-      address: "/live/clip/fire",
-      args: [Number(o.track ?? 0), Number(o.clip ?? 0)],
-    }),
-  },
+  // NOTE: "Clip · Fire" (raw /live/clip/fire) was removed — it duplicated
+  // "Fire clip" (the broker-backed `fire-clip`, which also drives Stream
+  // Deck feedback). Use `fire-clip` instead.
   {
     id: "clip-mute",
     label: "Clip · Mute (deactivate)",

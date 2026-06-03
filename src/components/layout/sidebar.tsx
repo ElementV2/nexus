@@ -25,6 +25,7 @@ import {
   Sliders,
   Lightbulb,
   ScrollText,
+  Film,
 } from "lucide-react";
 
 type Icon = typeof Monitor;
@@ -43,6 +44,7 @@ interface NavItem {
  */
 const STATIC_NAV: NavItem[] = [
   { href: "/streamdeck", label: "Deck", icon: Gamepad2 },
+  { href: "/timeline", label: "Show", icon: Film },
 ];
 
 const TRAILING_NAV: NavItem[] = [

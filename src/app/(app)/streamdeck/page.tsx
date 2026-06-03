@@ -26,7 +26,14 @@ import {
   remapLayout,
 } from "./_components/export-utils";
 import { DeckKey } from "./_components/DeckKey";
-import { PagesRail } from "./_components/PagesRail";
+import { PageSwitcher } from "@/components/page-switcher";
+import {
+  useSurfaceClipboard,
+  readSurfaceClipboard,
+  writeSurfaceClipboard,
+  clipToBinding,
+} from "@/lib/clipboard/surface-clipboard";
+import { useActionCatalog } from "./_components/action-catalog";
 import {
   DeviceManagerModal,
   ImportModal,
@@ -51,6 +58,28 @@ export default function StreamdeckPage() {
   draftRef.current = draft;
   const [dirty, setDirty] = useState(false);
   const [fire, setFire] = useState<FireState>({ kind: "idle" });
+  // Live scenario list, to populate the internal "Play scenario" action's
+  // dropdown in the inspector (the action ships no choices — shows aren't
+  // known server-side, same pattern as "Go to page").
+  const [scenarioChoices, setScenarioChoices] = useState<
+    Array<{ id: string; label: string }>
+  >([]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/timeline/scenarios", { cache: "no-store" })
+      .then((r) => r.json() as Promise<{ scenarios: Array<{ id: string; label: string }> }>)
+      .then((j) => {
+        if (!cancelled) {
+          setScenarioChoices(
+            (j.scenarios ?? []).map((s) => ({ id: s.id, label: s.label || s.id }))
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ── Undo / redo history (Ctrl+Z / Ctrl+Y) ────────────────────────────
   // Snapshots of the edited page. `past` holds states BEFORE each edit
@@ -598,18 +627,15 @@ export default function StreamdeckPage() {
               const k = s.actionId.includes(":")
                 ? s.actionId.slice(0, s.actionId.indexOf(":"))
                 : preset.kind;
-              // Same kind as the button → inherit the button's connection
-              // (no step pin needed). Different kind → pin to the first
-              // enabled connection of that kind so a cross-device action
-              // targets a concrete machine ("point barre").
-              const crossPin =
-                k !== existing.preset.kind
-                  ? connections.find((c) => c.kind === k && c.enabled)?.id
-                  : undefined;
+              // Connection is PER ACTION: pin every appended step to the first
+              // enabled connection of its OWN kind, so a cross-device button
+              // (vMix cut + OBS scene + Ableton clip) targets the right machine
+              // per action.
+              const pin = connections.find((c) => c.kind === k && c.enabled)?.id;
               return {
                 ...s,
                 kind: k,
-                ...(crossPin ? { connectionId: crossPin } : {}),
+                ...(pin ? { connectionId: pin } : {}),
               };
             });
             next = {
@@ -620,17 +646,22 @@ export default function StreamdeckPage() {
               },
             };
           } else {
-            // Empty key → fresh binding from the dropped preset, PINNED to
-            // a concrete connection (first enabled of the preset's kind).
-            // A shortcut targets a specific machine "point barre" from the
-            // start — never an implicit fallback — and the operator can
-            // repoint it in the inspector. This is also what makes
-            // export/import show the connection BY NAME instead of a
-            // generic "<kind> actions" bucket.
-            const seedPin = connections.find(
-              (c) => c.kind === preset.kind && c.enabled
-            )?.id;
-            next = { preset, connectionId: seedPin } as DeckBinding;
+            // Empty key → fresh binding from the dropped preset. Connection is
+            // PER ACTION: pin each step to the first enabled connection of its
+            // own kind ("point barre" — a concrete machine from the start,
+            // never an implicit fallback). No button-level pin; the operator
+            // repoints each action in the inspector. Export/import still shows
+            // connections BY NAME because it collects per-step pins too.
+            const pinnedSteps = preset.steps.map((s) => {
+              const k = s.actionId.includes(":")
+                ? s.actionId.slice(0, s.actionId.indexOf(":"))
+                : preset.kind;
+              const pin = connections.find((c) => c.kind === k && c.enabled)?.id;
+              return { ...s, kind: k, ...(pin ? { connectionId: pin } : {}) };
+            });
+            next = {
+              preset: { ...preset, steps: pinnedSteps },
+            } as DeckBinding;
           }
           beginEdit();
           setDraft({
@@ -687,18 +718,66 @@ export default function StreamdeckPage() {
   );
 
   // ── Copy / paste a key binding (duplicate shortcuts) ──
-  const [clipboard, setClipboard] = useState<DeckBinding | null>(null);
+  // Uses the SHARED cross-surface clipboard so a button can also be pasted
+  // onto the Live Show timeline (and a show clip pasted here).
+  const surfaceClip = useSurfaceClipboard();
+  const actionCatalog = useActionCatalog();
   const copyKey = useCallback((keyIndex: number) => {
     const b = draftRef.current?.bindings[keyIndex];
     if (!b) return;
-    setClipboard(structuredClone(b));
+    writeSurfaceClipboard({ v: 1, kind: "deck", binding: structuredClone(b) });
   }, []);
   const pasteKey = useCallback(
     (keyIndex: number) => {
-      if (!clipboard) return;
-      handleUpdateBinding(keyIndex, structuredClone(clipboard));
+      const c = readSurfaceClipboard();
+      if (!c) return;
+      let binding;
+      if (c.kind === "deck") {
+        // Deck → deck: verbatim.
+        binding = structuredClone(c.binding);
+      } else {
+        // Show → deck: convert the clip to a button, giving it the SAME face
+        // the deck assigns that action natively (catalog label + category
+        // colours) so it's indistinguishable from a fresh drop.
+        const first = c.clip.steps[0];
+        const firstGid = first
+          ? first.actionId.includes(":")
+            ? first.actionId
+            : `${first.kind ?? ""}:${first.actionId}`
+          : undefined;
+        const entry = actionCatalog?.find((a) => a.globalId === firstGid);
+        const converted = clipToBinding(
+          c.clip,
+          entry
+            ? { label: entry.label, bgcolor: entry.bgcolor, fgcolor: entry.fgcolor }
+            : undefined
+        );
+        // Ensure every action is pinned to a concrete connection of its kind
+        // — exactly like a native drop — so feedback (tally / state) resolves.
+        // A show clip may have been unpinned, which would otherwise paste a
+        // button with no target and therefore NO feedback.
+        binding = {
+          ...converted,
+          preset: {
+            ...converted.preset,
+            steps: converted.preset.steps.map((s) => {
+              const k =
+                s.kind ??
+                (s.actionId.includes(":")
+                  ? s.actionId.slice(0, s.actionId.indexOf(":"))
+                  : converted.preset.kind);
+              const pin =
+                s.connectionId ??
+                converted.connectionId ??
+                connections.find((cn) => cn.kind === k && cn.enabled)?.id;
+              return pin ? { ...s, connectionId: pin } : s;
+            }),
+          },
+        };
+      }
+      handleUpdateBinding(keyIndex, binding);
     },
-    [clipboard, handleUpdateBinding]
+    [handleUpdateBinding, actionCatalog, connections]
   );
 
   // Stable per-key grid handlers (index passed at call time) so every
@@ -1083,6 +1162,35 @@ export default function StreamdeckPage() {
       />
 
       <EditorToolbar
+        leading={
+          <PageSwitcher
+            items={data.layouts.map((l) => {
+              const pairedTotal = l.deviceSerials.length;
+              const pairedOnline = l.deviceSerials.filter((s) =>
+                hw?.devices.some((d) => d.serialNumber === s)
+              ).length;
+              const keys = Object.keys(l.bindings).length;
+              return {
+                id: l.id,
+                label: l.label || l.id,
+                meta: `${keys} keys${pairedTotal > 1 ? ` ·×${pairedTotal}` : ""}`,
+                dot:
+                  pairedTotal > 0 && pairedOnline > 0
+                    ? ("filled" as const)
+                    : pairedTotal > 0
+                      ? ("outline" as const)
+                      : ("none" as const),
+              };
+            })}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onAdd={handleAddDeck}
+            onRename={renameLayout}
+            onDelete={handleDeletePage}
+            addTitle="Add page"
+            deleteTitle="Delete page"
+          />
+        }
         browserOpen={browserOpen}
         fileInputRef={fileInputRef}
         onLoadToDeck={() => setLoadModalOpen(true)}
@@ -1105,18 +1213,6 @@ export default function StreamdeckPage() {
           background: "var(--bg)",
         }}
       >
-        {/* Pages rail — page list: click to switch,
-            inline rename, add, delete, with a pairing dot. */}
-        <PagesRail
-          layouts={data.layouts}
-          selectedId={selectedId}
-          hw={hw}
-          onSelect={setSelectedId}
-          onAdd={handleAddDeck}
-          onRename={renameLayout}
-          onDelete={handleDeletePage}
-        />
-
         {/* Deck column */}
         <div
           className="flex flex-col"
@@ -1274,12 +1370,13 @@ export default function StreamdeckPage() {
                   onPaste={() => {
                     if (selectedKey !== null) pasteKey(selectedKey);
                   }}
-                  canPaste={clipboard !== null}
+                  canPaste={surfaceClip !== null}
                   fire={fire}
                   pageChoices={data.layouts.map((l) => ({
                     id: l.id,
                     label: l.label || l.id,
                   }))}
+                  scenarioChoices={scenarioChoices}
                 />
               ) : (
                 <PresetBrowserPanel mode="sidebar" />

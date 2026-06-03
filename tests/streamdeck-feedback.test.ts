@@ -277,3 +277,87 @@ describe("X32 mute feedback — RED when the target is muted", () => {
     expect(r?.badge?.color).toBe(RED);
   });
 });
+
+describe('"Play scenario" feedback — red while its scenario runs', () => {
+  const scenarioKey = (scenarioId: string): DeckBinding => ({
+    preset: {
+      globalId: "internal:play-scenario",
+      kind: "internal",
+      id: "play-scenario",
+      label: "Play scenario",
+      steps: [{ actionId: "internal:play-scenario", options: { scenarioId } }],
+    },
+  });
+
+  it("is RED when the engine is running the key's scenario", () => {
+    expect(
+      evaluateFeedback(scenarioKey("show1"), {}, {}, undefined, { id: "show1" })
+        ?.bgcolor
+    ).toBe(RED);
+  });
+
+  it("is RED when the key stores the scenario by NAME (runner resolves it)", () => {
+    expect(
+      evaluateFeedback(scenarioKey("My Show"), {}, {}, undefined, {
+        id: "show1",
+        label: "My Show",
+      })?.bgcolor
+    ).toBe(RED);
+  });
+
+  it("is null when a DIFFERENT scenario is running", () => {
+    expect(
+      evaluateFeedback(scenarioKey("show1"), {}, {}, undefined, { id: "show2" })
+    ).toBeNull();
+  });
+
+  it("is null when nothing is playing", () => {
+    expect(
+      evaluateFeedback(scenarioKey("show1"), {}, {}, undefined, null)
+    ).toBeNull();
+  });
+});
+
+describe("feedback tolerates a FULL global step id (show↔deck round-trip)", () => {
+  it("matches the rule by bare id even when the step stores <kind>:<id>", () => {
+    const binding: DeckBinding = {
+      connectionId: "c1",
+      preset: {
+        globalId: "vmix:x",
+        kind: "vmix",
+        id: "x",
+        label: "x",
+        // After a show→deck paste the step id is normalised to the full
+        // "vmix:sc-cut"; the tally rule keys off the bare "sc-cut".
+        steps: [{ actionId: "vmix:sc-cut", kind: "vmix", options: { input: "2" } }],
+      },
+    };
+    expect(fb(binding, { tally_active: 2 })?.bgcolor).toBe(RED);
+  });
+});
+
+describe("multi-action offline marker (per-action connections)", () => {
+  const combo: DeckBinding = {
+    preset: {
+      globalId: "vmix:combo",
+      kind: "vmix",
+      id: "combo",
+      label: "combo",
+      steps: [
+        { actionId: "vmix:sc-cut", kind: "vmix", connectionId: "c1", options: {} },
+        { actionId: "obs:set-scene", kind: "obs", connectionId: "o1", options: {} },
+      ],
+    },
+  };
+  const KINDS2 = { vmix: ["c1"], obs: ["o1"] };
+
+  it("flags offline when ANY action's device is down (not just step[0])", () => {
+    const r = evaluateFeedback(combo, {}, KINDS2, { c1: true, o1: false });
+    expect(r?.badge?.icon).toBe("offline");
+  });
+
+  it("no offline marker when every action's device is connected", () => {
+    const r = evaluateFeedback(combo, {}, KINDS2, { c1: true, o1: true });
+    expect(r?.badge?.icon).not.toBe("offline");
+  });
+});

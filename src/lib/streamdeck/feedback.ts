@@ -29,6 +29,13 @@ import "@/lib/kinds/generic-feedback";
 
 export type { FeedbackOverride };
 
+/** Red glow for a "Play scenario" key while its scenario is running — the
+ *  same reserved live red as a program tally. */
+const SCENARIO_PLAYING_OVERRIDE: FeedbackOverride = {
+  bgcolor: "#ff3b30",
+  fgcolor: "#ffffff",
+};
+
 /** Variables snapshot keyed by `<connectionId>` → `<varId>` → value. The
  *  bus's flat list is reshaped before calling so lookups stay O(1). */
 export type VarsByConnection = Record<string, Record<string, unknown>>;
@@ -85,49 +92,94 @@ export function evaluateFeedback(
   binding: DeckBinding,
   vars: VarsByConnection,
   connectionIdsByKind: Record<string, string[]>,
-  connectedByConnection?: ConnectedByConnection
+  connectedByConnection?: ConnectedByConnection,
+  /** The scenario the timeline engine is currently running — id AND label, so
+   *  a "Play scenario" key stored by name (the runner resolves id-or-name) is
+   *  matched too. Server coordinator passes it; the editor preview omits it.
+   *  Drives the red "Play scenario" feedback. */
+  playingScenario?: { id: string; label?: string } | null
 ): FeedbackOverride | null {
   const kind = binding.preset.kind;
   const steps = binding.preset.steps;
   if (steps.length === 0) return null;
-  // Internal actions (delay, go-to-page) target no device — there's no
-  // connection that could be "offline" (if the server were down the whole
-  // app would be), so never show the offline marker for them.
-  if (kind === "internal") return null;
-  // The button's primary pin drives the offline marker.
-  const pinned = steps[0].connectionId ?? binding.connectionId;
-
-  // Offline marker takes priority over any kind rule. Two cases, and only
-  // when connection status is actually available (real callers pass it; the
-  // feedback-rule unit tests don't, so they still exercise the tally paths
-  // below via the vars-based resolution):
-  //   • UNPINNED / "None" — the button isn't assigned to any device, so it's
-  //     "not plugged in" → offline (and the press does nothing, see catalog).
-  //   • Pinned but the connection is NOT actively connected → offline (stale
-  //     tally would otherwise mislead). Anything other than an explicit
-  //     `true` counts as offline — false, "connecting", OR absent from the
-  //     map. The server's map only carries LIVE brokers, so a pinned-to-a-
-  //     disabled/missing connection is `undefined` there; treating that as
-  //     offline makes the physical deck match the web preview (whose map
-  //     includes every persisted connection as not-connected).
+  // Internal actions (delay, go-to-page, play-scenario) target no device, so
+  // there's no connection that could be "offline". They get no device tally —
+  // EXCEPT "Play scenario", which glows red while its scenario is running
+  // (driven by the engine's active scenario id, not by device variables).
+  if (kind === "internal") {
+    if (playingScenario) {
+      const label = playingScenario.label?.toLowerCase();
+      for (const step of steps) {
+        const id = step.actionId.includes(":")
+          ? step.actionId.slice(step.actionId.indexOf(":") + 1)
+          : step.actionId;
+        if (id === "play-scenario") {
+          const sid = String((step.options ?? {}).scenarioId ?? "");
+          // Match by id OR name — the runner resolves the stored ref either
+          // way, so the feedback must too.
+          if (
+            sid &&
+            (sid === playingScenario.id ||
+              (!!label && sid.toLowerCase() === label))
+          ) {
+            return SCENARIO_PLAYING_OVERRIDE;
+          }
+        }
+      }
+    }
+    return null;
+  }
+  // Offline marker takes priority over any kind rule. It fires when ANY of the
+  // button's DEVICE actions has no live target — so a multi-action button that
+  // drives different gear (vMix #1 + OBS) flags offline if EITHER device is
+  // down, not just the first. Internal steps (delay, play-scenario) target no
+  // device and are skipped. Only checked when connection status is available
+  // (real callers pass it; the feedback-rule unit tests don't, so they still
+  // exercise the tally paths below):
+  //   • UNPINNED / "None" step — not assigned to any device → offline (the
+  //     press does nothing for it, see catalog).
+  //   • Pinned but NOT actively connected → offline (stale tally would
+  //     mislead). Anything other than explicit `true` counts as offline —
+  //     false, "connecting", OR absent from the map (disabled/missing).
   if (connectedByConnection) {
-    if (!pinned) return OFFLINE_OVERRIDE;
-    if (connectedByConnection[pinned] !== true) return OFFLINE_OVERRIDE;
+    for (const step of steps) {
+      const sKind =
+        step.kind ??
+        (step.actionId.includes(":")
+          ? step.actionId.slice(0, step.actionId.indexOf(":"))
+          : kind);
+      if (sKind === "internal") continue;
+      const pin = step.connectionId ?? binding.connectionId;
+      if (!pin || connectedByConnection[pin] !== true) return OFFLINE_OVERRIDE;
+    }
   }
 
-  const rule = feedbackFor(kind);
-  if (!rule) return null;
-  // Scan steps; the first action that yields an override wins.
+  // Scan steps; the first action that yields an override wins. Each step is
+  // matched against ITS OWN kind's rule and the BARE action id — a step may
+  // store a full "<kind>:<id>" (e.g. after a show↔deck round-trip) while the
+  // rules key off the bare id, so "ableton:fire-clip" must still match the
+  // "fire-clip" rule. Per-step kind also lets a cross-kind button (vMix + OBS)
+  // light each action from the right device.
   for (const step of steps) {
+    const sKind =
+      step.kind ??
+      (step.actionId.includes(":")
+        ? step.actionId.slice(0, step.actionId.indexOf(":"))
+        : kind);
+    const rule = feedbackFor(sKind);
+    if (!rule) continue;
     const targetId = resolveTargetId(
-      kind,
+      sKind,
       vars,
       connectionIdsByKind,
       step.connectionId ?? binding.connectionId
     );
     const scope = targetId ? vars[targetId] : undefined;
     if (!scope) continue;
-    const override = rule(step.actionId, step.options ?? {}, scope);
+    const bareAction = step.actionId.includes(":")
+      ? step.actionId.slice(step.actionId.indexOf(":") + 1)
+      : step.actionId;
+    const override = rule(bareAction, step.options ?? {}, scope);
     if (override) return override;
   }
   return null;

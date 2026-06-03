@@ -314,6 +314,26 @@ async function runInternalAction(
     cmdLog.info(`internal goto-page "${target.label}" on ${serial}`);
     return { ok: true, data: { page: target.id } };
   }
+  if (id === "play-scenario") {
+    const ref = String(options.scenarioId ?? "").trim();
+    if (!ref) return { ok: false, error: "Play scenario: none chosen" };
+    const { getTimelineStore } = await import("@/lib/db/timeline");
+    const { timelineEngine } = await import("@/lib/timeline/engine");
+    // Resolve id-or-name so hand-written/imported configs and renames work.
+    const target = getTimelineStore().scenarios.find(
+      (s) => s.id === ref || s.label.toLowerCase() === ref.toLowerCase()
+    );
+    if (!target) return { ok: false, error: `Play scenario: no scenario "${ref}"` };
+    timelineEngine.play(target.id, { skipWaits: Boolean(options.skipWaits) });
+    cmdLog.info(`internal play-scenario "${target.label}"`);
+    return { ok: true, data: { scenarioId: target.id } };
+  }
+  if (id === "stop-scenario") {
+    const { timelineEngine } = await import("@/lib/timeline/engine");
+    timelineEngine.stop();
+    cmdLog.info("internal stop-scenario");
+    return { ok: true, data: { stopped: true } };
+  }
   return { ok: false, error: `Unknown internal action "${id}"` };
 }
 
