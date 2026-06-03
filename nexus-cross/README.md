@@ -35,8 +35,10 @@ shape as the main Nexus launcher.
 
 1. Install `Nexus-Cross-Setup-<version>.exe` on the PC the Stream Deck is
    plugged into. It launches to the tray.
-2. Open the window, type the Nexus server URL (e.g.
-   `http://192.168.1.10:9088`), and **Save & connect**.
+2. Open the window, enter the Nexus server **IP** and **Port** (e.g.
+   `192.168.1.10` / `9088` — no `http://`), give it a **Name**, and click
+   **Connect**. **Open GUI** opens the server's web interface in your
+   browser.
 3. In Nexus, the deck shows up under **Deck → Load to deck** (and in
    pairing) tagged **(remote)**. Pair a page to it — renders push back to
    this agent automatically.

@@ -28,9 +28,13 @@ LAN URL, a port picker, and a logs viewer.
   per kind.
 - **Stream Deck surfaces** — a drag-and-drop layout editor; one page can
   drive many decks, local or on remote machines via the nexus-cross
-  satellite; live tally/feedback on the keys. Decks work **headless** (no
-  browser needed), **restore their last page on launch**, flash a key red
-  when a press fails, and **reset to the standby logo on shutdown**.
+  satellite; live tally/feedback on the keys, with an offline marker when a
+  key's device is down. Multi-step buttons (chain actions, with **Delay**
+  and **Go to page** built-in steps; reorder, duplicate, enable/disable each
+  step), and a **deck manager** to name each deck and see its loaded page.
+  Decks work **headless** (no browser needed), **restore their last page on
+  launch**, flash a key red when a press fails, and **reset to the standby
+  logo on shutdown**.
 - **LAN-first** — bind the server to a specific interface or all
   interfaces; share the URL with co-operators on the same network.
 - **Touch-friendly** — designed for tablets sitting on FOH consoles;
@@ -51,7 +55,7 @@ Add any number of each in **Network › Connections** — none is mandatory.
 
 | Device | Transport | Default port | Prerequisite |
 |---|---|---|---|
-| **vMix** | HTTP XML API (poll + commands) | 8088 | vMix 27+, Web Controller enabled |
+| **vMix** | TCP API — real-time tally/activator push + commands, with HTTP-API fallback | 8099 (TCP) / 8088 (HTTP) | vMix 27+, Web Controller + TCP API enabled |
 | **OBS Studio** | obs-websocket v5 (push) | 4455 | obs-websocket (built into OBS 28+), password optional |
 | **Ableton Live** | OSC — AbletonOSC | 11000 send / 11001 recv | AbletonOSC in the MIDI Remote Scripts folder |
 | **Behringer X32 / M32** | OSC over UDP | 10023 | — (always listening) |
@@ -102,11 +106,12 @@ stops with it.
    until the status pill goes green.
 3. Add as many devices as you need — each one lights up its own pages.
 
-Example (vMix): enable **Settings → Web Controller** in vMix (port 8088),
-add a vMix connection pointing at `localhost`, then open **Live** for
-PGM / PVW + inputs. For Ableton, install AbletonOSC first (send `11000`,
-recv `11001`). For Stream Decks, build a page in the **Deck** editor and
-*Load to deck*.
+Example (vMix): in vMix **Settings → Web Controller**, tick **Enabled**
+(the master switch — port 8088) and **TCP API: Enabled** (port 8099, the
+real-time path), add a vMix connection pointing at `localhost`, then open
+**Live** for PGM / PVW + inputs. For Ableton, install AbletonOSC first
+(send `11000`, recv `11001`). For Stream Decks, build a page in the
+**Deck** editor and *Load to deck*.
 
 ---
 
@@ -226,7 +231,7 @@ banner links straight to the new `.exe` for a manual upgrade
 │   │   │                    #   x32, grandma2/3) + its <kind>-feedback.ts;
 │   │   │                    #   registered into core
 │   │   ├── vmix/ obs/ ableton/ x32/ grandma3/ grandma2/ osc/  # brokers
-│   │   │                    #   (HTTP poll / WebSocket / OSC-UDP / Telnet)
+│   │   │                    #   (TCP+HTTP / WebSocket / OSC-UDP / Telnet)
 │   │   ├── streamdeck/      # HID driver, feedback coordinator, press
 │   │   │                    #   dispatcher, satellite registry
 │   │   └── db/              # JSON data store (preferences, layouts, overlays)
@@ -258,18 +263,21 @@ Stream Deck feedback layer both read from it.
 
 ### Data flow (UI ↔ a device)
 
-1. A broker maintains the live link to its device — vMix HTTP polling
-   (~150 ms, configurable), an OBS WebSocket, an Ableton/X32/grandMA3
-   OSC-over-UDP socket, or a grandMA 2 Telnet line — and normalizes state
-   into a Zustand store + the variable bus.
+1. A broker maintains the live link to its device — vMix's real-time TCP
+   API (a persistent socket: `SUBSCRIBE TALLY`/`ACTS` push + `FUNCTION`
+   commands + `XML` state, falling back to the HTTP API when 8099 is
+   unavailable), an OBS WebSocket, an Ableton/X32/grandMA3 OSC-over-UDP
+   socket, or a grandMA 2 Telnet line — and normalizes state into a Zustand
+   store + the variable bus.
 2. The browser streams that state over **Server-Sent Events** from
    `/api/connections/:id/events` (one EventSource per stream, shared
    across consumers, paused on a hidden tab).
 3. UI subscribes via narrow selectors — pages re-render only when the
    slice they care about changes.
 4. Actions `POST /api/connections/:id/command`; the server routes to the
-   matching broker, which builds the device command (vMix URL, OBS
-   request, OSC message) — the browser never talks to devices directly.
+   matching broker, which builds the device command (a vMix `FUNCTION` over
+   TCP / HTTP, an OBS request, an OSC message) — the browser never talks to
+   devices directly.
 
 ### Data flow (Stream Deck)
 

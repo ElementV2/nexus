@@ -16,6 +16,46 @@ updater compares against the version embedded in its own installer asset
 name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
 shared release tag.
 
+## 0.1.20 — main app · 0.1.7 — Nexus Cross
+
+Real-time vMix over the TCP API, plus Ableton clip feedback and log/UX fixes.
+
+### vMix — real-time TCP API
+- **vMix now runs over its TCP API (port 8099).** A single persistent socket
+  carries `SUBSCRIBE TALLY` + `ACTS` (vMix **pushes** program/preview and
+  activator changes), `FUNCTION` commands, and `XML` state — so tally and
+  feedback update the instant vMix switches instead of waiting for a poll, and
+  commands go out with no per-request overhead. This is the transport Bitfocus
+  Companion and the broadcast community use.
+- **Automatic HTTP fallback.** State and commands fall back to the HTTP API
+  (8088) whenever the TCP socket is unavailable (TCP API off / firewalled) or
+  stops answering — the connection stays up over whichever API is reachable,
+  reporting an error only when **both** are down. No regression vs the old
+  HTTP-only path. (Tip: in vMix, the Web Controller "Enabled" toggle is the
+  master switch for *both* APIs — leave it on and tick **TCP API: Enabled**.)
+- **The connection card shows the live transport** — `vMix · TCP (real-time)`
+  or `vMix · HTTP (fallback)` — so it's clear how it's actually connected.
+
+### Stream Deck
+- **Ableton clip feedback.** A "fire-clip" key turns **red** while *its* clip
+  is the one playing on that track (driven live by Ableton's playing-slot
+  push).
+- **Offline marker on the physical deck.** A shortcut pinned to a connection
+  that isn't actively connected (e.g. a disabled instance) now shows the
+  offline marker on the deck too — previously it appeared only in the web
+  editor preview.
+
+### Logs
+- **Ableton commands now appear in the client log** (clip launches, transport,
+  tempo…), under the same `command` scope and format as vMix/OBS. They were
+  silently missing because the Ableton page bypassed the logged command hook.
+
+### Nexus Cross (satellite)
+- **"Open GUI" button** next to Connect/Disconnect — opens the server's web
+  interface in the default browser (handy straight from the satellite machine).
+- **Cleaner status line** — a past connection error (with the server IP) no
+  longer lingers above the button after a successful connect.
+
 ## 0.1.19 — main app · 0.1.6 — Nexus Cross
 
 Multi-step buttons, on-screen decks made solid, and a much snappier,
