@@ -298,18 +298,24 @@ class ScreendeckServerImpl {
     socket.on("data", (chunk) => this.onData(conn, chunk));
     socket.on("error", () => this.dropConn(conn));
     socket.on("close", () => this.dropConn(conn));
-    // Greet with the protocol handshake — the client waits for BEGIN
-    // before registering its surface(s) and checks ApiVersion for
-    // compatibility. The companion-satellite client (which ScreenDeck
-    // uses) requires `ApiVersion >= 1.7.0` (MINIMUM_PROTOCOL_VERSION) or
-    // it reports the server as unsupported and never marks "Connected".
-    // It also EXPECTS a follow-up CAPS message once `ApiVersion >= 1.10.0`
-    // — which we don't implement (classic Simple mode only). So we sit in
-    // the safe window [1.7.0, 1.10.0): high enough to be supported, low
-    // enough that the client completes the connection right after BEGIN
-    // without waiting on CAPS.
-    this.write(conn, "BEGIN CompanionVersion=nexus ApiVersion=1.9.0\n");
-    log.info(`→ sent BEGIN (ApiVersion 1.9.0) to ${conn.remoteAddr ?? "?"}`);
+    // Protocol handshake. The satellite client gates registration on our
+    // advertised ApiVersion (see bitfocus/companion-satellite client.ts):
+    //   • < 1.7.0 (MINIMUM_PROTOCOL_VERSION) → "unsupported": it closes the
+    //     socket silently and never registers.
+    //   • >= 1.10.0 → it DEFERS its internal "connected" event until it
+    //     receives a CAPS line, and only THEN does it (re)send ADD-DEVICE
+    //     for each surface.
+    // We advertise 1.10.0 and IMMEDIATELY follow with CAPS — the modern
+    // handshake. The earlier "1.9.0, no CAPS" relied on the client's legacy
+    // "complete immediately" branch (taken only for ApiVersion < 1.10.0);
+    // recent clients (incl. ScreenDeck) no longer take it, so a reconnect
+    // connected, got BEGIN, then sat silent and never re-registered — the
+    // deck stayed lost until a full server restart. Sending CAPS fixes the
+    // re-registration on every (re)connect. We expose no optional features,
+    // and an all-false CAPS still completes the client's handshake.
+    this.write(conn, "BEGIN CompanionVersion=nexus ApiVersion=1.10.0\n");
+    this.write(conn, "CAPS SUBSCRIPTIONS=0 NONSQUARE=0\n");
+    log.info(`→ sent BEGIN 1.10.0 + CAPS to ${conn.remoteAddr ?? "?"}`);
   }
 
   private dropConn(conn: Conn): void {
