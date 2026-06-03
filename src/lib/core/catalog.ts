@@ -7,12 +7,7 @@ import {
   INTERNAL_KIND,
   getInternalAction,
 } from "./internal-actions";
-import {
-  getStreamdeckStore,
-  upsertLayout,
-  maxDeckGeometry,
-} from "@/lib/db/streamdeck";
-import { streamdeckDriver } from "@/lib/streamdeck/driver";
+import { getStreamdeckStore, upsertLayout } from "@/lib/db/streamdeck";
 
 /** Optional runtime context for a command run — e.g. which deck a press
  *  originated from, needed by internal actions like "go to page". */
@@ -306,11 +301,16 @@ async function runInternalAction(
       ...target,
       deviceSerials: [...new Set([...target.deviceSerials, serial])],
     });
-    const devices = await streamdeckDriver.listDevices();
-    const path = devices.find((d) => d.serialNumber === serial)?.path;
-    if (path) {
-      await streamdeckDriver.pushLayout(path, target.bindings, maxDeckGeometry());
-    }
+    // Paint the deck immediately WITH feedback (tally / offline / state) in a
+    // single pass, and clear any keys the previous page filled but this one
+    // doesn't. Without this, go-to-page only pushed STATIC faces and feedback
+    // appeared on the next variable tick (up to the 5 s status poll) — the
+    // visible "feedback loads slowly after switching pages". The pressing
+    // deck's handle is live (it just sent this press) so no HID reopen needed.
+    const { feedbackCoordinator } = await import(
+      "@/lib/streamdeck/feedback-coordinator"
+    );
+    await feedbackCoordinator.renderLayout(target.id);
     cmdLog.info(`internal goto-page "${target.label}" on ${serial}`);
     return { ok: true, data: { page: target.id } };
   }

@@ -197,6 +197,43 @@ class CoordinatorImpl {
     }, 150);
   }
 
+  /**
+   * Immediate, single-pass paint of ONE layout's decks WITH feedback applied —
+   * for explicit, user-driven switches (load-to-deck, go-to-page). Walks every
+   * cell of the max canvas: a bound cell renders its face + live feedback
+   * override, an empty cell clears (so keys from the page we left don't
+   * linger). This is what makes the FINAL faces — tally/offline/state colours
+   * included — appear at once, instead of static faces that only gain feedback
+   * on the next variable tick (up to the 5 s status poll for go-to-page).
+   * Not debounced and not gated on `booted`: a deliberate action paints now.
+   */
+  async renderLayout(layoutId: string): Promise<void> {
+    const status = await streamdeckDriver.status();
+    if (status.state !== "ready") return;
+    const devices = await streamdeckDriver.listDevices();
+    if (devices.length === 0) return;
+    const layout = peekStreamdeckStore().layouts.find((l) => l.id === layoutId);
+    if (!layout || layout.deviceSerials.length === 0) return;
+    const paths = layout.deviceSerials
+      .map((serial) => devices.find((d) => d.serialNumber === serial)?.path)
+      .filter((p): p is string => !!p);
+    if (paths.length === 0) return;
+    const vars = buildVarsByConnection();
+    const kinds = buildKindIndex();
+    const connected = buildConnectedIndex();
+    const geom = maxDeckGeometry();
+    const total = geom.cols * geom.rows;
+    for (let layoutIndex = 0; layoutIndex < total; layoutIndex++) {
+      const binding = layout.bindings[layoutIndex];
+      const override = binding
+        ? evaluateFeedback(binding, vars, kinds, connected) ?? undefined
+        : undefined;
+      for (const path of paths) {
+        streamdeckDriver.renderLayoutKey(path, layoutIndex, geom, binding, override);
+      }
+    }
+  }
+
   dispose(): void {
     this.unsubVariables?.();
     this.unsubVariables = null;

@@ -144,5 +144,17 @@ export async function POST(req: NextRequest) {
       )
     )
   );
+  // pushLayout painted STATIC faces (and reopened the HID handle as insurance
+  // against another app having grabbed the deck). Immediately apply live
+  // feedback in the same breath — tally / offline / state colours — so a
+  // "Load to deck" shows its FINAL faces at once instead of static ones that
+  // only gain feedback ~150 ms later on the layouts-route refresh (or the next
+  // variable tick). renderLayout's renders supersede the just-queued static
+  // ones per key (latest-writer-wins in the driver's debounce).
+  void import("@/lib/streamdeck/feedback-coordinator")
+    .then((m) => m.feedbackCoordinator.renderLayout(layout.id))
+    .catch(() => {
+      /* coordinator unavailable — static faces already painted */
+    });
   return NextResponse.json({ ok: true });
 }
