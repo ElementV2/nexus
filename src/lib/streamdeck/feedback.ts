@@ -90,6 +90,10 @@ export function evaluateFeedback(
   const kind = binding.preset.kind;
   const steps = binding.preset.steps;
   if (steps.length === 0) return null;
+  // Internal actions (delay, go-to-page) target no device — there's no
+  // connection that could be "offline" (if the server were down the whole
+  // app would be), so never show the offline marker for them.
+  if (kind === "internal") return null;
   // The button's primary pin drives the offline marker.
   const pinned = steps[0].connectionId ?? binding.connectionId;
 

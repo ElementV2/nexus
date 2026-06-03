@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Sidebar, MobileSidebar, BurgerButton } from "@/components/layout/sidebar";
 import { LogCapture } from "@/components/layout/log-capture";
+import { ServerStatusOverlay } from "@/components/layout/server-status-overlay";
 import { VmixProvider } from "@/providers/vmix-provider";
 import { FloatingPlayer } from "@/components/stream/floating-player";
 import { ConfirmProvider } from "@/components/sw";
@@ -35,6 +36,7 @@ export default function DashboardLayout({
     <VmixProvider>
     <ConfirmProvider>
       <LogCapture />
+      <ServerStatusOverlay />
       {/* Skip-to-content target for keyboard users: they otherwise have
           to tab past 12 sidebar items before reaching the page body. */}
       <a

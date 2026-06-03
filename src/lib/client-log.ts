@@ -147,6 +147,7 @@ function installFetchCapture(): void {
     const skip =
       path.includes("/command") ||
       path.startsWith("/api/stream") ||
+      path.startsWith("/api/health") || // 3s heartbeat — would flood the log
       path.startsWith("/_next");
     const t0 = performance.now();
     try {
