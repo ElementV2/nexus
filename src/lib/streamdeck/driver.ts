@@ -362,6 +362,15 @@ class DriverImpl {
       // A virtual surface (dis)appeared — same signal as USB hotplug /
       // a satellite (re)announce, so reuse the debounced broadcast.
       this.screendeckChangeUnsub = screendeckServer.onChange(() => {
+        // A surface that just (re)registered is a FRESH, blank panel — but
+        // our per-key face cache survives (same deviceId across a reconnect),
+        // so the coordinator would skip every "unchanged" key and leave the
+        // new surface blank/stale (presses still work; only the display was
+        // wrong). Drop the face cache for all virtual decks so the next
+        // recompute repaints every key. Mirrors invalidateSatellite().
+        screendeckServer.forEachDevice((d) =>
+          this.invalidateFaceCache(`screendeck:${d.deviceId}`)
+        );
         this.notifyDevicesChanged();
       });
     }
