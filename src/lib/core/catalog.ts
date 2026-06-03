@@ -2,6 +2,23 @@ import { getKind, listKinds } from "./registry";
 import { connectionManager } from "./connection-manager";
 import { peekPreferences } from "@/lib/db/preferences";
 import { createLogger } from "./logger";
+import {
+  INTERNAL_ACTIONS,
+  INTERNAL_KIND,
+  getInternalAction,
+} from "./internal-actions";
+import {
+  getStreamdeckStore,
+  upsertLayout,
+  maxDeckGeometry,
+} from "@/lib/db/streamdeck";
+import { streamdeckDriver } from "@/lib/streamdeck/driver";
+
+/** Optional runtime context for a command run — e.g. which deck a press
+ *  originated from, needed by internal actions like "go to page". */
+export interface RunContext {
+  deckSerial?: string;
+}
 import type {
   ActionDefinition,
   PresetDefinition,
@@ -48,6 +65,12 @@ export function listActions(): CatalogActionEntry[] {
       out.push({ globalId: `${k.kind}:${a.id}`, kind: k.kind, def: a });
     }
   }
+  // App-level "internal" actions (delay, goto-page) — not tied to any device
+  // kind, but surfaced in the same catalog so the browser + inspector list
+  // them and runAction can execute them.
+  for (const a of INTERNAL_ACTIONS) {
+    out.push({ globalId: `${INTERNAL_KIND}:${a.id}`, kind: INTERNAL_KIND, def: a });
+  }
   return out;
 }
 
@@ -76,6 +99,10 @@ function actionIndexFor(
 export function getAction(globalId: string): CatalogActionEntry | undefined {
   const [kind, id] = splitGlobalId(globalId);
   if (!kind || !id) return undefined;
+  if (kind === INTERNAL_KIND) {
+    const def = getInternalAction(id);
+    return def ? { globalId, kind, def } : undefined;
+  }
   const k = getKind(kind);
   if (!k?.actions) return undefined;
   const def = actionIndexFor(k.actions).get(id);
@@ -191,11 +218,16 @@ export async function runAction(
   globalActionId: string,
   options: Record<string, unknown>,
   connectionId?: string,
-  allowDefault = true
+  allowDefault = true,
+  context?: RunContext
 ): Promise<ActionRunResult> {
   const entry = getAction(globalActionId);
   if (!entry) {
     return { ok: false, error: `Unknown action "${globalActionId}"` };
+  }
+  // Internal actions (delay, goto-page) run app-side, with no broker.
+  if (entry.kind === INTERNAL_KIND) {
+    return runInternalAction(entry.def.id, options ?? {}, context);
   }
   const target = resolveConnectionId(entry.kind, connectionId, allowDefault);
   if (!target) {
@@ -240,6 +272,52 @@ export async function runAction(
 }
 
 /**
+ * Execute an app-level "internal" action (no device broker):
+ *   • delay     — await N ms (sequences "A, wait, B" on one key).
+ *   • goto-page — switch the deck the press came from to another page,
+ *                 by re-pairing its serial to the target layout + pushing.
+ */
+async function runInternalAction(
+  id: string,
+  options: Record<string, unknown>,
+  context?: RunContext
+): Promise<ActionRunResult> {
+  if (id === "delay") {
+    const ms = Math.max(0, Math.min(600000, Number(options.ms) || 0));
+    cmdLog.info(`internal delay ${ms}ms`);
+    if (ms > 0) await new Promise((r) => setTimeout(r, ms));
+    return { ok: true, data: { delayed: ms } };
+  }
+  if (id === "goto-page") {
+    const serial = context?.deckSerial;
+    if (!serial) {
+      return { ok: false, error: "Go to page: no deck context (fire from a deck)" };
+    }
+    const page = String(options.page ?? "").trim();
+    if (!page) return { ok: false, error: "Go to page: no page chosen" };
+    const store = getStreamdeckStore();
+    const target = store.layouts.find(
+      (l) => l.id === page || l.label.toLowerCase() === page.toLowerCase()
+    );
+    if (!target) return { ok: false, error: `Go to page: no page "${page}"` };
+    // Re-pair this deck to the target page (applyLayoutUpsert claims the
+    // serial, releasing it from whatever page it was on), then paint it.
+    upsertLayout({
+      ...target,
+      deviceSerials: [...new Set([...target.deviceSerials, serial])],
+    });
+    const devices = await streamdeckDriver.listDevices();
+    const path = devices.find((d) => d.serialNumber === serial)?.path;
+    if (path) {
+      await streamdeckDriver.pushLayout(path, target.bindings, maxDeckGeometry());
+    }
+    cmdLog.info(`internal goto-page "${target.label}" on ${serial}`);
+    return { ok: true, data: { page: target.id } };
+  }
+  return { ok: false, error: `Unknown internal action "${id}"` };
+}
+
+/**
  * Run an explicit list of steps against `kind`'s first enabled
  * connection (or `connectionId` if pinned). Used by:
  *   • Stream Deck key presses — feeds `binding.preset.steps`
@@ -269,7 +347,8 @@ export async function runSteps(
   }>,
   kind: string,
   connectionId?: string,
-  allowDefault = true
+  allowDefault = true,
+  context?: RunContext
 ): Promise<{ results: ActionRunResult[] }> {
   const results: ActionRunResult[] = [];
   for (const step of steps) {
@@ -286,7 +365,13 @@ export async function runSteps(
     // runAction resolves the kind default. We let runAction do the
     // final resolution so the kind match is validated there.
     const pin = step.connectionId ?? connectionId;
-    const r = await runAction(stepGlobalId, step.options ?? {}, pin, allowDefault);
+    const r = await runAction(
+      stepGlobalId,
+      step.options ?? {},
+      pin,
+      allowDefault,
+      context
+    );
     results.push(r);
     if (!r.ok) break;
   }

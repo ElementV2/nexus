@@ -83,7 +83,10 @@ class PressDispatcherImpl {
         binding.preset.steps,
         binding.preset.kind,
         binding.connectionId,
-        false
+        false,
+        // Pass the originating deck so an internal "go to page" step knows
+        // which surface to switch.
+        { deckSerial: serial }
       )
         .then(({ results }) => {
           // Surface failed steps. A deck press that silently no-ops

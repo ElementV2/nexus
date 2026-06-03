@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Eyebrow } from "@/components/sw";
 import { X } from "lucide-react";
 import type { DeckBinding, DeckStep } from "@/lib/db/streamdeck";
@@ -51,6 +52,8 @@ export function KeyInspector({
   // kinds' snapshots.
   const kind = binding?.preset.kind ?? null;
   const inputSuggestions = useVmixInputSuggestions(kind === "vmix");
+  // Index of the step currently being dragged (HTML5 DnD reorder).
+  const [dragStep, setDragStep] = useState<number | null>(null);
 
   if (keyIndex === null) {
     return (
@@ -197,6 +200,15 @@ export function KeyInspector({
     if (j < 0 || j >= preset.steps.length) return;
     const nextSteps = [...preset.steps];
     [nextSteps[stepIdx], nextSteps[j]] = [nextSteps[j], nextSteps[stepIdx]];
+    onChange({ ...binding, preset: { ...preset, steps: nextSteps } });
+  };
+  // Drag-reorder: move a step from one position to another (insert, not
+  // swap) so dragging across several slots feels natural.
+  const moveStepTo = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0) return;
+    const nextSteps = [...preset.steps];
+    const [moved] = nextSteps.splice(from, 1);
+    nextSteps.splice(to, 0, moved);
     onChange({ ...binding, preset: { ...preset, steps: nextSteps } });
   };
   const addAction = (entry: ActionCatalogEntry) => {
@@ -350,17 +362,51 @@ export function KeyInspector({
             : `${sKind}:${step.actionId}`;
           const def = actions?.find((a) => a.globalId === globalId);
           const stepInstances = connections.filter((c) => c.kind === sKind);
+          const multi = preset.steps.length > 1;
           return (
             <div
               key={idx}
+              onDragOver={(e) => {
+                if (dragStep !== null && dragStep !== idx) e.preventDefault();
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragStep !== null) moveStepTo(dragStep, idx);
+                setDragStep(null);
+              }}
               style={{
                 padding: 8,
                 background: "var(--card)",
-                border: "1px solid var(--line)",
+                border:
+                  dragStep !== null && dragStep !== idx
+                    ? "1px dashed var(--amber)"
+                    : "1px solid var(--line)",
+                opacity: dragStep === idx ? 0.5 : 1,
               }}
               className="space-y-2"
             >
               <div className="flex items-center gap-2">
+                {/* Drag handle — reorder steps by dragging (multi-step only).
+                    Only the handle is draggable so option inputs stay
+                    selectable. */}
+                {multi && (
+                  <span
+                    draggable
+                    onDragStart={() => setDragStep(idx)}
+                    onDragEnd={() => setDragStep(null)}
+                    title="Drag to reorder"
+                    style={{
+                      cursor: "grab",
+                      color: "var(--sub)",
+                      fontSize: 12,
+                      lineHeight: 1,
+                      userSelect: "none",
+                      flexShrink: 0,
+                    }}
+                  >
+                    ⠿
+                  </span>
+                )}
                 <span
                   className="font-mono uppercase"
                   style={{
