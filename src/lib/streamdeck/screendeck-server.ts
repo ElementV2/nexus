@@ -267,10 +267,10 @@ class ScreendeckServerImpl {
     const entry = this.devices.get(deviceId);
     if (!entry) return;
     const b64 = rgb.toString("base64");
-    const key = keyToCoord(keyIndex, entry.dev.cols);
+    // Outbound KEY is a FLAT index (ScreenDeck parseInts it) — see coordToKey.
     this.write(
       entry.conn,
-      `KEY-STATE DEVICEID=${deviceId} KEY=${key} BITMAP=${b64}\n`
+      `KEY-STATE DEVICEID=${deviceId} KEY=${keyIndex} BITMAP=${b64}\n`
     );
   }
 
@@ -279,18 +279,17 @@ class ScreendeckServerImpl {
   clearKey(deviceId: string, keyIndex: number): void {
     const entry = this.devices.get(deviceId);
     if (!entry) return;
-    const key = keyToCoord(keyIndex, entry.dev.cols);
     const size = entry.dev.bitmapSize;
     if (size > 0) {
       const black = Buffer.alloc(size * size * 3).toString("base64");
       this.write(
         entry.conn,
-        `KEY-STATE DEVICEID=${deviceId} KEY=${key} BITMAP=${black}\n`
+        `KEY-STATE DEVICEID=${deviceId} KEY=${keyIndex} BITMAP=${black}\n`
       );
     } else {
       this.write(
         entry.conn,
-        `KEY-STATE DEVICEID=${deviceId} KEY=${key} COLOR=#000000\n`
+        `KEY-STATE DEVICEID=${deviceId} KEY=${keyIndex} COLOR=#000000\n`
       );
     }
   }
@@ -579,17 +578,14 @@ class ScreendeckServerImpl {
  * (`KEY=0`) or double-quoted with spaces (`PRODUCT_NAME="Stream Deck"`).
  */
 /**
- * The satellite protocol references a key as `row/col` (e.g. "0/0", "1/3")
- * since the surface-manifest era — which is what ScreenDeck sends/expects.
- * Our driver works in FLAT key indices, so convert at the protocol edge.
+ * ScreenDeck's protocol is ASYMMETRIC on the KEY field (verified on the
+ * wire): it SENDS presses as "row/col" (e.g. "0/0", "1/3") but EXPECTS a
+ * FLAT index on outbound KEY-STATE (it does parseInt on it, so "0/7" would
+ * be read as 0). So we parse inbound as row/col and emit outbound as flat.
+ *
+ * Parse a protocol KEY value ("row/col" or a legacy flat index) to a flat
+ * index using the device's column count. Returns NaN if unparseable.
  */
-function keyToCoord(keyIndex: number, cols: number): string {
-  const c = cols > 0 ? cols : 1;
-  return `${Math.floor(keyIndex / c)}/${keyIndex % c}`;
-}
-
-/** Parse a protocol KEY value ("row/col" or a legacy flat index) to a flat
- *  index using the device's column count. Returns NaN if unparseable. */
 function coordToKey(raw: string | undefined, cols: number): number {
   if (!raw) return NaN;
   if (raw.includes("/")) {
