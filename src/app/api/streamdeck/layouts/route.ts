@@ -23,12 +23,21 @@ export async function GET() {
 }
 
 /**
- * Upsert a layout. Body: `{ layout: DeckLayout }`. The whole layout
- * is replaced — partial updates (e.g. single binding) ride through
- * the editor by sending the full object back.
+ * Upsert a layout. Body: `{ layout: DeckLayout, pairDeviceSerials?: string[] }`.
+ * The whole layout is replaced — partial updates (e.g. single binding) ride
+ * through the editor by sending the full object back.
+ *
+ * Pairing (`deviceSerials` — which decks show this page) is RUNTIME state
+ * OWNED BY THE SERVER: it's set by "load to deck" AND mutated at runtime by
+ * the internal "go to page" action. A plain content save from the editor must
+ * NOT clobber it, or editing a page the deck switched to via go-to-page would
+ * silently un-pair it — new keys would stop reaching the deck (the editor's
+ * draft has a stale, empty `deviceSerials`). So pairing only changes when the
+ * caller sends an EXPLICIT `pairDeviceSerials`; otherwise we preserve the
+ * server's current pairing and treat the PUT as content-only.
  */
 export async function PUT(req: NextRequest) {
-  let body: { layout?: unknown };
+  let body: { layout?: unknown; pairDeviceSerials?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -44,14 +53,20 @@ export async function PUT(req: NextRequest) {
       { status: 400 }
     );
   }
+  const existing = getStreamdeckStore().layouts.find((x) => x.id === l.id);
+  const pairDeviceSerials = Array.isArray(body.pairDeviceSerials)
+    ? (body.pairDeviceSerials.filter((s) => typeof s === "string") as string[])
+    : undefined;
   // normalizeLayout coerces pairing into `deviceSerials: string[]` and
-  // migrates a legacy single `deviceSerial` from older clients.
+  // migrates a legacy single `deviceSerial` from older clients. Pairing is
+  // taken from the explicit `pairDeviceSerials`, else preserved from the
+  // server's existing layout, else empty for a brand-new one — never from the
+  // (possibly stale) editor draft's `deviceSerials`.
   const cleaned = normalizeLayout({
     id: l.id,
     model: l.model,
     label: typeof l.label === "string" && l.label.trim() ? l.label : l.id,
-    deviceSerials: Array.isArray(l.deviceSerials) ? l.deviceSerials : [],
-    deviceSerial: (l as { deviceSerial?: string }).deviceSerial,
+    deviceSerials: pairDeviceSerials ?? existing?.deviceSerials ?? [],
     bindings:
       l.bindings && typeof l.bindings === "object"
         ? (l.bindings as DeckLayout["bindings"])

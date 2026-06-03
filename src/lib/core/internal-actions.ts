@@ -40,16 +40,20 @@ export const INTERNAL_ACTIONS: ActionDefinition[] = [
     id: "goto-page",
     label: "Go to page",
     category: "Internal",
-    description:
-      "Switch the deck this button is on to another page (by name or id).",
+    description: "Switch the deck this button is on to another page.",
     bgcolor: "#5856d6",
     fgcolor: "#ffffff",
     options: [
       {
+        // Rendered as a dropdown of the operator's pages — the editor injects
+        // the live layout list as `choices` (this static list is empty since
+        // pages aren't known here). The STORED value is the layout id, so the
+        // link survives a page rename; the runner still resolves id-or-name
+        // for hand-written / imported configs.
         id: "page",
-        type: "string",
-        label: "Page (name or id)",
-        placeholder: "Page name",
+        type: "dropdown",
+        label: "Page",
+        choices: [],
       },
     ],
     toCommand: (o) => ({ internal: "goto-page", page: String(o.page ?? "") }),

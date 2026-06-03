@@ -197,15 +197,28 @@ export function InspectorOptionField({
     );
   }
   if (def.type === "dropdown") {
+    const cur = typeof value === "string" ? value : String(value ?? "");
+    const choices = def.choices ?? [];
+    // A freshly-added step (or a value pointing at a since-deleted choice, e.g.
+    // a go-to-page target page that was removed) has no matching option. A
+    // native <select> would silently DISPLAY its first option while the stored
+    // value stays empty — so show an explicit placeholder and keep the select
+    // empty until the operator actually picks, instead of a phantom selection.
+    const matched = choices.some((c) => c.id === cur);
     return (
       <div className="flex items-center gap-2">
         <span style={labelStyle}>{def.label}</span>
         <select
-          value={typeof value === "string" ? value : String(value ?? "")}
+          value={matched ? cur : ""}
           onChange={(e) => onChange(e.target.value)}
           style={inputStyle}
         >
-          {(def.choices ?? []).map((c) => (
+          {!matched && (
+            <option value="">
+              {cur ? "⚠ missing — pick one" : "— select —"}
+            </option>
+          )}
+          {choices.map((c) => (
             <option key={c.id} value={c.id}>
               {c.label}
             </option>

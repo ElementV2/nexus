@@ -352,10 +352,12 @@ export default function StreamdeckPage() {
       const next: DeckLayout = { ...draft, deviceSerials };
       setDraft(next);
       try {
+        // Explicit pairing change → send `pairDeviceSerials` so the server
+        // applies it (a plain content save would preserve the old pairing).
         const res = await fetch("/api/streamdeck/layouts", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ layout: next }),
+          body: JSON.stringify({ layout: next, pairDeviceSerials: deviceSerials }),
         });
         if (res.ok) {
           const json = (await res.json()) as {
@@ -380,6 +382,24 @@ export default function StreamdeckPage() {
     },
     [draft]
   );
+
+  // Keep the edited draft's deviceSerials aligned with the server's truth
+  // after a save. Pairing is server-owned — the runtime "go to page" action
+  // can move a deck onto the page we're editing without the editor knowing.
+  // Without this resync the draft's stale (empty) pairing would make the live
+  // key-push skip the deck and the pairing dot read wrong. Only touches
+  // deviceSerials, never user-edited content, so it can't stomp an edit.
+  const syncDraftPairing = useCallback((layouts: DeckLayout[]) => {
+    setDraft((d) => {
+      if (!d) return d;
+      const fresh = layouts.find((x) => x.id === d.id);
+      if (!fresh) return d;
+      const same =
+        fresh.deviceSerials.length === d.deviceSerials.length &&
+        fresh.deviceSerials.every((s, i) => s === d.deviceSerials[i]);
+      return same ? d : { ...d, deviceSerials: fresh.deviceSerials };
+    });
+  }, []);
 
   // Auto-pair convenience: when exactly one device is connected and
   // the current layout has no pairing AND no other layout claims that
@@ -439,6 +459,7 @@ export default function StreamdeckPage() {
           setData((cur) =>
             cur ? { ...cur, layouts: json.store.layouts } : cur
           );
+          syncDraftPairing(json.store.layouts);
           setDirty(false);
           // Burst committed → the next edit starts a new undo step.
           editBurstActive.current = false;
@@ -459,7 +480,7 @@ export default function StreamdeckPage() {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [draft, dirty, retryNonce]);
+  }, [draft, dirty, retryNonce, syncDraftPairing]);
 
   // beforeunload safety net: if a save is pending when the user
   // closes / refreshes the tab, fire a last-chance request with
@@ -860,21 +881,38 @@ export default function StreamdeckPage() {
   );
 
   // Persist a single layout immediately (used by rename + import).
-  const persistLayout = useCallback(async (layout: DeckLayout) => {
-    try {
-      const res = await fetch("/api/streamdeck/layouts", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ layout }),
-      });
-      if (res.ok) {
-        const json = (await res.json()) as { store: { layouts: DeckLayout[] } };
-        setData((cur) => (cur ? { ...cur, layouts: json.store.layouts } : cur));
+  // Persist a layout. By default this is a CONTENT save and the server
+  // preserves the page's pairing (runtime go-to-page can move a deck onto a
+  // page the editor doesn't know about — its draft would otherwise clobber
+  // that pairing back to empty). Pass `pairDeviceSerials` ONLY for an explicit
+  // pairing change (load-to-deck, clear).
+  const persistLayout = useCallback(
+    async (layout: DeckLayout, pairDeviceSerials?: string[]) => {
+      try {
+        const res = await fetch("/api/streamdeck/layouts", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            pairDeviceSerials !== undefined
+              ? { layout, pairDeviceSerials }
+              : { layout }
+          ),
+        });
+        if (res.ok) {
+          const json = (await res.json()) as {
+            store: { layouts: DeckLayout[] };
+          };
+          setData((cur) =>
+            cur ? { ...cur, layouts: json.store.layouts } : cur
+          );
+          syncDraftPairing(json.store.layouts);
+        }
+      } catch {
+        /* surfaced via save chip on next selected-page edit */
       }
-    } catch {
-      /* surfaced via save chip on next selected-page edit */
-    }
-  }, []);
+    },
+    [syncDraftPairing]
+  );
 
   // Rename any page (selected or not) from the rail.
   const renameLayout = useCallback(
@@ -1238,6 +1276,10 @@ export default function StreamdeckPage() {
                   }}
                   canPaste={clipboard !== null}
                   fire={fire}
+                  pageChoices={data.layouts.map((l) => ({
+                    id: l.id,
+                    label: l.label || l.id,
+                  }))}
                 />
               ) : (
                 <PresetBrowserPanel mode="sidebar" />
@@ -1293,7 +1335,7 @@ export default function StreamdeckPage() {
               deviceSerials,
               model: detectedModel,
             };
-            await persistLayout(paired);
+            await persistLayout(paired, deviceSerials);
             if (selectedId === layoutId) {
               setDraft((d) =>
                 d ? { ...d, deviceSerials, model: detectedModel } : d

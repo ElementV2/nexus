@@ -31,6 +31,7 @@ export function KeyInspector({
   onPaste,
   canPaste,
   fire,
+  pageChoices,
 }: {
   keyIndex: number | null;
   binding: DeckBinding | undefined;
@@ -44,6 +45,10 @@ export function KeyInspector({
   onPaste: () => void;
   canPaste: boolean;
   fire: FireState;
+  /** Live page list for the internal "Go to page" action's dropdown.
+   *  `id` is the layout id (stored on the step → survives renames),
+   *  `label` the page name shown. */
+  pageChoices: Array<{ id: string; label: string }>;
 }) {
   const actions = useActionCatalog();
   // Quick-pick suggestions for fields the operator typically picks
@@ -528,10 +533,18 @@ export function KeyInspector({
                       const cur = (step.options ?? {})[opt.showWhen.option];
                       return String(cur ?? "") === opt.showWhen.equals;
                     })
-                    .map((opt) => (
+                    .map((opt) => {
+                      // The internal "Go to page" page field is a dropdown
+                      // whose choices are the operator's live pages (the
+                      // action ships none — pages aren't known server-side).
+                      const optDef =
+                        globalId === "internal:goto-page" && opt.id === "page"
+                          ? { ...opt, type: "dropdown" as const, choices: pageChoices }
+                          : opt;
+                      return (
                     <InspectorOptionField
                       key={opt.id}
-                      def={opt}
+                      def={optDef}
                       value={(step.options ?? {})[opt.id]}
                       onChange={(v) => patchStepOptions(idx, { [opt.id]: v })}
                       // vMix inputs accept a number, a title, or a
@@ -545,7 +558,8 @@ export function KeyInspector({
                           : undefined
                       }
                     />
-                  ))}
+                      );
+                    })}
                 </div>
               ) : def ? (
                 <div style={{ fontSize: 10, color: "var(--muted)" }}>
