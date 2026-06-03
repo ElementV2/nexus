@@ -16,6 +16,59 @@ updater compares against the version embedded in its own installer asset
 name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
 shared release tag.
 
+## 0.1.19 — main app · 0.1.6 — Nexus Cross
+
+Multi-step buttons, on-screen decks made solid, and a much snappier,
+quieter editor.
+
+### Stream Deck — buttons & editor
+- **Internal actions.** New device-less steps that run app-side: **Delay**
+  (wait N ms between two actions on one key) and **Go to page** (switch the
+  deck the press came from to another page). Go to page is a **dropdown of
+  your pages** and stores the page by id, so renaming the page keeps the
+  link working.
+- **Multi-step editing.** Drag-reorder a button's actions by the handle,
+  **duplicate** an action, and **enable/disable** any action with a switch —
+  without deleting it.
+- **Deck manager.** A gear opens a dialog listing every deck (USB / remote /
+  ScreenDeck) with its serial, the page currently loaded on it, and an
+  editable **friendly name** — so four identical decks are finally telling
+  apart. Names persist by serial across reconnects.
+- **Editor always shows the full XL canvas.** Authoring no longer shrinks to
+  the connected deck's size; a smaller deck shows the top-left sub-rectangle.
+- **Pairing survives a runtime page switch.** Dragging shortcuts onto a page
+  a deck had switched to via Go to page no longer silently un-paired it, so
+  the edits reach the deck.
+
+### Stream Deck — on-screen / satellite decks
+- **Solid handshake & recovery.** ScreenDeck / Companion-Satellite clients
+  now re-register reliably (modern handshake), the listener retries its
+  bind, and dormant clients are auto-recovered by a per-connection watchdog —
+  no more restarting the server to get decks back.
+- **Correct presses & rendering.** Fixed key mapping (row/col on the way in,
+  flat index on the way out), full repaint when a surface (re)registers, and
+  rendering/press both use the max 8×4 grid so faces land on the right keys
+  of any deck size.
+
+### Catalog
+- **vMix catalog complete to the v29 reference**, with the whole app now
+  driven by **one coloured action list per device** — the duplicate
+  "preset" mirrors are gone (only genuine multi-step presets remain),
+  trimming well over a thousand lines of dead config.
+
+### Reliability & polish
+- **Server-down curtain.** A full-screen "server disconnected — reconnecting"
+  overlay drops over the whole app (launcher and browser) when the local
+  server crashes or is stopped — now within ~1–2s instead of ~7s.
+- **Feedback paints in one pass.** Loading a page or switching via Go to page
+  now shows the final faces *with* tally/offline/state feedback at once,
+  instead of static faces that gained feedback a beat later.
+- **Quieter, clearer signals.** Browser tiles are drag-only (a click never
+  fires an action — testing stays in the shortcut's Test button), internal
+  actions no longer show an impossible "offline" marker, the health-check
+  heartbeat no longer spams Server Activity, and every command dispatched is
+  logged server-side. Fixed a stray passive-listener console warning.
+
 ## 0.1.18 — main app · 0.1.6 — Nexus Cross
 
 On-screen virtual decks, plus a real diagnostics trail.
