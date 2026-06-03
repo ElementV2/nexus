@@ -68,6 +68,18 @@ const STALE_MS = 16_000;
 // just-killed previous instance, or a real Companion). Keeps the satellite
 // server self-healing instead of dying silently on the first conflict.
 const REBIND_MS = 2_000;
+// Auto-recovery for the satellite client's reconnect quirk: a client that
+// connects to an ALREADY-running server (no connection-refused retry phase)
+// can stay dormant — it answers our PINGs but never (re)sends ADD-DEVICE.
+// The only thing that unsticks it is experiencing the server going down→up
+// (what a manual restart does). So if clients are connected but NO surface
+// is registered for this long, we bounce the listener to force exactly that
+// transition. Guarded to fire ONLY when zero devices are registered, so a
+// working deck is never disrupted. Capped so a genuinely-dead client can't
+// loop us forever.
+const DORMANT_RECOVER_MS = 6_000;
+const BOUNCE_GAP_MS = 2_000;
+const MAX_BOUNCES = 5;
 
 const log = createLogger("screendeck");
 
@@ -85,6 +97,10 @@ class ScreendeckServerImpl {
    *  transient bind failure self-heals instead of leaving the server dead. */
   private desiredPort: number | null = null;
   private rebindTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When connected-but-no-surfaces first observed (drives auto-recovery). */
+  private dormantSince: number | null = null;
+  /** Consecutive recovery bounces with no successful registration; capped. */
+  private bounceCount = 0;
 
   // ─────────────────────────── lifecycle ──────────────────────────────
 
@@ -447,6 +463,10 @@ class ScreendeckServerImpl {
     };
     this.devices.set(deviceId, { dev, conn });
     conn.deviceIds.add(deviceId);
+    // A surface registered → healthy again: clear the dormancy/auto-recovery
+    // state so the bounce budget resets for any future stuck episode.
+    this.dormantSince = null;
+    this.bounceCount = 0;
     this.write(conn, `ADD-DEVICE OK DEVICEID=${deviceId}\n`);
     log.info(
       `surface registered: "${dev.productName}" ${cols}x${rows} ` +
@@ -480,6 +500,51 @@ class ScreendeckServerImpl {
       }
       this.write(conn, "PING nexus\n");
     }
+    this.maybeRecoverDormant(now);
+  }
+
+  /**
+   * Detect the satellite reconnect quirk and self-heal: if clients are
+   * connected but NONE has registered a surface, the client is dormant
+   * (connected on the first try, so it never did a full re-handshake). Only
+   * a server down→up transition unsticks it — so bounce the listener. Fires
+   * ONLY at zero registered devices (a working deck is never disrupted) and
+   * is capped to avoid an endless loop against a truly dead client.
+   */
+  private maybeRecoverDormant(now: number): void {
+    const dormant =
+      !!this.server && this.conns.size > 0 && this.devices.size === 0;
+    if (!dormant) {
+      this.dormantSince = null;
+      return;
+    }
+    if (this.dormantSince === null) {
+      this.dormantSince = now;
+      return;
+    }
+    if (now - this.dormantSince < DORMANT_RECOVER_MS) return;
+    if (this.bounceCount >= MAX_BOUNCES) return; // gave up; manual restart
+    this.dormantSince = null;
+    this.bounceCount++;
+    this.bounce();
+  }
+
+  /** Close the listener + all connections, then rebind after a short gap so
+   *  reconnecting clients hit a real connection-refused, forcing them to
+   *  redo a full handshake (and re-register their surfaces). */
+  private bounce(): void {
+    const port = this.desiredPort;
+    log.warn(
+      `recovery: ${this.conns.size} client(s) connected but 0 surface registered — ` +
+        `bouncing listener (attempt ${this.bounceCount}/${MAX_BOUNCES}) to force a clean reconnect`
+    );
+    this.stop();
+    if (port === null) return;
+    this.rebindTimer = setTimeout(() => {
+      this.rebindTimer = null;
+      if (this.desiredPort === port && !this.server) this.start(port);
+    }, BOUNCE_GAP_MS);
+    this.rebindTimer.unref?.();
   }
 }
 
