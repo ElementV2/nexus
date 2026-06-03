@@ -70,19 +70,13 @@ const STALE_MS = 16_000;
 // server self-healing instead of dying silently on the first conflict.
 const REBIND_MS = 2_000;
 // Auto-recovery for the satellite client's reconnect quirk: a client that
-// connects to an ALREADY-running server (no connection-refused retry phase)
-// can stay dormant — it answers our PINGs but never (re)sends ADD-DEVICE.
-// The only thing that unsticks it is the server going down→up (what a
-// manual restart does). So a per-connection watchdog fires this long after
-// a connect that registered no surface; if NO device is registered server-
-// wide we bounce the listener to force that transition. A healthy client
-// registers in well under a second, so this grace is comfortably safe.
-const HANDSHAKE_GRACE_MS = 2_000;
-// Listener-down gap during a bounce. Must exceed the client's own reconnect
-// delay (~1 s) so its first retry hits a real connection-refused. We can't
-// go much lower without the client reconnecting before we've gone down.
-const BOUNCE_GAP_MS = 1_500;
-const MAX_BOUNCES = 5;
+// connects to an ALREADY-running server can stay dormant — it answers our
+// PINGs but never (re)sends ADD-DEVICE. A per-connection watchdog fires this
+// long after a connect that registered no surface and drops JUST that socket,
+// so the client reconnects and redoes the handshake (we always re-send CAPS on
+// connect, which is what unsticks it). Generous, because a slightly-slow but
+// healthy client must NOT be disturbed — dropping it would only add churn.
+const HANDSHAKE_GRACE_MS = 5_000;
 
 const log = createLogger("screendeck");
 
@@ -100,8 +94,6 @@ class ScreendeckServerImpl {
    *  transient bind failure self-heals instead of leaving the server dead. */
   private desiredPort: number | null = null;
   private rebindTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Consecutive recovery bounces with no successful registration; capped. */
-  private bounceCount = 0;
 
   // ─────────────────────────── lifecycle ──────────────────────────────
 
@@ -347,18 +339,22 @@ class ScreendeckServerImpl {
     conn.handshakeTimer.unref?.();
   }
 
-  /** Watchdog: a connection that registered nothing in the grace window is
-   *  the dormant client. If NO surface is registered anywhere, bounce the
-   *  listener to force a clean reconnect (capped). Never fires when a deck
-   *  is already up, so a working surface is never disrupted. */
+  /** Watchdog: a connection that registered nothing in the grace window is a
+   *  dormant client. Drop JUST that socket so it reconnects and redoes the
+   *  handshake (fresh CAPS re-registers it). Crucially this does NOT touch any
+   *  other connection — the old global listener "bounce" tore down EVERY
+   *  connected deck, so a second (slightly-slow) deck connecting would nuke the
+   *  already-working decks on other machines. Per-connection recovery keeps
+   *  multi-deck setups stable. */
   private onHandshakeTimeout(conn: Conn): void {
     conn.handshakeTimer = null;
     if (!this.conns.has(conn)) return; // already gone
     if (conn.deviceIds.size > 0) return; // this client registered fine
-    if (this.devices.size > 0) return; // another deck is live — leave it be
-    if (this.bounceCount >= MAX_BOUNCES) return; // gave up; manual restart
-    this.bounceCount++;
-    this.bounce();
+    log.warn(
+      `client ${conn.remoteAddr ?? "?"} registered no surface in ${HANDSHAKE_GRACE_MS}ms — ` +
+        `dropping it to force a clean reconnect (other decks untouched)`
+    );
+    this.dropConn(conn);
   }
 
   private dropConn(conn: Conn): void {
@@ -473,13 +469,11 @@ class ScreendeckServerImpl {
     };
     this.devices.set(deviceId, { dev, conn });
     conn.deviceIds.add(deviceId);
-    // Registered → healthy: cancel this conn's watchdog and reset the bounce
-    // budget for any future stuck episode.
+    // Registered → healthy: cancel this conn's handshake watchdog.
     if (conn.handshakeTimer) {
       clearTimeout(conn.handshakeTimer);
       conn.handshakeTimer = null;
     }
-    this.bounceCount = 0;
     this.write(conn, `ADD-DEVICE OK DEVICEID=${deviceId}\n`);
     log.info(
       `surface registered: "${dev.productName}" ${cols}x${rows} ` +
@@ -522,23 +516,6 @@ class ScreendeckServerImpl {
     }
   }
 
-  /** Close the listener + all connections, then rebind after a short gap so
-   *  reconnecting clients hit a real connection-refused, forcing them to
-   *  redo a full handshake (and re-register their surfaces). */
-  private bounce(): void {
-    const port = this.desiredPort;
-    log.warn(
-      `recovery: ${this.conns.size} client(s) connected but 0 surface registered — ` +
-        `bouncing listener (attempt ${this.bounceCount}/${MAX_BOUNCES}) to force a clean reconnect`
-    );
-    this.stop();
-    if (port === null) return;
-    this.rebindTimer = setTimeout(() => {
-      this.rebindTimer = null;
-      if (this.desiredPort === port && !this.server) this.start(port);
-    }, BOUNCE_GAP_MS);
-    this.rebindTimer.unref?.();
-  }
 }
 
 /**
