@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Eyebrow } from "@/components/sw";
-import { X } from "lucide-react";
+import { X, Copy } from "lucide-react";
 import type { DeckBinding, DeckStep } from "@/lib/db/streamdeck";
 import { useActionCatalog, useVmixInputSuggestions } from "./action-catalog";
 import type {
@@ -195,11 +195,17 @@ export function KeyInspector({
     const nextSteps = preset.steps.filter((_, i) => i !== stepIdx);
     onChange({ ...binding, preset: { ...preset, steps: nextSteps } });
   };
-  const moveStep = (stepIdx: number, dir: -1 | 1) => {
-    const j = stepIdx + dir;
-    if (j < 0 || j >= preset.steps.length) return;
+  // Duplicate a step in place (inserted right after the original) so a
+  // tweaked copy is one click away.
+  const duplicateStep = (stepIdx: number) => {
+    const s = preset.steps[stepIdx];
+    if (!s) return;
+    const copy: DeckStep = {
+      ...s,
+      options: s.options ? { ...s.options } : undefined,
+    };
     const nextSteps = [...preset.steps];
-    [nextSteps[stepIdx], nextSteps[j]] = [nextSteps[j], nextSteps[stepIdx]];
+    nextSteps.splice(stepIdx + 1, 0, copy);
     onChange({ ...binding, preset: { ...preset, steps: nextSteps } });
   };
   // Drag-reorder: move a step from one position to another (insert, not
@@ -435,25 +441,14 @@ export function KeyInspector({
                   {sKind !== preset.kind ? `${sKind} · ` : ""}
                   {def?.label ?? step.actionId}
                 </span>
-                {/* Reorder + remove — only meaningful with 2+ steps. */}
-                {preset.steps.length > 1 && (
-                  <>
-                    <StepIconButton
-                      title="Move up"
-                      disabled={idx === 0}
-                      onClick={() => moveStep(idx, -1)}
-                    >
-                      ↑
-                    </StepIconButton>
-                    <StepIconButton
-                      title="Move down"
-                      disabled={idx === preset.steps.length - 1}
-                      onClick={() => moveStep(idx, 1)}
-                    >
-                      ↓
-                    </StepIconButton>
-                  </>
-                )}
+                {/* Reorder is via the drag handle (⠿). Per-step actions:
+                    duplicate + remove. */}
+                <StepIconButton
+                  title="Duplicate this action"
+                  onClick={() => duplicateStep(idx)}
+                >
+                  <Copy size={11} />
+                </StepIconButton>
                 <StepIconButton
                   title="Remove this action"
                   danger
