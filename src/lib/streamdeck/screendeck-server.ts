@@ -58,6 +58,10 @@ interface Conn {
   /** Diagnostic: how many raw inbound chunks we've logged for this conn.
    *  Bounded so a normal session (100 ms pings) doesn't flood the log. */
   rawLogged: number;
+  /** Per-connection handshake watchdog — fires HANDSHAKE_GRACE_MS after
+   *  connect; if this conn registered nothing, triggers auto-recovery.
+   *  Cleared on first ADD-DEVICE or when the conn drops. */
+  handshakeTimer: ReturnType<typeof setTimeout> | null;
 }
 
 // Keepalive: ping idle clients; reap a socket that's gone silent for
@@ -71,14 +75,16 @@ const REBIND_MS = 2_000;
 // Auto-recovery for the satellite client's reconnect quirk: a client that
 // connects to an ALREADY-running server (no connection-refused retry phase)
 // can stay dormant — it answers our PINGs but never (re)sends ADD-DEVICE.
-// The only thing that unsticks it is experiencing the server going down→up
-// (what a manual restart does). So if clients are connected but NO surface
-// is registered for this long, we bounce the listener to force exactly that
-// transition. Guarded to fire ONLY when zero devices are registered, so a
-// working deck is never disrupted. Capped so a genuinely-dead client can't
-// loop us forever.
-const DORMANT_RECOVER_MS = 6_000;
-const BOUNCE_GAP_MS = 2_000;
+// The only thing that unsticks it is the server going down→up (what a
+// manual restart does). So a per-connection watchdog fires this long after
+// a connect that registered no surface; if NO device is registered server-
+// wide we bounce the listener to force that transition. A healthy client
+// registers in well under a second, so this grace is comfortably safe.
+const HANDSHAKE_GRACE_MS = 2_000;
+// Listener-down gap during a bounce. Must exceed the client's own reconnect
+// delay (~1 s) so its first retry hits a real connection-refused. We can't
+// go much lower without the client reconnecting before we've gone down.
+const BOUNCE_GAP_MS = 1_500;
 const MAX_BOUNCES = 5;
 
 const log = createLogger("screendeck");
@@ -97,8 +103,6 @@ class ScreendeckServerImpl {
    *  transient bind failure self-heals instead of leaving the server dead. */
   private desiredPort: number | null = null;
   private rebindTimer: ReturnType<typeof setTimeout> | null = null;
-  /** When connected-but-no-surfaces first observed (drives auto-recovery). */
-  private dormantSince: number | null = null;
   /** Consecutive recovery bounces with no successful registration; capped. */
   private bounceCount = 0;
 
@@ -161,6 +165,7 @@ class ScreendeckServerImpl {
       this.rebindTimer = null;
     }
     for (const c of this.conns) {
+      if (c.handshakeTimer) clearTimeout(c.handshakeTimer);
       try {
         c.socket.destroy();
       } catch {
@@ -312,6 +317,7 @@ class ScreendeckServerImpl {
       lastSeenTs: Date.now(),
       deviceIds: new Set(),
       rawLogged: 0,
+      handshakeTimer: null,
     };
     this.conns.add(conn);
     log.info(`client connected from ${conn.remoteAddr ?? "?"}`);
@@ -336,11 +342,36 @@ class ScreendeckServerImpl {
     this.write(conn, "BEGIN CompanionVersion=nexus ApiVersion=1.10.0\n");
     this.write(conn, "CAPS SUBSCRIPTIONS=0 NONSQUARE=0\n");
     log.info(`→ sent BEGIN 1.10.0 + CAPS to ${conn.remoteAddr ?? "?"}`);
+    // Arm the handshake watchdog: if this client doesn't register a surface
+    // shortly, it's the dormant-reconnect quirk → auto-recover.
+    conn.handshakeTimer = setTimeout(
+      () => this.onHandshakeTimeout(conn),
+      HANDSHAKE_GRACE_MS
+    );
+    conn.handshakeTimer.unref?.();
+  }
+
+  /** Watchdog: a connection that registered nothing in the grace window is
+   *  the dormant client. If NO surface is registered anywhere, bounce the
+   *  listener to force a clean reconnect (capped). Never fires when a deck
+   *  is already up, so a working surface is never disrupted. */
+  private onHandshakeTimeout(conn: Conn): void {
+    conn.handshakeTimer = null;
+    if (!this.conns.has(conn)) return; // already gone
+    if (conn.deviceIds.size > 0) return; // this client registered fine
+    if (this.devices.size > 0) return; // another deck is live — leave it be
+    if (this.bounceCount >= MAX_BOUNCES) return; // gave up; manual restart
+    this.bounceCount++;
+    this.bounce();
   }
 
   private dropConn(conn: Conn): void {
     if (!this.conns.has(conn)) return;
     this.conns.delete(conn);
+    if (conn.handshakeTimer) {
+      clearTimeout(conn.handshakeTimer);
+      conn.handshakeTimer = null;
+    }
     try {
       conn.socket.destroy();
     } catch {
@@ -386,7 +417,9 @@ class ScreendeckServerImpl {
     // whether a reconnecting client sends ADD-DEVICE at all.
     if (conn.rawLogged < 6) {
       conn.rawLogged++;
-      log.info(
+      // Debug-only (opt-in via NEXUS_LOG_DEBUG): raw inbound chunks for
+      // diagnosing handshake issues without flooding the normal log.
+      log.debug(
         `raw ← ${JSON.stringify(chunk.toString("utf8")).slice(0, 400)} from ${conn.remoteAddr ?? "?"}`
       );
     }
@@ -463,9 +496,12 @@ class ScreendeckServerImpl {
     };
     this.devices.set(deviceId, { dev, conn });
     conn.deviceIds.add(deviceId);
-    // A surface registered → healthy again: clear the dormancy/auto-recovery
-    // state so the bounce budget resets for any future stuck episode.
-    this.dormantSince = null;
+    // Registered → healthy: cancel this conn's watchdog and reset the bounce
+    // budget for any future stuck episode.
+    if (conn.handshakeTimer) {
+      clearTimeout(conn.handshakeTimer);
+      conn.handshakeTimer = null;
+    }
     this.bounceCount = 0;
     this.write(conn, `ADD-DEVICE OK DEVICEID=${deviceId}\n`);
     log.info(
@@ -500,33 +536,6 @@ class ScreendeckServerImpl {
       }
       this.write(conn, "PING nexus\n");
     }
-    this.maybeRecoverDormant(now);
-  }
-
-  /**
-   * Detect the satellite reconnect quirk and self-heal: if clients are
-   * connected but NONE has registered a surface, the client is dormant
-   * (connected on the first try, so it never did a full re-handshake). Only
-   * a server down→up transition unsticks it — so bounce the listener. Fires
-   * ONLY at zero registered devices (a working deck is never disrupted) and
-   * is capped to avoid an endless loop against a truly dead client.
-   */
-  private maybeRecoverDormant(now: number): void {
-    const dormant =
-      !!this.server && this.conns.size > 0 && this.devices.size === 0;
-    if (!dormant) {
-      this.dormantSince = null;
-      return;
-    }
-    if (this.dormantSince === null) {
-      this.dormantSince = now;
-      return;
-    }
-    if (now - this.dormantSince < DORMANT_RECOVER_MS) return;
-    if (this.bounceCount >= MAX_BOUNCES) return; // gave up; manual restart
-    this.dormantSince = null;
-    this.bounceCount++;
-    this.bounce();
   }
 
   /** Close the listener + all connections, then rebind after a short gap so
