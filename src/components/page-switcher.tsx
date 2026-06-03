@@ -111,14 +111,17 @@ export function PageSwitcher({
           );
         })}
       </select>
+      {/* No `disabled` attribute on these buttons: it's a hydration-mismatch
+          liability (server/extension can render it differently). Guard the
+          action in onClick instead and convey the state with opacity. */}
       <button
         onClick={() => {
-          setDraft(cur?.label ?? "");
+          if (!cur) return;
+          setDraft(cur.label);
           setEditing(true);
         }}
-        disabled={!cur}
         title="Rename"
-        style={{ ...btn, opacity: cur ? 1 : 0.4 }}
+        style={{ ...btn, opacity: cur ? 1 : 0.4, cursor: cur ? "pointer" : "default" }}
       >
         <Pencil size={12} />
       </button>
@@ -126,10 +129,15 @@ export function PageSwitcher({
         <Plus size={13} />
       </button>
       <button
-        onClick={() => cur && onDelete(cur.id)}
-        disabled={!cur || items.length <= 1}
+        onClick={() => {
+          if (cur && items.length > 1) onDelete(cur.id);
+        }}
         title={deleteTitle}
-        style={{ ...btn, opacity: cur && items.length > 1 ? 1 : 0.4 }}
+        style={{
+          ...btn,
+          opacity: cur && items.length > 1 ? 1 : 0.4,
+          cursor: cur && items.length > 1 ? "pointer" : "default",
+        }}
       >
         <Trash2 size={12} />
       </button>

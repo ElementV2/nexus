@@ -638,7 +638,6 @@ export default function TimelinePage() {
         onResume={() => post({ action: "resume" })}
         onStop={() => post({ action: "stop" })}
         onGo={() => post({ action: "go" })}
-        onSeek={(ms) => post({ action: "seek", ms, scenarioId: selectedId })}
         onToggleSkip={() =>
           post({ action: "setSkipWaits", skipWaits: !transport.skipWaits })
         }

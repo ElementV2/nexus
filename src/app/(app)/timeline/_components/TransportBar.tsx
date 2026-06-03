@@ -18,7 +18,6 @@ export function TransportBar({
   onResume,
   onStop,
   onGo,
-  onSeek,
   onToggleSkip,
   onAddWait,
 }: {
@@ -33,7 +32,6 @@ export function TransportBar({
   onResume: () => void;
   onStop: () => void;
   onGo: () => void;
-  onSeek: (ms: number) => void;
   onToggleSkip: () => void;
   onAddWait: () => void;
 }) {
@@ -91,15 +89,8 @@ export function TransportBar({
 
       <TBtn label="Add wait" onClick={onAddWait} icon={<Flag size={13} />} />
 
-      {/* Scrubber */}
-      <input
-        type="range"
-        min={0}
-        max={Math.max(1, durationMs)}
-        value={Math.min(playheadMs, durationMs)}
-        onChange={(e) => onSeek(Number(e.target.value))}
-        style={{ flex: 1, minWidth: 80, accentColor: "var(--pvw)" }}
-      />
+      {/* Push the readout to the right (scrub by dragging the playhead). */}
+      <div style={{ flex: 1, minWidth: 8 }} />
 
       {/* Readout */}
       <span
