@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Eyebrow, MonoChip } from "@/components/sw";
 import {
   KEY_FONT_FAMILY,
@@ -64,15 +64,6 @@ interface ActionEntry {
   options: ActionOptionDef[];
 }
 
-type FireState =
-  | { kind: "idle" }
-  | { kind: "running"; globalId: string }
-  | { kind: "ok"; globalId: string }
-  | { kind: "err"; globalId: string; error: string };
-
-const FIRE_FEEDBACK_MS = 1500;
-const FIRE_ERROR_MS = 3000;
-
 export interface PresetBrowserPanelProps {
   mode?: "full" | "sidebar";
 }
@@ -93,7 +84,6 @@ export function PresetBrowserPanel({
   const [actions, setActions] = useState<ActionEntry[] | null>(null);
   const [filterKind, setFilterKind] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [fire, setFire] = useState<FireState>({ kind: "idle" });
 
   useEffect(() => {
     let cancelled = false;
@@ -160,60 +150,6 @@ export function PresetBrowserPanel({
     return Array.from(s).sort();
   }, [tiles]);
 
-  const fireTile = useCallback(async (p: PresetEntry) => {
-    setFire({ kind: "running", globalId: p.globalId });
-    let next: FireState;
-    try {
-      // Curated presets resolve server-side by globalId; synthesized
-      // action-tiles fire their single action with the frozen options.
-      let failedError: string | null = null;
-      if (p.synthetic) {
-        const step = p.steps[0];
-        const res = await fetch("/api/actions/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            globalId: `${p.kind}:${step.actionId}`,
-            options: step.options ?? {},
-          }),
-        });
-        const json = (await res.json()) as
-          | { ok: true; data: unknown }
-          | { ok: false; error: string };
-        if (!json.ok) failedError = json.error;
-      } else {
-        const res = await fetch("/api/presets/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ globalId: p.globalId }),
-        });
-        const json = (await res.json()) as {
-          results: Array<{ ok: boolean; error?: string }>;
-        };
-        failedError = json.results.find((r) => !r.ok)?.error ?? null;
-      }
-      next = failedError
-        ? { kind: "err", globalId: p.globalId, error: failedError }
-        : { kind: "ok", globalId: p.globalId };
-    } catch (err) {
-      next = {
-        kind: "err",
-        globalId: p.globalId,
-        error: err instanceof Error ? err.message : "network",
-      };
-    }
-    setFire(next);
-    const captured = p.globalId;
-    const delay = next.kind === "err" ? FIRE_ERROR_MS : FIRE_FEEDBACK_MS;
-    setTimeout(() => {
-      setFire((cur) =>
-        cur.kind !== "idle" && cur.globalId === captured
-          ? { kind: "idle" }
-          : cur
-      );
-    }, delay);
-  }, []);
-
   if (!tiles) {
     return (
       <div className="text-[13px] text-sw-muted py-12 text-center">
@@ -268,8 +204,6 @@ export function PresetBrowserPanel({
           presets={tiles}
           filterKind={filterKind}
           search={search}
-          fire={fire}
-          onFire={fireTile}
           compact={sidebar}
         />
       </div>
@@ -333,15 +267,11 @@ function PresetsView({
   presets,
   filterKind,
   search,
-  fire,
-  onFire,
   compact,
 }: {
   presets: PresetEntry[];
   filterKind: string | null;
   search: string;
-  fire: FireState;
-  onFire: (p: PresetEntry) => void;
   compact: boolean;
 }) {
   const filtered = useMemo(() => {
@@ -410,13 +340,7 @@ function PresetsView({
             }}
           >
             {items.map((p) => (
-              <PresetTile
-                key={p.globalId}
-                preset={p}
-                state={fire}
-                onFire={() => onFire(p)}
-                compact={compact}
-              />
+              <PresetTile key={p.globalId} preset={p} compact={compact} />
             ))}
           </div>
         </section>
@@ -432,27 +356,21 @@ function PresetsView({
 
 function PresetTile({
   preset,
-  state,
-  onFire,
   compact,
 }: {
   preset: PresetEntry;
-  state: FireState;
-  onFire: () => void;
   compact: boolean;
 }) {
-  const isFiring =
-    state.kind === "running" && state.globalId === preset.globalId;
-  const justOk = state.kind === "ok" && state.globalId === preset.globalId;
-  const justErr = state.kind === "err" && state.globalId === preset.globalId;
-
   const bg = preset.bgcolor ?? "var(--card)";
   const fg = preset.fgcolor ?? "var(--ink)";
   const face = preset.text ?? preset.label;
 
   return (
+    // Drag-only: tiles are dropped onto keys, never fired here. Actions are
+    // tested from the key inspector's Test button so a stray click in the
+    // browser can't trigger a live device action.
     <button
-      onClick={onFire}
+      type="button"
       draggable
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "copy";
@@ -480,16 +398,8 @@ function PresetTile({
         background: keyBackgroundCss(bg),
         color: fg,
         border: "1px solid var(--line-hi)",
-        outline: justOk
-          ? "2px solid var(--pvw)"
-          : justErr
-            ? "2px solid var(--pgm)"
-            : "none",
-        outlineOffset: 2,
         cursor: "grab",
         fontFamily: "var(--font-mono)",
-        opacity: isFiring ? 0.6 : 1,
-        transform: isFiring ? "scale(0.96)" : "none",
         transitionDuration: "120ms",
         whiteSpace: "pre-line",
       }}
