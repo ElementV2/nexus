@@ -16,6 +16,14 @@ updater compares against the version embedded in its own installer asset
 name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
 shared release tag.
 
+## 0.1.24 — main app · 0.1.7 — Nexus Cross
+
+### Live Show
+- Removed the transport scrubber — scrub by dragging the green playhead on
+  the timeline (the native slider looked out of place).
+- Fixed a React hydration warning on the page/scenario selector (dropped the
+  `disabled` attribute that the server/client could disagree on).
+
 ## 0.1.23 — main app · 0.1.7 — Nexus Cross
 
 Live Show polish + deck/show parity fixes.
