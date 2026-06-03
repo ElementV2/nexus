@@ -1,4 +1,7 @@
 export const VMIX_DEFAULT_PORT = 8088;
+/** vMix TCP API port — fixed at 8099 in vMix (not user-configurable there).
+ *  Used for the real-time broker (commands + SUBSCRIBE TALLY/ACTS + XML). */
+export const VMIX_TCP_DEFAULT_PORT = 8099;
 export const POLLING_INTERVAL_MS = 150;
 // Drag-handler throttle. Kept below the poll rate so a fader moved during
 // drag commits at least once between polls (avoids race where the latest

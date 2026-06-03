@@ -8,11 +8,12 @@ import {
 } from "lucide-react";
 import { registerDeviceKind } from "@/lib/core/registry";
 import { createLogger } from "@/lib/core/logger";
-import { VmixStateBroker } from "@/lib/vmix/state-broker";
+import { VmixTcpBroker } from "@/lib/vmix/tcp-broker";
 import {
   COMMAND_FETCH_TIMEOUT_MS,
   POLLING_INTERVAL_MS,
   VMIX_DEFAULT_PORT,
+  VMIX_TCP_DEFAULT_PORT,
 } from "@/lib/vmix/constants";
 import type {
   BrokerImpl,
@@ -26,11 +27,12 @@ import { vmixShortcutActions } from "./vmix-shortcut-actions";
 /**
  * vMix kind — fully per-instance.
  *
- * Each connection owns its own `VmixStateBroker` (its own HTTP poll loop
- * + cached state) AND dispatches commands to its own `config.host`. So
- * multiple vMix machines poll and are controlled independently — a deck
- * button targeting "vMix #2" both reads vMix #2's tally (per-connection
- * variables → deck feedback) and sends to vMix #2. The legacy
+ * Each connection owns its own `VmixTcpBroker` (a persistent TCP connection
+ * to vMix's real-time API: SUBSCRIBE TALLY/ACTS for pushed feedback + FUNCTION
+ * for commands + XML for full state) AND dispatches commands to its own
+ * `config.host`. So multiple vMix machines are read and controlled
+ * independently — a deck button targeting "vMix #2" both reads vMix #2's tally
+ * (per-connection variables → deck feedback) and sends to vMix #2. The legacy
  * live/playlist/title/audio/replay/colour pages subscribe to the DEFAULT
  * connection's SSE (resolved via `useConnectionId` → default), so they
  * follow whichever vMix is marked default.
@@ -40,9 +42,14 @@ import { vmixShortcutActions } from "./vmix-shortcut-actions";
 
 interface VmixConfig {
   host: string;
-  /** vMix HTTP API port — default 8088. */
+  /** vMix HTTP API port — default 8088. Used for the connection test probe
+   *  and as a command fallback when the TCP socket is momentarily down. */
   port: number;
-  /** Poll cadence (ms) for the shared state broker. */
+  /** vMix TCP API port — default 8099. The real-time broker (commands +
+   *  SUBSCRIBE TALLY/ACTS + XML) runs here. */
+  tcpPort: number;
+  /** Background XML poll cadence (ms) for the broker — keeps VU/levels fresh
+   *  between pushed events. */
   pollingInterval: number;
   /** vMix SRT publisher port — purely informational here, used by the
    *  preview tile to construct an SRT URL. */
@@ -62,6 +69,12 @@ function parseVmixConfig(
   if (!Number.isFinite(port) || port <= 0 || port > 65535) {
     return { ok: false, error: "port must be 1-65535" };
   }
+  const tcpPortRaw =
+    typeof r.tcpPort === "number" ? r.tcpPort : Number(r.tcpPort ?? VMIX_TCP_DEFAULT_PORT);
+  const tcpPort =
+    Number.isFinite(tcpPortRaw) && tcpPortRaw > 0 && tcpPortRaw <= 65535
+      ? tcpPortRaw
+      : VMIX_TCP_DEFAULT_PORT;
   const pollingInterval =
     typeof r.pollingInterval === "number"
       ? r.pollingInterval
@@ -73,6 +86,7 @@ function parseVmixConfig(
     config: {
       host,
       port,
+      tcpPort,
       pollingInterval: Number.isFinite(pollingInterval)
         ? pollingInterval
         : POLLING_INTERVAL_MS,
@@ -84,16 +98,18 @@ function parseVmixConfig(
 // ─────────────────────────── Adapter ──────────────────────────────────
 
 class VmixAdapter implements BrokerImpl {
-  private broker: VmixStateBroker;
+  private broker: VmixTcpBroker;
 
   constructor(private config: VmixConfig) {
-    // Per-instance poller bound to THIS connection's host/port/cadence.
-    // No longer writes the global `vmix_*` prefs (that's what made two
-    // vMix connections fight over one host). The legacy pages follow the
-    // DEFAULT vMix via `applyDefaultsToLegacy` + `useConnectionId`.
-    this.broker = new VmixStateBroker({
+    // Per-instance real-time TCP broker bound to THIS connection's host. It
+    // pushes tally/activator changes (instant deck feedback) and carries the
+    // FUNCTION commands. Multiple vMix machines stay fully independent — a
+    // deck button targeting "vMix #2" reads #2's tally and sends to #2. The
+    // legacy pages follow the DEFAULT vMix via `useConnectionId`.
+    this.broker = new VmixTcpBroker({
       host: config.host,
-      port: config.port,
+      httpPort: config.port,
+      tcpPort: config.tcpPort,
       pollingInterval: config.pollingInterval,
     });
   }
@@ -143,18 +159,17 @@ class VmixAdapter implements BrokerImpl {
   }
 
   /**
-   * Forward a `VmixCommand` shape (`{Function, Input?, Value?, ...}`)
-   * to THIS connection's vMix HTTP API — `config.host`/`port`, not the
-   * global prefs. That's what makes per-action targeting of multiple
-   * vMix machines actually route to the right one.
+   * Forward a `VmixCommand` shape (`{Function, Input?, Value?, ...}`) to THIS
+   * connection's vMix. Primary path is the persistent TCP socket (`FUNCTION`);
+   * if it's momentarily down (reconnecting / firewall) we fall back to the
+   * HTTP API so a live command is never silently lost. Either way it targets
+   * `config.host`, so per-action routing to multiple vMix machines holds.
    */
   private async dispatch(body: Record<string, unknown>): Promise<unknown> {
     const fn = body.Function;
     if (!fn) throw new Error("Missing Function");
-    const host = this.config.host;
-    const port = this.config.port;
 
-    const params = new URLSearchParams({ Function: String(fn) });
+    const params: Record<string, string> = {};
     for (const k of [
       "Input",
       "Value",
@@ -164,19 +179,38 @@ class VmixAdapter implements BrokerImpl {
       "SelectedIndex",
       "SelectedName",
     ]) {
-      if (body[k] !== undefined) params.set(k, String(body[k]));
+      if (body[k] !== undefined) params[k] = String(body[k]);
     }
 
+    try {
+      await this.broker.sendFunction(String(fn), params);
+      return { success: true };
+    } catch (err) {
+      // TCP path unavailable — fall back to HTTP so the command still fires.
+      createLogger("vmix").debug(
+        `TCP send failed (${err instanceof Error ? err.message : "?"}), falling back to HTTP`
+      );
+      return this.httpDispatch(String(fn), params);
+    }
+  }
+
+  /** Fallback command path over the HTTP API (`config.port`, default 8088). */
+  private async httpDispatch(
+    fn: string,
+    params: Record<string, string>
+  ): Promise<unknown> {
+    const { host, port } = this.config;
+    const qs = new URLSearchParams({ Function: fn, ...params });
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
       COMMAND_FETCH_TIMEOUT_MS
     );
     try {
-      const res = await fetch(
-        `http://${host}:${port}/api/?${params.toString()}`,
-        { signal: controller.signal, cache: "no-store" }
-      );
+      const res = await fetch(`http://${host}:${port}/api/?${qs.toString()}`, {
+        signal: controller.signal,
+        cache: "no-store",
+      });
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`vMix returned ${res.status}: ${text}`);
@@ -236,7 +270,8 @@ class VmixAdapter implements BrokerImpl {
     this.config = parsed.config;
     this.broker.updateConfig({
       host: parsed.config.host,
-      port: parsed.config.port,
+      httpPort: parsed.config.port,
+      tcpPort: parsed.config.tcpPort,
       pollingInterval: parsed.config.pollingInterval,
     });
   }
@@ -291,11 +326,12 @@ const vmixKind: DeviceKind = {
   kind: "vmix",
   displayName: "vMix",
   icon: Monitor,
-  tagline: "HTTP XML API",
+  tagline: "TCP API (real-time)",
   parseConfig: parseVmixConfig,
   defaultConfig: (): VmixConfig => ({
     host: "localhost",
     port: VMIX_DEFAULT_PORT,
+    tcpPort: VMIX_TCP_DEFAULT_PORT,
     pollingInterval: POLLING_INTERVAL_MS,
     srtPort: 5000,
   }),
