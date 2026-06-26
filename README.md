@@ -23,6 +23,13 @@ LAN URL, a port picker, and a logs viewer.
   picker), OBS (scenes/audio/media/filters), Stream Deck editor, Replay
   (transport + channels + events + marks), Audio, Playlist, Titles, Web
   Assets, Colorimetry, Network, Ableton, Timers, Live preview.
+- **Auto-réalisation (auto-mix)** — on the **Live** page, an ON/OFF toggle
+  + ⚙ that lets the default vMix switch its own program from the **mic
+  levels**: add your cameras, map one or more mics to each, and a
+  server-side director follows the conversation (one talker → their cam,
+  two → the scene that frames both). Cough rejection, an anti-ping-pong
+  dwell, and a "recently spoke" majority rule keep it clean. Runs with the
+  browser closed. See [Auto-réalisation](#auto-réalisation-auto-mix).
 - **Multi-device, multi-instance** — several vMix / OBS / Ableton / X32 /
   grandMA connections at once, each on its own broker, with a default
   per kind.
@@ -115,6 +122,58 @@ real-time path), add a vMix connection pointing at `localhost`, then open
 
 ---
 
+## Auto-réalisation (auto-mix)
+
+Audio-following automatic camera switching for the **default vMix**, driven
+from the per-input audio meters. Open **Live**, hit the **AUTO** toggle, and
+configure it from the ⚙ modal. The decision engine runs **server-side** (one
+clock, keeps switching with the browser closed) and only ever drives the
+default vMix, exactly like the rest of the Live page.
+
+**Setup (⚙ modal)**
+- **Cameras & mics** — add the inputs that are cameras (an *Add* picker, not
+  the whole input list). Each camera gets one **or several** mics: it counts
+  as "talking" when any of its mics is live. A "wide"/group shot is just a
+  camera with several mics — there's no separate wide-shot concept. A camera
+  with no mic is a pure visual, never auto-selected.
+- **Transition** — `Cut`, `Fade`, **`AlphaFade`** (default — vMix 29+,
+  alpha-correct), `Merge`, `Wipe`, `Zoom`, + duration.
+- **Réactivité** — presets **Calme / Standard / Réactif** (or *Custom*), with
+  advanced detection/timing knobs.
+
+**How it decides**
+1. **Per-mic detection.** Each mic's meter (only counted when **on air** — not
+   muted and routed to Master) feeds an envelope + a hysteresis gate with an
+   **activation hold** (rejects coughs/transients — a sound must be sustained
+   to register) and a **release hang** (rides the gaps between words).
+2. **Follow the conversation.** The program cuts to the **best shot of whoever
+   is talking now**: one person → their tightest solo, two people → the camera
+   that frames the most of them (the 2-shot/group). A freshly-cut shot is held
+   a **minimum on-air time** (the dwell) so it can't flicker, but the moment
+   it's a lone speaker again it drops to their solo. No artificial rotation, so
+   no scene↔solo loops.
+3. **Recent-majority rule.** A multi-person scene is only used while a
+   **majority** of the people it frames have spoken in the last ~20 s (2 of 3 →
+   yes, 2 of 4 → no) — it never appears just because it contains the one active
+   mic.
+4. **Monologue reactions.** When a lone speaker talks nonstop for ≥10 s, a brief
+   **reaction cut** to a wider scene framing them *with others* is dropped in
+   every ~20–30 s (cooldown-gated, never a loop) — even if those others are
+   silent.
+5. **Manual override.** If the operator cuts by hand (or via a deck / tablet /
+   another operator — anything the engine didn't command), it stands down so it
+   never fights the human. Pick the behaviour: nothing, a **timed pause** then
+   auto-resume, or **stop until relaunch** (the auto-mix turns OFF; click AUTO
+   to restart).
+
+The status line under the AUTO button shows **why** the current shot is up
+(`cam 3`, `groupe ×2`, `réaction`, `… · monologue`, `manuel`, `silence`).
+
+Config persists to `auto-switch.json`; the engine restarts itself (and keeps
+running) across server restarts when it was left enabled.
+
+---
+
 ## Development
 
 ```bash
@@ -202,7 +261,7 @@ banner links straight to the new `.exe` for a manual upgrade
 ├── src/                     # Next.js web app + LAN server
 │   ├── app/
 │   │   ├── (app)/           # Operator pages
-│   │   │   ├── live/        # PGM / PVW routing + transition picker (vMix)
+│   │   │   ├── live/        # PGM / PVW routing + transition picker + auto-mix (vMix)
 │   │   │   ├── obs/          # OBS scenes, audio, media, filters, stats
 │   │   │   ├── streamdeck/   # Stream Deck layout editor (drag presets → keys)
 │   │   │   ├── replay/       # Replay transport, channels, events, marks
@@ -232,6 +291,8 @@ banner links straight to the new `.exe` for a manual upgrade
 │   │   │                    #   registered into core
 │   │   ├── vmix/ obs/ ableton/ x32/ grandma3/ grandma2/ osc/  # brokers
 │   │   │                    #   (TCP+HTTP / WebSocket / OSC-UDP / Telnet)
+│   │   ├── auto-switch/     # Auto-réalisation engine — audio-following
+│   │   │                    #   program switching on the default vMix
 │   │   ├── streamdeck/      # HID driver, feedback coordinator, press
 │   │   │                    #   dispatcher, satellite registry
 │   │   └── db/              # JSON data store (preferences, layouts, overlays)
@@ -359,5 +420,5 @@ between the desktop shell and the in-browser UI.
 
 Nexus is **source-available, not open-source** — see [`LICENSE`](./LICENSE).
 The code is published for reference; all rights are reserved by the
-author. Contact death0factory@gmail.com to request a license to use it
+author. Open an issue on the repository to request a license to use it
 or to discuss other terms.

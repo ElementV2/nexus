@@ -21,6 +21,7 @@ import {
   type TransitionOption,
 } from "@/components/playlist/output-buttons";
 import { LiveHeader } from "@/components/live/live-header";
+import { AutoReaControl } from "@/components/live/auto-rea-control";
 import { TopBar, Section } from "@/components/sw";
 import { InputCell, CollapsedInputCell } from "@/components/live/input-cell";
 import { DetailsPanel } from "@/components/live/details-panel";
@@ -572,6 +573,7 @@ export default function LivePage() {
         onSelectTransition={handleSelectTransition}
         durations={transitionDurations}
         onSetDuration={handleSetDuration}
+        autoSlot={<AutoReaControl inputs={vmixState?.inputs ?? []} />}
       />
 
       <RouteModeBar

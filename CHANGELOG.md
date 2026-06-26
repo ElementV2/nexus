@@ -16,6 +16,29 @@ updater compares against the version embedded in its own installer asset
 name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
 shared release tag.
 
+## 0.1.25 — main app · 0.1.7 — Nexus Cross
+
+### Auto-réalisation (auto-mix)
+- **New on the Live page.** An **AUTO** toggle + ⚙ that lets the default vMix
+  switch its own program from the per-input **mic levels** — see the
+  [README section](./README.md#auto-réalisation-auto-mix) for the full setup.
+- **Server-side director.** Runs on one clock (keeps switching with the browser
+  closed), drives only the default vMix. Per-mic detection with an envelope +
+  hysteresis gate, an **activation hold** (cough/transient rejection) and a
+  **release hang** (rides word gaps); audio only counts when it's actually on
+  air (not muted, routed to Master).
+- **Follows the conversation.** One talker → their solo, two → the camera that
+  frames both. A freshly-cut shot gets a minimum on-air time (dwell, no
+  flicker), then drops back to a lone speaker's solo — no rotation, no
+  scene↔solo loops.
+- **Multi-mic scenes.** A "wide"/group shot is just a camera with several mics;
+  it's only used while a **majority** of the people it frames have spoken in the
+  last ~20 s. A long **monologue** gets an occasional brief reaction cut to a
+  wider scene framing the speaker with others.
+- **Presets** (Calme / Standard / Réactif / Custom), choice of transition
+  (default **AlphaFade**), and a manual-override pause so it never fights the
+  operator. Config persists to `auto-switch.json`.
+
 ## 0.1.24 — main app · 0.1.7 — Nexus Cross
 
 ### Live Show

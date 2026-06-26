@@ -80,6 +80,14 @@ export function ensureBooted(): void {
   // the persisted enable/port (default on, 16622).
   applyScreendeckPreferences();
 
+  // Start the auto-réalisation engine. It loads its persisted config and only
+  // begins ticking if it was left enabled, so a show keeps auto-switching
+  // across a server restart with the browser closed. Lazy import keeps the
+  // vMix meter chain out of routes that never touch it.
+  void import("@/lib/auto-switch/engine").then((m) => {
+    m.autoSwitchEngine.init();
+  });
+
   registerShutdownReset();
 }
 

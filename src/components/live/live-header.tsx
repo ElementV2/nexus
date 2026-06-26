@@ -24,6 +24,7 @@ export function LiveHeader({
   onSelectTransition,
   durations,
   onSetDuration,
+  autoSlot,
 }: {
   pgmInput: VmixInput | null;
   pvwInput: VmixInput | null;
@@ -36,6 +37,10 @@ export function LiveHeader({
   /** Per-fn duration overrides. Falls back to TransitionButton.duration. */
   durations?: Record<string, number>;
   onSetDuration?: (fn: string, ms: number) => void;
+  /** Auto-réalisation control, rendered as its own header section. Kept as a
+   *  slot (not inline state) so its SSE stream re-renders only that subtree,
+   *  not the whole Live page + input grid. */
+  autoSlot?: React.ReactNode;
 }) {
   return (
     <header
@@ -53,6 +58,7 @@ export function LiveHeader({
     >
       <NowNextSlot label="NOW" input={pgmInput} accent="red" />
       <NowNextSlot label="NEXT" input={pvwInput} accent="green" />
+      {autoSlot}
       <TransitionRow
         label="TRANSITION"
         items={baseTransitions}
