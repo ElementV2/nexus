@@ -24,7 +24,12 @@ jobs:
 
   release:
     needs: checks
-    runs-on: windows-latest
+    # Pinned to windows-2022 (NOT windows-latest): GitHub moved `windows-latest`
+    # to the Server 2025 image (10.0.26100), where node-gyp's Visual Studio
+    # finder fails to locate the C++ toolchain and the native `node-hid` rebuild
+    # for nexus-cross dies with "Could not find any Visual Studio installation".
+    # windows-2022 ships VS 2022 Build Tools that @electron/rebuild detects.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
         with:
