@@ -16,6 +16,18 @@ updater compares against the version embedded in its own installer asset
 name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
 shared release tag.
 
+## 0.1.26 — main app · 0.1.7 — Nexus Cross
+
+### Fixed
+- **Auto-réalisation: no switching when every camera carries several mics.** The
+  "majority recently spoke" rule was a hard filter, so a setup with no
+  single-mic (solo) camera — e.g. a group cam + two 2-shots — eliminated every
+  candidate the moment a single person talked, and the mix froze. The rule is
+  now a ranking *preference*: majority-conversation shots still win, but when
+  none qualifies the director falls back to the tightest camera that frames the
+  active talker instead of doing nothing. Behaviour with solo cameras is
+  unchanged.
+
 ## 0.1.25 — main app · 0.1.7 — Nexus Cross
 
 ### Auto-réalisation (auto-mix)

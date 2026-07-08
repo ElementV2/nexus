@@ -366,12 +366,15 @@ class AutoSwitchEngineImpl extends EventEmitter {
       target = program;
       reason = "silence";
     } else {
-      // A camera is a valid shot only when a MAJORITY of the people it frames
-      // have spoken within the recent window — so a multi-mic scene never shows
-      // up just because it contains the one active mic; enough of the others
-      // must be part of the live conversation too. Majority = strictly more than
-      // half: 2 of 3 → yes, 2 of 4 → no, 1 of 1 → yes. A mic talking right now
-      // is trivially recent. (A "wide" is just a camera with several mics.)
+      // A camera's "majority" flag: strictly more than half of the people it
+      // frames have spoken within the recent window (2 of 3 → yes, 2 of 4 → no,
+      // 1 of 1 → yes; a mic talking right now is trivially recent). This is a
+      // strong PREFERENCE, not a hard filter: we rank majority shots first so a
+      // multi-mic scene never wins just because it contains the one active mic
+      // while a tighter shot of that same speaker exists — but when NO camera
+      // qualifies (e.g. every camera carries several mics and only one person is
+      // talking), we still fall back to the tightest camera that frames the
+      // talker instead of freezing. (A "wide" is just a camera with several mics.)
       const isRecent = (mic: number) =>
         now - (this.#lastSpokeAt.get(mic) ?? -Infinity) <= RECENT_ACTIVE_MS;
       const majorityRecent = (cam: AutoCamera): boolean => {
@@ -379,8 +382,9 @@ class AutoSwitchEngineImpl extends EventEmitter {
         return recent * 2 > cam.audioInputs.length;
       };
 
-      // Rank the valid cameras by coverage (how many talkers they currently
-      // show), then loudness, then specificity (tightest first).
+      // Rank the cameras that frame a live talker by: majority-conversation
+      // first, then coverage (how many talkers they show), then loudness, then
+      // specificity (tightest = fewest mics/fewest silent people first).
       const ranked = cams
         .map((cam) => {
           let cov = 0;
@@ -390,12 +394,15 @@ class AutoSwitchEngineImpl extends EventEmitter {
             cov++;
             lvl = Math.max(lvl, micLevel.get(ai) ?? SILENCE_DB);
           }
-          return { cam, cov, lvl };
+          return { cam, cov, lvl, maj: majorityRecent(cam) };
         })
-        .filter((r) => r.cov > 0 && majorityRecent(r.cam))
+        .filter((r) => r.cov > 0)
         .sort(
           (a, b) =>
-            b.cov - a.cov || b.lvl - a.lvl || a.cam.audioInputs.length - b.cam.audioInputs.length
+            Number(b.maj) - Number(a.maj) ||
+            b.cov - a.cov ||
+            b.lvl - a.lvl ||
+            a.cam.audioInputs.length - b.cam.audioInputs.length
         );
 
       const best = ranked[0];
