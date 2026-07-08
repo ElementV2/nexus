@@ -136,6 +136,11 @@ default vMix, exactly like the rest of the Live page.
   as "talking" when any of its mics is live. A "wide"/group shot is just a
   camera with several mics — there's no separate wide-shot concept. A camera
   with no mic is a pure visual, never auto-selected.
+- **Renumbering-proof** — cameras and mics are tracked by the vMix input
+  **GUID**, not the input number, so adding/removing inputs mid-show (which
+  renumbers everything in vMix) never breaks the mapping. The UI always shows
+  each input's current name/number; configs saved before this migrate
+  automatically on the first connected tick.
 - **Transition** — `Cut`, `Fade`, **`AlphaFade`** (default — vMix 29+,
   alpha-correct), `Merge`, `Wipe`, `Zoom`, + duration.
 - **Réactivité** — presets **Calme / Standard / Réactif** (or *Custom*), with
@@ -160,14 +165,20 @@ default vMix, exactly like the rest of the Live page.
    **reaction cut** to a wider scene framing them *with others* is dropped in
    every ~20–30 s (cooldown-gated, never a loop) — even if those others are
    silent.
-5. **Manual override.** If the operator cuts by hand (or via a deck / tablet /
+5. **Equivalent angles.** Two shots framing **exactly the same mics** (e.g. a
+   scene and its telestrator view) are interchangeable angles: the director
+   never burns a cut between them just because of config order, and instead
+   **rotates** from one to the other on the same ~20–30 s variety cooldown so
+   each angle gets airtime.
+6. **Manual override.** If the operator cuts by hand (or via a deck / tablet /
    another operator — anything the engine didn't command), it stands down so it
    never fights the human. Pick the behaviour: nothing, a **timed pause** then
    auto-resume, or **stop until relaunch** (the auto-mix turns OFF; click AUTO
    to restart).
 
-The status line under the AUTO button shows **why** the current shot is up
-(`cam 3`, `groupe ×2`, `réaction`, `… · monologue`, `manuel`, `silence`).
+The status line under the AUTO button shows **why** the current shot is up,
+using the input's **name** (`CAM JEAN`, `groupe ×2 · PLATEAU`, `réaction · …`,
+`angle · …`, `… · monologue`, `manuel`, `silence`).
 
 Config persists to `auto-switch.json`; the engine restarts itself (and keeps
 running) across server restarts when it was left enabled.

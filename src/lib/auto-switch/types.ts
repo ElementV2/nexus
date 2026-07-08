@@ -33,19 +33,36 @@ export const TRANSITION_LABELS: Record<TransitionType, string> = {
   Zoom: "Zoom",
 };
 
-/** A camera participating in the auto-mix. `input` is the vMix input switched
- *  to program; `audioInputs` are the input(s) whose meters drive it — the cam
- *  counts as "talking" when ANY of them is active on air, and its level is the
- *  loudest of them. Defaults to `[input]` (the cam carries its own mic) but can
+/** A reference to a vMix input (camera or mic). The `key` (vMix input GUID)
+ *  is the CANONICAL identity — it survives inputs being added/removed/
+ *  reordered, which renumbers everything. `input` and `label` are a display/
+ *  fallback cache: the last known number and title, used when vMix is offline
+ *  and to resolve legacy configs saved before GUIDs existed (`key === ""`,
+ *  backfilled by the engine on the first connected tick). */
+export interface AutoInputRef {
+  key: string;
+  input: number;
+  label?: string;
+}
+
+/** A camera participating in the auto-mix. The camera input is switched to
+ *  program; `mics` are the input(s) whose meters drive it — the cam counts as
+ *  "talking" when ANY of them is active on air, and its level is the loudest
+ *  of them. Defaults to the input itself (the cam carries its own mic) but can
  *  be any set of other inputs / audio-only inputs (e.g. a group shot framing
  *  three people, driven by their three mics). An empty list = never auto-
- *  selected by speech (e.g. a visual you only insert via the wide shot). */
-export interface AutoCamera {
-  input: number;
-  audioInputs: number[];
-  label?: string;
+ *  selected by speech (a pure visual). */
+export interface AutoCamera extends AutoInputRef {
+  mics: AutoInputRef[];
   enabled: boolean;
 }
+
+/** Stable id of a config ref: the input GUID when known, else a number-derived
+ *  fallback for legacy refs the engine hasn't backfilled yet. Used to key
+ *  detection state, dedup, and match UI rows — NEVER the bare number, which
+ *  vMix rewrites when inputs are added/removed. */
+export const refId = (r: Pick<AutoInputRef, "key" | "input">): string =>
+  r.key || `n${r.input}`;
 
 export type AutoPreset = "calm" | "standard" | "reactive" | "custom";
 
@@ -92,9 +109,14 @@ export interface AutoSwitchConfig {
 }
 
 /** Live per-camera readout pushed to the UI for the "talking" dot. Keyed by
- *  the camera's program input (a camera can aggregate several mics). */
+ *  the camera's stable id (a camera can aggregate several mics). */
 export interface AutoSourceStatus {
+  /** `refId` of the camera — stable across vMix renumbering. */
+  camId: string;
+  /** Current input number when resolved, else the last known one. */
   camInput: number;
+  /** Current input title when resolved, else the cached label. */
+  label: string;
   /** Smoothed level, dB (loudest mic of the camera). */
   db: number;
   /** 0..1 for a VU bar (see `meterToLevel`). */

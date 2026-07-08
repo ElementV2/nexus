@@ -16,6 +16,38 @@ updater compares against the version embedded in its own installer asset
 name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
 shared release tag.
 
+## 0.1.27 — main app · 0.1.7 — Nexus Cross
+
+### Auto-réalisation
+- **Cameras/mics tracked by vMix input GUID.** Adding or removing inputs
+  mid-show renumbers everything in vMix; the auto-mix config now references
+  inputs by their stable GUID, so the mapping never breaks and no re-setup is
+  needed. Existing (number-based) configs migrate automatically on the first
+  connected tick. Switch commands address inputs by GUID too, and the UI —
+  modal rows, mic chips, and the status line — always shows each input's
+  **current name** (never a bare number), with an `(absent)` marker when an
+  input disappeared from vMix.
+- **Equivalent angles.** Two shots framing exactly the same mics (e.g. a scene
+  and its telestrator view) ranked as a perfect tie, so the config-first one
+  aired constantly and the other almost never. They're now treated as
+  interchangeable angles: no wasted cut between them, and the director
+  **rotates** from one to the other on the ~20–30 s variety cooldown
+  (status shows `angle · NAME`).
+- **Monologue reactions work without solo cameras.** The reaction cut was
+  keyed on the current shot carrying exactly one mic; in a setup where every
+  camera has several mics it never fired. It's now keyed on the lone *talking*
+  mic, cutting to a scene wider than the current shot.
+- **No commands while a switch is in flight.** Re-targeting mid-fade could
+  double-command vMix and then misread our own first switch as a *manual* cut,
+  wrongly triggering the manual-override stand-down (or a full stop in
+  manual-hold mode). The engine now issues nothing until the previous switch
+  is reflected (with the same retry-after-rearm for dropped commands).
+- Decision core extracted to a pure, unit-tested module
+  (`lib/auto-switch/director.ts`) — 19 tests cover the ranking, reaction pool,
+  and angle-equivalence rules, including the exact layouts that failed in
+  production.
+- Clearer status lines: `aucune caméra`, `caméras introuvables dans vMix`.
+
 ## 0.1.26 — main app · 0.1.7 — Nexus Cross
 
 ### Fixed

@@ -4,7 +4,9 @@ import { useState } from "react";
 import type { VmixInput } from "@/lib/vmix/types";
 import {
   applyPreset,
+  refId,
   TRANSITION_LABELS,
+  type AutoInputRef,
   type AutoPreset,
   type AutoSwitchConfig,
   type AutoSwitchState,
@@ -41,42 +43,61 @@ export function AutoSwitchModal({
 }) {
   const [advanced, setAdvanced] = useState(false);
 
-  const camByInput = new Map(config.cameras.map((c) => [c.input, c]));
+  // Cameras and mics are identified by their vMix input GUID (`refId`) — never
+  // the number, which shifts whenever inputs are added/removed in vMix. Live
+  // inputs resolve by key (falling back to number only for legacy refs the
+  // engine hasn't backfilled yet); the stored number/label serve as an offline
+  // display cache.
+  const camById = new Map(config.cameras.map((c) => [refId(c), c]));
   const inputByNumber = new Map(inputs.map((i) => [i.number, i]));
+  const inputByKey = new Map(inputs.map((i) => [i.key, i]));
+  const liveInput = (ref: AutoInputRef): VmixInput | undefined =>
+    ref.key ? inputByKey.get(ref.key) : inputByNumber.get(ref.input);
+  /** Is this live input already covered by a config ref (GUID or legacy nr)? */
+  const covers = (ids: Set<string>, i: VmixInput) =>
+    ids.has(i.key) || ids.has(`n${i.number}`);
+  const asRef = (i: VmixInput): AutoInputRef => ({
+    key: i.key,
+    input: i.number,
+    label: i.title,
+  });
+
   // Inputs not yet added as a camera — the pool the ADD picker offers. A camera
   // can be video-only, so this is NOT filtered on audio.
-  const available = inputs.filter((i) => !camByInput.has(i.number));
+  const camIds = new Set(camById.keys());
+  const available = inputs.filter((i) => !covers(camIds, i));
   // Mic pickers only offer inputs that actually carry audio — same rule as the
   // Audio page (`hasAudio`); a silent input is useless as a trigger source.
   const audioCapable = inputs.filter((i) => i.hasAudio);
 
-  const addCamera = (input: number) => {
-    if (camByInput.has(input)) return;
+  const addCamera = (i: VmixInput) => {
+    if (covers(camIds, i)) return;
+    // Default mic = the input itself (a camera usually carries its own audio).
     onChange({
       ...config,
-      cameras: [...config.cameras, { input, audioInputs: [input], enabled: true }],
+      cameras: [...config.cameras, { ...asRef(i), mics: [asRef(i)], enabled: true }],
     });
   };
 
-  const removeCamera = (input: number) =>
-    onChange({ ...config, cameras: config.cameras.filter((c) => c.input !== input) });
+  const removeCamera = (id: string) =>
+    onChange({ ...config, cameras: config.cameras.filter((c) => refId(c) !== id) });
 
-  const patchCameraAudio = (input: number, audioInputs: number[]) =>
+  const patchCameraMics = (id: string, mics: AutoInputRef[]) =>
     onChange({
       ...config,
-      cameras: config.cameras.map((c) => (c.input === input ? { ...c, audioInputs } : c)),
+      cameras: config.cameras.map((c) => (refId(c) === id ? { ...c, mics } : c)),
     });
 
-  const addAudioInput = (input: number, audioInput: number) => {
-    const cam = camByInput.get(input);
-    if (!cam || cam.audioInputs.includes(audioInput)) return;
-    patchCameraAudio(input, [...cam.audioInputs, audioInput]);
+  const addMic = (id: string, i: VmixInput) => {
+    const cam = camById.get(id);
+    if (!cam || covers(new Set(cam.mics.map(refId)), i)) return;
+    patchCameraMics(id, [...cam.mics, asRef(i)]);
   };
 
-  const removeAudioInput = (input: number, audioInput: number) => {
-    const cam = camByInput.get(input);
+  const removeMic = (id: string, micId: string) => {
+    const cam = camById.get(id);
     if (!cam) return;
-    patchCameraAudio(input, cam.audioInputs.filter((a) => a !== audioInput));
+    patchCameraMics(id, cam.mics.filter((m) => refId(m) !== micId));
   };
 
   // Editing any tuning field drops the preset to "custom" so the label is honest.
@@ -85,10 +106,17 @@ export function AutoSwitchModal({
   const patchTiming = (p: Partial<AutoSwitchConfig["timing"]>) =>
     onChange({ ...config, preset: "custom", timing: { ...config.timing, ...p } });
 
-  const speakingByCam = new Map((state?.sources ?? []).map((s) => [s.camInput, s]));
-  const inputLabel = (n: number) => {
-    const i = inputByNumber.get(n);
-    return i ? i.title : `Input ${n} (absent)`;
+  const speakingByCam = new Map((state?.sources ?? []).map((s) => [s.camId, s]));
+  /** Display name + number of a ref: live title/number when the input exists,
+   *  else the cached label (so a renamed/renumbered input always shows its
+   *  CURRENT name, and an offline one still shows something meaningful). */
+  const refName = (ref: AutoInputRef) => {
+    const i = liveInput(ref);
+    return {
+      num: i?.number ?? ref.input,
+      title: i?.title ?? ref.label ?? `Input ${ref.input}`,
+      absent: !i,
+    };
   };
 
   return (
@@ -103,15 +131,21 @@ export function AutoSwitchModal({
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {config.cameras.map((cam) => {
-              const inp = inputByNumber.get(cam.input);
-              const title = inp?.title ?? `Input ${cam.input}`;
-              const src = speakingByCam.get(cam.input);
+              const id = refId(cam);
+              const c = refName(cam);
+              // Fallback by number covers the brief window where the client
+              // still holds a legacy (pre-GUID) config while the engine has
+              // already backfilled — ids differ but the number still matches.
+              const src =
+                speakingByCam.get(id) ??
+                (state?.sources ?? []).find((s) => s.camInput === c.num);
               // Inputs available to add as a mic for THIS camera — audio-bearing
               // inputs only, minus the ones already assigned.
-              const audioPool = audioCapable.filter((o) => !cam.audioInputs.includes(o.number));
+              const micIds = new Set(cam.mics.map(refId));
+              const audioPool = audioCapable.filter((o) => !covers(micIds, o));
               return (
                 <div
-                  key={cam.input}
+                  key={id}
                   style={{
                     display: "flex",
                     flexDirection: "column",
@@ -134,14 +168,14 @@ export function AutoSwitchModal({
                       }}
                     />
                     <span className="font-mono" style={{ fontSize: 11, color: "var(--pgm)", minWidth: 22 }}>
-                      {String(cam.input).padStart(2, "0")}
+                      {String(c.num).padStart(2, "0")}
                     </span>
                     <span className="truncate" style={{ fontSize: 12, flex: 1, color: "var(--ink)" }}>
-                      {title}
-                      {!inp && <span style={{ color: "var(--muted)", marginLeft: 6, fontSize: 10 }}>(absent)</span>}
+                      {c.title}
+                      {c.absent && <span style={{ color: "var(--muted)", marginLeft: 6, fontSize: 10 }}>(absent)</span>}
                     </span>
                     <button
-                      onClick={() => removeCamera(cam.input)}
+                      onClick={() => removeCamera(id)}
                       aria-label="Retirer la caméra"
                       title="Retirer la caméra"
                       style={{
@@ -163,9 +197,12 @@ export function AutoSwitchModal({
                     <span className="font-mono uppercase" style={{ fontSize: 9, color: "var(--muted)", letterSpacing: "1px" }}>
                       micros
                     </span>
-                    {cam.audioInputs.map((ai) => (
+                    {cam.mics.map((mic) => {
+                      const m = refName(mic);
+                      const mid = refId(mic);
+                      return (
                       <span
-                        key={ai}
+                        key={mid}
                         className="font-mono"
                         style={{
                           display: "inline-flex",
@@ -178,9 +215,9 @@ export function AutoSwitchModal({
                           color: "var(--ink)",
                         }}
                       >
-                        {String(ai).padStart(2, "0")} · <span className="truncate" style={{ maxWidth: 120 }}>{inputLabel(ai)}</span>
+                        {String(m.num).padStart(2, "0")} · <span className="truncate" style={{ maxWidth: 120 }}>{m.title}{m.absent ? " (absent)" : ""}</span>
                         <button
-                          onClick={() => removeAudioInput(cam.input, ai)}
+                          onClick={() => removeMic(id, mid)}
                           aria-label="Retirer ce micro"
                           title="Retirer ce micro"
                           style={{
@@ -196,15 +233,17 @@ export function AutoSwitchModal({
                           ✕
                         </button>
                       </span>
-                    ))}
-                    {cam.audioInputs.length === 0 && (
+                      );
+                    })}
+                    {cam.mics.length === 0 && (
                       <span style={{ fontSize: 10, color: "var(--muted)" }}>aucun (cam jamais auto-sélectionnée)</span>
                     )}
                     {audioPool.length > 0 && (
                       <select
                         value=""
                         onChange={(e) => {
-                          if (e.target.value) addAudioInput(cam.input, Number(e.target.value));
+                          const inp = inputByKey.get(e.target.value);
+                          if (inp) addMic(id, inp);
                         }}
                         style={{ ...selectStyle, fontSize: 10, padding: "2px 18px 2px 6px" }}
                         className="font-mono"
@@ -212,7 +251,7 @@ export function AutoSwitchModal({
                       >
                         <option value="">+ micro…</option>
                         {audioPool.map((o) => (
-                          <option key={o.key} value={o.number}>
+                          <option key={o.key} value={o.key}>
                             {String(o.number).padStart(2, "0")} · {o.title}
                           </option>
                         ))}
@@ -231,7 +270,8 @@ export function AutoSwitchModal({
               value=""
               disabled={available.length === 0}
               onChange={(e) => {
-                if (e.target.value) addCamera(Number(e.target.value));
+                const inp = inputByKey.get(e.target.value);
+                if (inp) addCamera(inp);
               }}
               style={{
                 ...selectStyle,
@@ -248,7 +288,7 @@ export function AutoSwitchModal({
                 {available.length ? "+ Ajouter une caméra…" : "toutes les caméras ajoutées"}
               </option>
               {available.map((o) => (
-                <option key={o.key} value={o.number}>
+                <option key={o.key} value={o.key}>
                   {String(o.number).padStart(2, "0")} · {o.title}
                 </option>
               ))}

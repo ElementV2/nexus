@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { sanitizeConfig } from "@/lib/db/auto-switch";
 import { defaultConfig } from "@/lib/auto-switch/types";
 
+const K1 = "a1b2c3d4-0000-0000-0000-000000000001";
+const K2 = "a1b2c3d4-0000-0000-0000-000000000002";
+
 describe("auto-switch config sanitize", () => {
   it("returns the default (disabled) config for junk input", () => {
     expect(sanitizeConfig(null)).toEqual(defaultConfig());
@@ -11,33 +14,54 @@ describe("auto-switch config sanitize", () => {
     expect(sanitizeConfig({}).enabled).toBe(false);
   });
 
-  it("migrates the legacy single `audioInput` to an array", () => {
+  it("migrates the oldest single `audioInput` number to a keyless mic ref", () => {
     const c = sanitizeConfig({ cameras: [{ input: 3, audioInput: 7 }] });
-    expect(c.cameras).toEqual([{ input: 3, audioInputs: [7], enabled: true, label: undefined }]);
+    expect(c.cameras).toEqual([
+      {
+        key: "",
+        input: 3,
+        label: undefined,
+        mics: [{ key: "", input: 7, label: undefined }],
+        enabled: true,
+      },
+    ]);
   });
 
-  it("defaults a camera's mic to its own input when no audio field is given", () => {
-    const c = sanitizeConfig({ cameras: [{ input: 5 }] });
-    expect(c.cameras[0].audioInputs).toEqual([5]);
+  it("migrates the legacy `audioInputs` number array to mic refs (deduped)", () => {
+    const c = sanitizeConfig({ cameras: [{ input: 2, audioInputs: [4, 4, 5] }] });
+    expect(c.cameras[0].mics).toEqual([
+      { key: "", input: 4, label: undefined },
+      { key: "", input: 5, label: undefined },
+    ]);
+  });
+
+  it("defaults a camera's mic to itself when no mic field is given", () => {
+    const c = sanitizeConfig({ cameras: [{ key: K1, input: 5, label: "Cam" }] });
+    expect(c.cameras[0].mics).toEqual([{ key: K1, input: 5, label: "Cam" }]);
   });
 
   it("keeps an explicitly emptied mic list (a pure visual camera)", () => {
-    const c = sanitizeConfig({ cameras: [{ input: 5, audioInputs: [] }] });
-    expect(c.cameras[0].audioInputs).toEqual([]);
+    expect(sanitizeConfig({ cameras: [{ input: 5, mics: [] }] }).cameras[0].mics).toEqual([]);
+    // Legacy empty list too.
+    expect(
+      sanitizeConfig({ cameras: [{ input: 5, audioInputs: [] }] }).cameras[0].mics
+    ).toEqual([]);
   });
 
-  it("dedups mics within a camera and dedups cameras by input", () => {
+  it("dedups mics within a camera and cameras by their stable id", () => {
     const c = sanitizeConfig({
       cameras: [
-        { input: 2, audioInputs: [4, 4, 5] },
-        { input: 2, audioInputs: [9] }, // duplicate camera input → dropped
+        { key: K1, input: 2, mics: [{ key: K2, input: 4 }, { key: K2, input: 9 }] },
+        { key: K1, input: 7 }, // same GUID → duplicate camera, dropped
+        { input: 2 }, // keyless → id n2, NOT a duplicate of the K1 camera
       ],
     });
-    expect(c.cameras).toHaveLength(1);
-    expect(c.cameras[0].audioInputs).toEqual([4, 5]);
+    expect(c.cameras).toHaveLength(2);
+    expect(c.cameras[0].mics).toEqual([{ key: K2, input: 4, label: undefined }]);
+    expect(c.cameras[1]).toMatchObject({ key: "", input: 2 });
   });
 
-  it("skips malformed camera entries (non-object / missing-or-bad input)", () => {
+  it("skips malformed camera entries (non-object / no key and no valid input)", () => {
     const c = sanitizeConfig({
       cameras: [null, 7, { foo: 1 }, { input: 0 }, { input: -3 }, { input: 6 }],
     });
@@ -62,18 +86,38 @@ describe("auto-switch config sanitize", () => {
     expect(c.preset).toBe(defaultConfig().preset);
   });
 
-  it("accepts a valid full config round-trip unchanged", () => {
+  it("accepts a valid full v2 config round-trip unchanged", () => {
     const valid = sanitizeConfig({
       enabled: true,
       preset: "reactive",
       transition: { type: "Merge", durationMs: 250 },
-      cameras: [{ input: 1, audioInputs: [1, 2], enabled: false, label: "Wide" }],
+      cameras: [
+        {
+          key: K1,
+          input: 1,
+          label: "Wide",
+          mics: [
+            { key: K1, input: 1, label: "Wide" },
+            { key: K2, input: 2, label: "Mic B" },
+          ],
+          enabled: false,
+        },
+      ],
       manualHold: true,
     });
     expect(valid.enabled).toBe(true);
     expect(valid.preset).toBe("reactive");
     expect(valid.transition).toEqual({ type: "Merge", durationMs: 250 });
-    expect(valid.cameras[0]).toEqual({ input: 1, audioInputs: [1, 2], enabled: false, label: "Wide" });
+    expect(valid.cameras[0]).toEqual({
+      key: K1,
+      input: 1,
+      label: "Wide",
+      mics: [
+        { key: K1, input: 1, label: "Wide" },
+        { key: K2, input: 2, label: "Mic B" },
+      ],
+      enabled: false,
+    });
     expect(valid.manualHold).toBe(true);
     // sanitize is idempotent
     expect(sanitizeConfig(valid)).toEqual(valid);

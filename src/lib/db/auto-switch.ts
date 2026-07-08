@@ -1,7 +1,9 @@
 import { readJson, writeJson } from "./index";
 import {
   defaultConfig,
+  refId,
   type AutoCamera,
+  type AutoInputRef,
   type AutoPreset,
   type AutoSwitchConfig,
   type TransitionType,
@@ -42,18 +44,42 @@ function inputNum(v: unknown): number | null {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
 }
 
-function sanitizeAudioInputs(raw: unknown): number[] {
-  // New shape: `audioInputs: number[]`. Legacy shape: `audioInput: number`.
+function str(v: unknown, max: number): string | undefined {
+  return typeof v === "string" && v ? v.slice(0, max) : undefined;
+}
+
+/** One input ref: v2 `{key, input, label}` object, or a legacy bare number
+ *  (pre-GUID configs) which migrates with an empty key — the engine backfills
+ *  the GUID from the live snapshot on the first connected tick. Valid as long
+ *  as it has a key OR a positive number. */
+function sanitizeRef(raw: unknown): AutoInputRef | null {
+  if (typeof raw === "number" || typeof raw === "string") {
+    const input = inputNum(raw);
+    return input === null ? null : { key: "", input, label: undefined };
+  }
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const key = str(r.key, 64) ?? "";
+  const input = inputNum(r.input) ?? 0;
+  if (!key && input === 0) return null;
+  return { key, input, label: str(r.label, 64) };
+}
+
+function sanitizeMics(raw: unknown): AutoInputRef[] {
   // An explicitly empty list is kept (a camera with no mic — a pure visual
   // source). The "default to own input" is applied only when the field is
   // ABSENT (see sanitizeCameras).
   let list: unknown[] = [];
   if (Array.isArray(raw)) list = raw;
   else if (raw !== undefined) list = [raw];
-  const out: number[] = [];
+  const out: AutoInputRef[] = [];
+  const seen = new Set<string>();
   for (const v of list) {
-    const n = inputNum(v);
-    if (n !== null && !out.includes(n)) out.push(n);
+    const ref = sanitizeRef(v);
+    if (ref && !seen.has(refId(ref))) {
+      seen.add(refId(ref));
+      out.push(ref);
+    }
   }
   return out;
 }
@@ -61,26 +87,23 @@ function sanitizeAudioInputs(raw: unknown): number[] {
 function sanitizeCameras(raw: unknown): AutoCamera[] {
   if (!Array.isArray(raw)) return [];
   const out: AutoCamera[] = [];
-  const seen = new Set<number>();
+  const seen = new Set<string>();
   for (const c of raw) {
     if (!c || typeof c !== "object") continue;
     const r = c as Record<string, unknown>;
-    const input = inputNum(r.input);
-    if (input === null || seen.has(input)) continue;
-    seen.add(input);
-    // Default to the camera's own input ONLY when no audio field was provided
+    const ref = sanitizeRef(c);
+    if (ref === null || seen.has(refId(ref))) continue;
+    seen.add(refId(ref));
+    // Default to the camera's own input ONLY when no mic field was provided
     // (fresh add / legacy migration). An explicitly emptied list stays empty so
-    // a mic can be fully removed, even from a camera input.
-    const hasAudioField = r.audioInputs !== undefined || r.audioInput !== undefined;
-    const audioInputs = hasAudioField
-      ? sanitizeAudioInputs(r.audioInputs ?? r.audioInput)
-      : [input];
-    out.push({
-      input,
-      audioInputs,
-      label: typeof r.label === "string" ? r.label.slice(0, 64) : undefined,
-      enabled: bool(r.enabled, true),
-    });
+    // a mic can be fully removed, even from a camera input. Legacy fields:
+    // `audioInputs: number[]` then, further back, `audioInput: number`.
+    const hasMicField =
+      r.mics !== undefined || r.audioInputs !== undefined || r.audioInput !== undefined;
+    const mics = hasMicField
+      ? sanitizeMics(r.mics ?? r.audioInputs ?? r.audioInput)
+      : [{ ...ref }];
+    out.push({ ...ref, mics, enabled: bool(r.enabled, true) });
   }
   return out;
 }

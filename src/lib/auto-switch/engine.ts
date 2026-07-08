@@ -7,8 +7,17 @@ import { getAutoSwitchConfig, setAutoSwitchConfig } from "@/lib/db/auto-switch";
 import { meterToDb } from "@/lib/utils/audio";
 import type { VmixInput, VmixState } from "@/lib/vmix/types";
 import {
+  equivalentAngles,
+  rankShots,
+  reactionPool,
+  SILENCE_DB,
+  type Shot,
+} from "./director";
+import {
   defaultConfig,
+  refId,
   type AutoCamera,
+  type AutoInputRef,
   type AutoSourceStatus,
   type AutoSwitchConfig,
   type AutoSwitchState,
@@ -25,8 +34,6 @@ const TICK_MS = 100;
  *  hang time does the real work. */
 const ATTACK = 0.6;
 const RELEASE = 0.25;
-/** dB floor we map true silence to (meterToDb(0) is -Infinity). */
-const SILENCE_DB = -100;
 /** If a commanded switch isn't reflected by vMix within this window, allow a
  *  resend (covers a dropped FUNCTION) — otherwise we'd never retry. */
 const COMMAND_REARM_MS = 1500;
@@ -94,10 +101,11 @@ class AutoSwitchEngineImpl extends EventEmitter {
   #config: AutoSwitchConfig | null = null;
   #timer: ReturnType<typeof setInterval> | null = null;
 
-  // Per audio-source tracking (keyed by vMix input number).
-  #sources = new Map<number, SourceTrack>();
+  // Per audio-source tracking (keyed by the mic's stable ref id — the vMix
+  // input GUID, or the number-derived legacy fallback; see `refId`).
+  #sources = new Map<string, SourceTrack>();
   /** Wall time each mic was last talking, for the "recently active" window. */
-  #lastSpokeAt = new Map<number, number>();
+  #lastSpokeAt = new Map<string, number>();
   #lastSources: AutoSourceStatus[] = [];
 
   // Program tracking. `lastSeenProgram` is what vMix reports; `expectedProgram`
@@ -270,22 +278,36 @@ class AutoSwitchEngineImpl extends EventEmitter {
     }
     const msOnCam = now - this.#programSince;
 
-    // ── per-MIC detection ──
-    // Detection is keyed by AUDIO INPUT (mic), not camera: a mic that feeds
-    // several cameras (e.g. an individual cam AND a group shot) must be counted
-    // ONCE, otherwise every overlap inflates the "speaker count" and pins the
-    // mix on the wide shot. `micTalking` is the set of distinct mics live on
-    // air right now; `micLevel` is each mic's smoothed dB.
-    const byInput = new Map(snap.inputs.map((i) => [i.number, i]));
-    const cams = cfg.cameras.filter((c) => c.enabled);
-    const d = cfg.detection;
-    const mics = new Set<number>();
-    for (const cam of cams) for (const ai of cam.audioInputs) mics.add(ai);
+    // ── resolve config refs against the live inputs ──
+    // The GUID (`key`) is canonical: a ref whose key exists follows its input
+    // wherever vMix renumbers it (inputs added/removed mid-show shift every
+    // number). A key that's GONE means the input was deleted — never fall back
+    // to the stale number, it may now point at an unrelated input. The number
+    // path only serves legacy refs saved before GUIDs, until `#backfillKeys`
+    // adopts their GUID below.
+    const byNumber = new Map(snap.inputs.map((i) => [i.number, i]));
+    const byKey = new Map(snap.inputs.map((i) => [i.key, i]));
+    const resolve = (ref: AutoInputRef): VmixInput | undefined =>
+      ref.key ? byKey.get(ref.key) : byNumber.get(ref.input);
 
-    const micTalking = new Set<number>();
-    const micLevel = new Map<number, number>();
-    for (const mic of mics) {
-      const inp = byInput.get(mic);
+    // One-time migration: adopt GUIDs for number-only legacy refs.
+    const cameras = (this.#backfillKeys(byNumber) ?? cfg).cameras;
+    const cams = cameras.filter((c) => c.enabled);
+    const d = cfg.detection;
+
+    // ── per-MIC detection ──
+    // Detection is keyed by MIC ref id, not camera: a mic that feeds several
+    // cameras (e.g. an individual cam AND a group shot) must be counted ONCE,
+    // otherwise every overlap inflates the "speaker count" and pins the mix on
+    // the wide shot. `micTalking` is the set of distinct mics live on air
+    // right now; `micLevel` is each mic's smoothed dB.
+    const micRefs = new Map<string, AutoInputRef>();
+    for (const cam of cams) for (const m of cam.mics) micRefs.set(refId(m), m);
+
+    const micTalking = new Set<string>();
+    const micLevel = new Map<string, number>();
+    for (const [mic, ref] of micRefs) {
+      const inp = resolve(ref);
       // Only count audio actually ON AIR — vMix's meter keeps moving when muted
       // / off the Master bus. `isOnAir` = has audio, not muted, routed to M.
       const raw = isOnAir(inp) ? Math.max(inp.meterF1, inp.meterF2) : 0;
@@ -318,21 +340,53 @@ class AutoSwitchEngineImpl extends EventEmitter {
       }
     }
     // Drop tracking for mics no longer referenced by any camera.
-    for (const k of [...this.#sources.keys()]) if (!mics.has(k)) this.#sources.delete(k);
-    for (const k of [...this.#lastSpokeAt.keys()]) if (!mics.has(k)) this.#lastSpokeAt.delete(k);
+    for (const k of [...this.#sources.keys()]) if (!micRefs.has(k)) this.#sources.delete(k);
+    for (const k of [...this.#lastSpokeAt.keys()]) if (!micRefs.has(k)) this.#lastSpokeAt.delete(k);
+
+    // ── resolved shots: the cameras we can actually cut to right now ──
+    // A camera whose input no longer exists is NOT a candidate; mics that no
+    // longer resolve are dropped from the shot so width/majority stay honest
+    // (a deleted mic input = that person is gone from the frame's count).
+    const shots: Shot[] = [];
+    const shotInfo = new Map<string, { cam: AutoCamera; inp: VmixInput }>();
+    for (const cam of cams) {
+      const inp = resolve(cam);
+      if (!inp) continue;
+      const id = refId(cam);
+      shotInfo.set(id, { cam, inp });
+      shots.push({ id, mics: cam.mics.filter((m) => resolve(m)).map(refId) });
+    }
 
     // Per-camera readout for the UI (a cam "talks" if any of its mics talk).
-    const camLevel = (cam: AutoCamera): number =>
-      cam.audioInputs.reduce((m, ai) => Math.max(m, micLevel.get(ai) ?? SILENCE_DB), SILENCE_DB);
+    // Lists ALL enabled cams — including unresolved ones — so the modal can
+    // flag a camera whose input disappeared instead of silently hiding it.
     this.#lastSources = cams.map((cam) => {
-      const env = camLevel(cam);
+      const inp = shotInfo.get(refId(cam))?.inp;
+      const env = cam.mics.reduce(
+        (m, ref) => Math.max(m, micLevel.get(refId(ref)) ?? SILENCE_DB),
+        SILENCE_DB
+      );
       return {
-        camInput: cam.input,
+        camId: refId(cam),
+        camInput: inp?.number ?? cam.input,
+        label: inp?.title ?? cam.label ?? `Input ${cam.input}`,
         db: env,
         level: Math.max(0, Math.min(1, (env + 60) / 60)),
-        speaking: cam.audioInputs.some((ai) => micTalking.has(ai)),
+        speaking: cam.mics.some((ref) => micTalking.has(refId(ref))),
       };
     });
+
+    // Nothing to direct — say WHY instead of a misleading "silence".
+    if (cams.length === 0) {
+      this.#reason = "aucune caméra";
+      this.#maybeEmit(now);
+      return;
+    }
+    if (shots.length === 0) {
+      this.#reason = "caméras introuvables dans vMix";
+      this.#maybeEmit(now);
+      return;
+    }
 
     // ── manual-override pause: track audio but don't drive ──
     if (now < this.#overrideUntil) {
@@ -350,68 +404,63 @@ class AutoSwitchEngineImpl extends EventEmitter {
     }
 
     // ── director decision ──
-    let target = program;
-    let reason = "—";
-    // Set when the on-air primary is a lone speaker mid-monologue — surfaced in
-    // the status line so the operator sees the extended hold kick in.
-    let monologue = false;
+    // The program is reported as a NUMBER (consistent within one snapshot);
+    // map it back to the configured shot it corresponds to, if any.
+    const programShotId =
+      program !== null
+        ? ([...shotInfo].find(([, v]) => v.inp.number === program)?.[0] ?? null)
+        : null;
+    /** Display name of a resolved shot — the operator sees INPUT NAMES, never
+     *  bare numbers (numbers shift when vMix renumbers). */
+    const shotName = (id: string): string => {
+      const v = shotInfo.get(id);
+      return v ? v.inp.shortTitle || v.inp.title : "?";
+    };
 
-    // A switch we already issued is "settling" until vMix reflects it — gate
-    // new switches/rotations on it so we don't spin while a fade is in flight.
+    let targetId = programShotId;
+    let reason = "—";
+    // Set when the lone active talker is mid-monologue — surfaced in the
+    // status line so the operator sees the extended hold kick in.
+    let monologue = false;
+    // Set when THIS tick commits a monologue reaction cut.
+    let reactionCut = false;
+    // Set when THIS tick commits a rotation to an equivalent angle.
+    let angleCut = false;
+
+    // A switch we already issued is "settling" until vMix reflects it. While
+    // in flight, do NOT command anything — not even a different target:
+    // re-targeting mid-fade double-commands vMix, and when the FIRST switch
+    // then lands it no longer matches `expectedProgram`, so it would read as
+    // an "external" cut and wrongly trigger the manual-override stand-down
+    // (or a full stop in manual-hold mode). After the rearm window the gate
+    // opens again, which doubles as the retry for a dropped command.
     const rearmMs = Math.max(COMMAND_REARM_MS, cfg.transition.durationMs + 800);
+    const inFlight =
+      this.#expectedProgram !== null &&
+      program !== this.#expectedProgram &&
+      now - this.#commandedAt < rearmMs;
     const settled = program === this.#expectedProgram;
 
     if (micTalking.size === 0) {
       // Silence — there is no dedicated wide shot; just hold the last frame.
-      target = program;
       reason = "silence";
     } else {
-      // A camera's "majority" flag: strictly more than half of the people it
-      // frames have spoken within the recent window (2 of 3 → yes, 2 of 4 → no,
-      // 1 of 1 → yes; a mic talking right now is trivially recent). This is a
-      // strong PREFERENCE, not a hard filter: we rank majority shots first so a
-      // multi-mic scene never wins just because it contains the one active mic
-      // while a tighter shot of that same speaker exists — but when NO camera
-      // qualifies (e.g. every camera carries several mics and only one person is
-      // talking), we still fall back to the tightest camera that frames the
-      // talker instead of freezing. (A "wide" is just a camera with several mics.)
-      const isRecent = (mic: number) =>
+      // Rank the shots framing a live talker (see director.ts): majority-
+      // recent shots first (preference, NOT a hard filter — a setup where every
+      // camera carries several mics must still cut), then coverage, loudness,
+      // specificity (tightest first).
+      const isRecent = (mic: string) =>
         now - (this.#lastSpokeAt.get(mic) ?? -Infinity) <= RECENT_ACTIVE_MS;
-      const majorityRecent = (cam: AutoCamera): boolean => {
-        const recent = cam.audioInputs.filter(isRecent).length;
-        return recent * 2 > cam.audioInputs.length;
-      };
-
-      // Rank the cameras that frame a live talker by: majority-conversation
-      // first, then coverage (how many talkers they show), then loudness, then
-      // specificity (tightest = fewest mics/fewest silent people first).
-      const ranked = cams
-        .map((cam) => {
-          let cov = 0;
-          let lvl = SILENCE_DB;
-          for (const ai of cam.audioInputs) {
-            if (!micTalking.has(ai)) continue;
-            cov++;
-            lvl = Math.max(lvl, micLevel.get(ai) ?? SILENCE_DB);
-          }
-          return { cam, cov, lvl, maj: majorityRecent(cam) };
-        })
-        .filter((r) => r.cov > 0)
-        .sort(
-          (a, b) =>
-            Number(b.maj) - Number(a.maj) ||
-            b.cov - a.cov ||
-            b.lvl - a.lvl ||
-            a.cam.audioInputs.length - b.cam.audioInputs.length
-        );
+      const ranked = rankShots(shots, micTalking, micLevel, isRecent);
 
       const best = ranked[0];
       const curEntry =
-        program != null ? ranked.find((r) => r.cam.input === program) : undefined;
+        programShotId !== null
+          ? ranked.find((r) => r.shot.id === programShotId)
+          : undefined;
 
       if (!best) {
         // No camera frames any talker — keep the current shot.
-        target = program;
         reason = "—";
       } else {
         // PURE FOLLOW: go to the best (tightest) shot of whoever is talking RIGHT
@@ -420,64 +469,112 @@ class AutoSwitchEngineImpl extends EventEmitter {
         // freshly-cut shot a minimum on-air time, so a 2-shot that just "arrived"
         // isn't a flicker — but the moment it's a lone speaker again we drop to
         // their solo. No artificial rotation, so no scene↔solo loops.
-        target = best.cam.input;
+        targetId = best.shot.id;
 
-        // The ONE exception (always on): a genuine monologue. While holding a
-        // lone speaker's solo and they've talked nonstop ≥SUSTAINED_TALK_MS,
-        // drop in a brief REACTION cut now and then — a WIDER scene that frames
-        // them WITH others (a 2-shot/group), even if those others aren't talking
+        // Interchangeable ANGLES: when the current shot frames EXACTLY the
+        // same mics as the best (e.g. a scene and its telestrator view — a
+        // perfect ranking tie, where the stable sort would otherwise always
+        // favour whichever comes first in the config), STAY. Never burn a cut
+        // for an equivalent frame; airtime for the other angle comes from the
+        // rotation below.
+        if (
+          programShotId !== null &&
+          curEntry &&
+          targetId !== programShotId &&
+          equivalentAngles(shots, targetId).includes(programShotId)
+        ) {
+          targetId = programShotId;
+        }
+
+        // The ONE exception (always on): a genuine monologue. Exactly one mic
+        // has been talking nonstop ≥SUSTAINED_TALK_MS while we hold its best
+        // shot → drop in a brief REACTION cut now and then: a WIDER scene that
+        // frames the speaker WITH others, even if those others aren't talking
         // (it's a listening/reaction shot, so recency is NOT required here).
+        // Keyed on the lone TALKING mic — not on the current shot being a solo
+        // — so setups where every camera carries several mics still breathe.
         // Cooldown-gated, so it's an accent, never a loop.
-        if (curEntry && best.cam.input === program) {
-          const onlyMic =
-            curEntry.cam.audioInputs.length === 1 ? curEntry.cam.audioInputs[0] : null;
-          const streakSince =
-            onlyMic !== null ? this.#sources.get(onlyMic)?.speakingSince ?? null : null;
+        if (
+          programShotId !== null &&
+          curEntry &&
+          targetId === programShotId &&
+          micTalking.size === 1
+        ) {
+          const loneMic = micTalking.values().next().value as string;
+          const streakSince = this.#sources.get(loneMic)?.speakingSince ?? null;
           monologue = streakSince !== null && now - streakSince >= SUSTAINED_TALK_MS;
-          // Only commit a reaction once the dwell is satisfied — otherwise the
-          // switch below is blocked and we'd burn the cooldown without cutting.
+          // Only commit a reaction once settled + dwell satisfied — otherwise
+          // the switch below is blocked and we'd burn the cooldown without
+          // cutting.
           if (
             monologue &&
             settled &&
-            onlyMic !== null &&
             msOnCam >= cfg.timing.minOnCamMs &&
             now >= this.#nextVarietyAt
           ) {
-            // Other cameras that FRAME the speaker; prefer the multi-person
-            // scenes (him with others) so the reaction is a real wider shot.
-            const framing = cams.filter(
-              (c) => c.input !== program && c.audioInputs.includes(onlyMic)
+            const pool = reactionPool(
+              shots,
+              programShotId,
+              loneMic,
+              curEntry.shot.mics.length
             );
-            const multi = framing.filter((c) => c.audioInputs.length >= 2);
-            const pool = (multi.length ? multi : framing).map((c) => c.input);
             if (pool.length > 0) {
-              target = pool[Math.floor(Math.random() * pool.length)];
+              targetId = pool[Math.floor(Math.random() * pool.length)];
               this.#nextVarietyAt = now + this.#varietyCooldown();
               this.#reactionUntil = now + cfg.timing.reactionHoldMs;
+              reactionCut = true;
             }
           }
         }
 
-        const t = ranked.find((r) => r.cam.input === target);
-        if (t) {
-          reason = t.cov >= 2 ? `groupe ×${t.cov}` : `cam ${target}`;
-        } else {
-          // Target isn't framing a live talker → it's the monologue reaction scene.
-          reason = "réaction";
+        // ANGLE rotation: while holding a shot that has equivalent angles
+        // (exact same mic set — e.g. List vs Telestrator views of the same
+        // people), occasionally swap to one of them on the shared variety
+        // cooldown so every angle gets airtime instead of the config-first one
+        // hogging it. A PERMANENT cut (no return hold) — the frames are
+        // interchangeable, so the new angle simply becomes the held shot.
+        // Reactions take priority on the cooldown when both are eligible.
+        if (
+          !reactionCut &&
+          programShotId !== null &&
+          targetId === programShotId &&
+          settled &&
+          msOnCam >= cfg.timing.minOnCamMs &&
+          now >= this.#nextVarietyAt
+        ) {
+          const angles = equivalentAngles(shots, programShotId);
+          if (angles.length > 0) {
+            targetId = angles[Math.floor(Math.random() * angles.length)];
+            this.#nextVarietyAt = now + this.#varietyCooldown();
+            angleCut = true;
+          }
         }
-        if (monologue && target === program) reason += " · monologue";
+
+        if (reactionCut) {
+          reason = `réaction · ${shotName(targetId!)}`;
+        } else if (angleCut) {
+          reason = `angle · ${shotName(targetId!)}`;
+        } else {
+          const t = ranked.find((r) => r.shot.id === targetId);
+          reason =
+            t && t.cov >= 2
+              ? `groupe ×${t.cov} · ${shotName(targetId!)}`
+              : shotName(targetId!);
+          if (monologue && targetId === programShotId) reason += " · monologue";
+        }
       }
     }
 
     // ── enforce dwell + switch ──
-    // Don't resend while a switch we issued is still settling — long fades take
-    // longer than the base rearm window to reflect in `active`.
-    const justCommanded =
-      target === this.#expectedProgram && now - this.#commandedAt < rearmMs;
-    if (target && target !== program && !justCommanded) {
+    // `inFlight` (computed above) blocks EVERY command while our last switch
+    // is still settling — same-target resends AND mid-fade re-targets alike.
+    const targetInfo = targetId !== null ? shotInfo.get(targetId) : undefined;
+    if (targetInfo && targetInfo.inp.number !== program && !inFlight) {
       if (msOnCam >= cfg.timing.minOnCamMs) {
-        this.#switchTo(broker!, target);
-        this.#expectedProgram = target;
+        // Address the input by its GUID (from the live snapshot) — immune to a
+        // renumbering that lands between this snapshot and the command.
+        this.#switchTo(broker!, targetInfo.inp.key);
+        this.#expectedProgram = targetInfo.inp.number;
         this.#commandedAt = now;
       } else {
         reason += " · dwell";
@@ -490,16 +587,45 @@ class AutoSwitchEngineImpl extends EventEmitter {
 
   #switchTo(
     broker: { send(c: unknown): Promise<unknown> },
-    input: number
+    input: string
   ): void {
     const t = this.getConfig().transition;
     const cmd =
       t.type === "Cut"
-        ? { Function: "Cut", Input: String(input) }
-        : { Function: t.type, Input: String(input), Duration: String(t.durationMs) };
+        ? { Function: "Cut", Input: input }
+        : { Function: t.type, Input: input, Duration: String(t.durationMs) };
     void Promise.resolve(broker.send(cmd)).catch((e) =>
       log.warn(`switch to input ${input} failed: ${e instanceof Error ? e.message : e}`)
     );
+  }
+
+  /** One-time migration for configs saved before GUID refs: adopt the GUID
+   *  (and cache the title) of the input each number-only ref points at RIGHT
+   *  NOW, then persist. From then on the mapping survives vMix renumbering
+   *  inputs. No-op once every ref carries a key. */
+  #backfillKeys(byNumber: Map<number, VmixInput>): AutoSwitchConfig | null {
+    const cfg = this.#config;
+    if (!cfg || !cfg.cameras.some((c) => !c.key || c.mics.some((m) => !m.key))) {
+      return null;
+    }
+    let changed = false;
+    const fill = (ref: AutoInputRef): AutoInputRef => {
+      if (ref.key) return ref;
+      const inp = byNumber.get(ref.input);
+      if (!inp) return ref;
+      changed = true;
+      return { ...ref, key: inp.key, label: ref.label ?? inp.title };
+    };
+    const cameras = cfg.cameras.map((c) => {
+      const camRef = fill(c);
+      const mics = c.mics.map(fill);
+      if (camRef === c && mics.every((m, i) => m === c.mics[i])) return c;
+      return { ...c, key: camRef.key, label: camRef.label, mics };
+    });
+    if (!changed) return null;
+    log.info("adopted input GUIDs for legacy camera/mic refs");
+    this.#config = setAutoSwitchConfig({ ...cfg, cameras });
+    return this.#config;
   }
 
   /** Push immediately (config saves / toggles — the user wants instant echo). */
