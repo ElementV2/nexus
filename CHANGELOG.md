@@ -16,6 +16,15 @@ updater compares against the version embedded in its own installer asset
 name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
 shared release tag.
 
+## 0.1.29 — main app · 0.1.7 — Nexus Cross
+
+### Audio
+- **Fix: the Auto (Audio Follow Program) button now works and shows its
+  state** — green "Auto On" when active. vMix's API doesn't report this
+  state, so Nexus remembers what it last set (per input GUID, kept across
+  refreshes) and always sends explicit AudioAutoOn/AudioAutoOff. If Auto is
+  changed directly in vMix, one click in Nexus re-syncs it.
+
 ## 0.1.28 — main app · 0.1.7 — Nexus Cross
 
 ### Audio
