@@ -16,6 +16,14 @@ updater compares against the version embedded in its own installer asset
 name (`Nexus-Setup-X.Y.Z.exe` / `Nexus-Cross-Setup-X.Y.Z.exe`), not the
 shared release tag.
 
+## 0.1.28 — main app · 0.1.7 — Nexus Cross
+
+### Audio
+- **Audio Follow Program (vMix "Auto") toggle on every audio strip**, right
+  under Live/Muted: the source's audio is only live while it is on Program.
+  When vMix reports the state, the button shows On/Off; otherwise it sends a
+  plain toggle.
+
 ## 0.1.27 — main app · 0.1.7 — Nexus Cross
 
 ### Auto-réalisation
