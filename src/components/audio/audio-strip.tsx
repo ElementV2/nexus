@@ -5,11 +5,11 @@ import { FaderStrip } from "@/components/sw/FaderStrip";
 import { BusButton } from "./bus-button";
 import { useVmixCommand } from "@/hooks/use-vmix-command";
 import { useAudioFader } from "@/hooks/use-audio-fader";
+import { useAudioAutoStore } from "@/stores/audio-auto-store";
 import {
   setVolume,
   audioOn,
   audioOff,
-  audioAuto,
   audioAutoOn,
   audioAutoOff,
   audioBusOn,
@@ -41,12 +41,15 @@ function AudioStripImpl({ input, index, availableBuses }: AudioStripProps) {
     send(input.muted ? audioOn(input.number) : audioOff(input.number));
   };
 
-  // vMix may not report the Auto state in its XML: in that case we send
-  // the plain toggle and show a neutral button instead of a fake state.
-  const autoKnown = input.audioAuto !== undefined;
+  // vMix doesn't report Auto in its API: use it if a future version does,
+  // otherwise the state Nexus last set (see audio-auto-store).
+  const storedAuto = useAudioAutoStore((st) => st.byKey[input.key]);
+  const setStoredAuto = useAudioAutoStore((st) => st.set);
+  const autoOn = input.audioAuto ?? storedAuto ?? false;
   const handleAutoToggle = () => {
-    if (!autoKnown) send(audioAuto(input.number));
-    else send(input.audioAuto ? audioAutoOff(input.number) : audioAutoOn(input.number));
+    const next = !autoOn;
+    send(next ? audioAutoOn(input.number) : audioAutoOff(input.number));
+    setStoredAuto(input.key, next);
   };
 
   const handleBusToggle = (bus: string) => {
@@ -152,18 +155,18 @@ function AudioStripImpl({ input, index, availableBuses }: AudioStripProps) {
         ● {input.muted ? "Muted" : "Live"}
       </button>
 
-      {/* Audio Follow Program (vMix "Auto") */}
+      {/* Audio Follow Program (vMix "Auto") — green when active */}
       <button
         onClick={handleAutoToggle}
-        data-active={input.audioAuto ? "true" : "false"}
-        data-role="amber"
+        data-active={autoOn ? "true" : "false"}
+        data-role="green"
         className="sw-cell"
-        style={{ width: "100%", minHeight: 26, fontSize: 10 }}
-        aria-pressed={autoKnown ? !!input.audioAuto : undefined}
+        style={{ width: "100%", minHeight: 30, fontSize: 10 }}
+        aria-pressed={autoOn}
         aria-label={`Audio follow program ${input.shortTitle || input.title}`}
         title="Audio Follow Program : l'audio n'est actif que quand la source est au Program"
       >
-        Auto{autoKnown ? (input.audioAuto ? " · On" : " · Off") : ""}
+        Auto {autoOn ? "On" : "Off"}
       </button>
 
       {/* Bus grid — 2 columns */}
@@ -195,6 +198,7 @@ export const AudioStrip = memo(AudioStripImpl, (prev, next) => {
   const a = prev.input;
   const b = next.input;
   return (
+    a.key === b.key &&
     a.number === b.number &&
     a.title === b.title &&
     a.shortTitle === b.shortTitle &&
