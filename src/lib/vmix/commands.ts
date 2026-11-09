@@ -23,6 +23,20 @@ export function audioOff(input: number | string): VmixCommand {
   return { Function: "AudioOff", Input: String(input) };
 }
 
+// "Audio Follow Program" (vMix's per-input Auto button): the input's
+// audio is only live while that input is on Program.
+export function audioAuto(input: number | string): VmixCommand {
+  return { Function: "AudioAuto", Input: String(input) };
+}
+
+export function audioAutoOn(input: number | string): VmixCommand {
+  return { Function: "AudioAutoOn", Input: String(input) };
+}
+
+export function audioAutoOff(input: number | string): VmixCommand {
+  return { Function: "AudioAutoOff", Input: String(input) };
+}
+
 export function audioBusOn(input: number | string, bus: string): VmixCommand {
   return { Function: "AudioBusOn", Input: String(input), Value: bus };
 }

@@ -148,6 +148,10 @@ function parseInput(node: Record<string, unknown>): VmixInput {
     meterF1: parseFloat(String(node["@_meterF1"] ?? "0")),
     meterF2: parseFloat(String(node["@_meterF2"] ?? "0")),
     solo: String(node["@_solo"]) === "True",
+    audioAuto:
+      node["@_audioauto"] != null
+        ? String(node["@_audioauto"]) === "True"
+        : undefined,
     hasAudio: "@_muted" in node,
     cc: parseCC(node["cc"] as Record<string, unknown> | undefined),
     selectedIndex: node["@_selectedIndex"] ? Number(node["@_selectedIndex"]) : undefined,

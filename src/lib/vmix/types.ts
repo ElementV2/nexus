@@ -94,6 +94,8 @@ export interface VmixInput {
   meterF1: number;
   meterF2: number;
   solo: boolean;
+  /** Audio Follow Program ("Auto"). Undefined when vMix's XML doesn't expose it. */
+  audioAuto?: boolean;
   hasAudio: boolean;
   cc: ColorCorrectionData;
   overlay?: VmixInputOverlay[];

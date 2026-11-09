@@ -9,6 +9,9 @@ import {
   setVolume,
   audioOn,
   audioOff,
+  audioAuto,
+  audioAutoOn,
+  audioAutoOff,
   audioBusOn,
   audioBusOff,
 } from "@/lib/vmix/commands";
@@ -36,6 +39,14 @@ function AudioStripImpl({ input, index, availableBuses }: AudioStripProps) {
 
   const handleMuteToggle = () => {
     send(input.muted ? audioOn(input.number) : audioOff(input.number));
+  };
+
+  // vMix may not report the Auto state in its XML: in that case we send
+  // the plain toggle and show a neutral button instead of a fake state.
+  const autoKnown = input.audioAuto !== undefined;
+  const handleAutoToggle = () => {
+    if (!autoKnown) send(audioAuto(input.number));
+    else send(input.audioAuto ? audioAutoOff(input.number) : audioAutoOn(input.number));
   };
 
   const handleBusToggle = (bus: string) => {
@@ -141,6 +152,20 @@ function AudioStripImpl({ input, index, availableBuses }: AudioStripProps) {
         ● {input.muted ? "Muted" : "Live"}
       </button>
 
+      {/* Audio Follow Program (vMix "Auto") */}
+      <button
+        onClick={handleAutoToggle}
+        data-active={input.audioAuto ? "true" : "false"}
+        data-role="amber"
+        className="sw-cell"
+        style={{ width: "100%", minHeight: 26, fontSize: 10 }}
+        aria-pressed={autoKnown ? !!input.audioAuto : undefined}
+        aria-label={`Audio follow program ${input.shortTitle || input.title}`}
+        title="Audio Follow Program : l'audio n'est actif que quand la source est au Program"
+      >
+        Auto{autoKnown ? (input.audioAuto ? " · On" : " · Off") : ""}
+      </button>
+
       {/* Bus grid — 2 columns */}
       <div className="grid grid-cols-2">
         {busList.map((bus) => (
@@ -175,6 +200,7 @@ export const AudioStrip = memo(AudioStripImpl, (prev, next) => {
     a.shortTitle === b.shortTitle &&
     a.volume === b.volume &&
     a.muted === b.muted &&
+    a.audioAuto === b.audioAuto &&
     a.meterF1 === b.meterF1 &&
     a.meterF2 === b.meterF2 &&
     a.audioBusses === b.audioBusses
